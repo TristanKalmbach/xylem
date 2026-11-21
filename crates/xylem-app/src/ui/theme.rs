@@ -258,7 +258,9 @@ fn configure(style: &mut egui::Style, p: &Palette) {
 
     w.inactive.bg_fill = p.hover;
     w.inactive.weak_bg_fill = p.hover;
-    w.inactive.bg_stroke = Stroke::NONE;
+    // Text fields draw their edge from this; on white dialogs a field
+    // without one is invisible.
+    w.inactive.bg_stroke = Stroke::new(1.0_f32, p.border);
     w.inactive.fg_stroke = Stroke::new(1.0_f32, p.text);
     w.inactive.corner_radius = control;
     w.inactive.expansion = 0.0;

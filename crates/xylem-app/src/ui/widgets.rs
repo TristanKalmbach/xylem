@@ -376,9 +376,21 @@ pub struct Form<'a> {
 }
 
 impl Form<'_> {
-    pub fn row<R>(&mut self, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    fn label(&mut self, label: &str) {
         let p = palette(self.ui.ctx());
-        self.ui.label(RichText::new(label).color(p.text_muted));
+        // A fixed label column, so separate forms in one dialog line up.
+        self.ui.allocate_ui_with_layout(
+            vec2(LABEL_WIDTH, 22.0),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.set_min_width(LABEL_WIDTH);
+                ui.label(RichText::new(label).color(p.text_muted));
+            },
+        );
+    }
+
+    pub fn row<R>(&mut self, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+        self.label(label);
         let r = add(self.ui);
         self.ui.end_row();
         r
@@ -392,7 +404,7 @@ impl Form<'_> {
         add: impl FnOnce(&mut Ui) -> R,
     ) -> R {
         let p = palette(self.ui.ctx());
-        self.ui.label(RichText::new(label).color(p.text_muted));
+        self.label(label);
         let r = self
             .ui
             .vertical(|ui| {

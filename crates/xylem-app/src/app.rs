@@ -2790,88 +2790,138 @@ impl XylemApp {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::menu(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(180.0);
+                    use crate::ui::icon;
+                    // Look like a real menu: frameless rows, full width.
+                    ui.style_mut().visuals.button_frame = false;
+                    ui.set_min_width(230.0);
                     let mut picked: Option<Cmd> = None;
-                    let item =
-                        |ui: &mut egui::Ui, label: &str, c: Cmd, picked: &mut Option<Cmd>| {
-                            if ui.button(label).clicked() {
-                                *picked = Some(c);
-                            }
-                        };
+                    let item = |ui: &mut egui::Ui,
+                                glyph: Option<&str>,
+                                label: &str,
+                                shortcut: Option<&str>,
+                                c: Cmd,
+                                picked: &mut Option<Cmd>| {
+                        if crate::ui::menu_item(ui, glyph, label, shortcut).clicked() {
+                            *picked = Some(c);
+                        }
+                    };
                     if let Some((node, range, word, sugg)) = &menu.suggestions {
-                        ui.label(RichText::new(format!("“{word}”")).weak());
+                        crate::ui::muted(
+                            ui,
+                            format!("\u{201c}{word}\u{201d} is not in the dictionary"),
+                        );
                         for s in sugg.iter().take(6) {
                             item(
                                 ui,
+                                None,
                                 s,
+                                None,
                                 Cmd::Replace(*node, range.clone(), s.clone()),
                                 &mut picked,
                             );
                         }
                         item(
                             ui,
+                            Some(icon::PLUS),
                             "Add to dictionary",
+                            None,
                             Cmd::AddToDictionary(word.clone()),
                             &mut picked,
                         );
                         ui.separator();
                     }
-                    item(ui, "Cut", Cmd::Cut, &mut picked);
-                    item(ui, "Copy", Cmd::Copy, &mut picked);
-                    item(ui, "Paste", Cmd::Paste, &mut picked);
+                    item(ui, None, "Cut", Some("Ctrl+X"), Cmd::Cut, &mut picked);
+                    item(ui, None, "Copy", Some("Ctrl+C"), Cmd::Copy, &mut picked);
+                    item(ui, None, "Paste", Some("Ctrl+V"), Cmd::Paste, &mut picked);
                     ui.separator();
                     if !menu.insertable.is_empty() {
-                        ui.menu_button("Insert element", |ui| {
-                            egui::ScrollArea::vertical()
-                                .max_height(360.0)
-                                .show(ui, |ui| {
-                                    for n in &menu.insertable {
-                                        if ui.button(n).clicked() {
-                                            picked = Some(Cmd::InsertElement(n.clone()));
+                        ui.menu_button(
+                            crate::ui::icon_text(icon::BRACKETS_ANGLE, "Insert element"),
+                            |ui| {
+                                egui::ScrollArea::vertical()
+                                    .max_height(360.0)
+                                    .show(ui, |ui| {
+                                        for n in &menu.insertable {
+                                            if crate::ui::menu_item(ui, None, n, None).clicked() {
+                                                picked = Some(Cmd::InsertElement(n.clone()));
+                                            }
                                         }
-                                    }
-                                });
-                        });
+                                    });
+                            },
+                        );
                     }
                     if !name.is_empty() {
+                        let sel = format!("Select <{name}>");
+                        let split = format!("Split <{name}>");
+                        let untag = format!("Remove <{name}> tags");
+                        let del = format!("Delete <{name}>");
+                        let fold = format!("Collapse <{name}>");
                         item(
                             ui,
-                            &format!("Select <{name}>"),
+                            None,
+                            &sel,
+                            Some("Ctrl+E"),
                             Cmd::SelectElement,
                             &mut picked,
                         );
                         item(
                             ui,
-                            &format!("Remove <{name}> tags"),
-                            Cmd::RemoveTags,
+                            Some(icon::PENCIL_SIMPLE),
+                            "Edit attributes",
+                            None,
+                            Cmd::EditAttributes,
                             &mut picked,
                         );
                         item(
                             ui,
-                            &format!("Split <{name}>"),
-                            Cmd::SplitElement,
+                            Some(icon::LINK),
+                            "Follow link",
+                            Some("Ctrl+click"),
+                            Cmd::FollowLink(menu.node),
                             &mut picked,
                         );
-                        item(ui, "Join to preceding", Cmd::JoinPreceding, &mut picked);
+                        ui.separator();
+                        item(ui, None, &split, None, Cmd::SplitElement, &mut picked);
                         item(
                             ui,
-                            &format!("Delete <{name}>"),
+                            None,
+                            "Join to preceding",
+                            None,
+                            Cmd::JoinPreceding,
+                            &mut picked,
+                        );
+                        item(ui, None, &untag, None, Cmd::RemoveTags, &mut picked);
+                        item(
+                            ui,
+                            Some(icon::TRASH),
+                            &del,
+                            None,
                             Cmd::DeleteElement,
                             &mut picked,
                         );
-                        item(ui, "Edit attributes", Cmd::EditAttributes, &mut picked);
+                        ui.separator();
                         item(
                             ui,
-                            &format!("Collapse <{name}>"),
+                            None,
+                            &fold,
+                            Some("Ctrl+Shift+-"),
                             Cmd::Collapse(true),
                             &mut picked,
                         );
-                        item(ui, "Collapse children", Cmd::CollapseChildren, &mut picked);
-                        item(ui, "Follow link", Cmd::FollowLink(menu.node), &mut picked);
+                        item(
+                            ui,
+                            None,
+                            "Collapse children",
+                            None,
+                            Cmd::CollapseChildren,
+                            &mut picked,
+                        );
                     }
                     if in_table {
                         ui.separator();
-                        ui.menu_button("Table", |ui| table_menu(ui, cmds));
+                        ui.menu_button(crate::ui::icon_text(icon::TABLE, "Table"), |ui| {
+                            table_menu(ui, cmds)
+                        });
                     }
                     if let Some(c) = picked {
                         cmds.push(c);
@@ -3281,19 +3331,20 @@ impl XylemApp {
     }
 
     fn update_dialog(&mut self, ctx: &egui::Context) {
+        use crate::ui::{Dialog, Tone, dialog_footer, notice};
         if !self.dialogs.update {
             return;
         }
-        let mut open = true;
         let mut apply = None;
         let mut restart = None;
-        egui::Window::new("Check for updates")
-            .anchor(egui::Align2::CENTER_TOP, [0.0, 120.0])
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
+        let mut close = false;
+        let dirty = self.docs.iter().any(|d| d.is_dirty());
+        let (x, _) = Dialog::new("Check for updates")
+            .width(400.0)
             .show(ctx, |ui| {
-                ui.label(format!("This is Xylem {}.", crate::install::VERSION));
+                crate::ui::muted(ui, format!("This is Xylem {}.", crate::install::VERSION));
+                ui.add_space(6.0);
+                let mut primary: Option<(&str, bool)> = None;
                 match &self.update {
                     UpdateState::Idle | UpdateState::Checking { .. } => {
                         ui.horizontal(|ui| {
@@ -3302,26 +3353,39 @@ impl XylemApp {
                         });
                     }
                     UpdateState::UpToDate => {
-                        ui.label("You have the latest version.");
+                        notice(ui, Tone::Success, "You have the latest version.")
                     }
-                    UpdateState::Failed(e) => {
-                        ui.colored_label(ui.visuals().warn_fg_color, e);
-                    }
+                    UpdateState::Failed(e) => notice(ui, Tone::Warning, e.clone()),
                     UpdateState::Found(a) => {
-                        ui.label(format!("Version {} is available.", a.version));
-                        if ui.button("Update now").clicked() {
-                            apply = Some(a.clone());
-                        }
+                        notice(
+                            ui,
+                            Tone::Accent,
+                            format!("Version {} is available.", a.version),
+                        );
+                        primary = Some(("Update now", true));
                     }
-                    UpdateState::Applied(exe) => {
-                        ui.label("Updated. The new version starts the next time you open Xylem.");
-                        if self.docs.iter().any(|d| d.is_dirty()) {
-                            ui.weak("Save your documents, then restart.");
-                        } else if ui.button("Restart now").clicked() {
-                            restart = Some(exe.clone());
+                    UpdateState::Applied(_) => {
+                        notice(
+                            ui,
+                            Tone::Success,
+                            "Updated. The new version starts the next time you open Xylem.",
+                        );
+                        if dirty {
+                            crate::ui::muted(ui, "Save your documents, then restart.");
+                        } else {
+                            primary = Some(("Restart now", true));
                         }
                     }
                 }
+                let r = dialog_footer(ui, primary, Some("Close"), |_| {});
+                if r.confirmed {
+                    match &self.update {
+                        UpdateState::Found(a) => apply = Some(a.clone()),
+                        UpdateState::Applied(exe) => restart = Some(exe.clone()),
+                        _ => {}
+                    }
+                }
+                close |= r.closed;
             });
         if let Some(a) = apply {
             self.update = match crate::install::apply(&a) {
@@ -3336,50 +3400,73 @@ impl XylemApp {
                 Err(e) => self.toast(format!("Could not start {}: {e}", exe.display()), true),
             }
         }
-        if !open {
+        if x || close {
             self.dialogs.update = false;
         }
     }
 
     fn dialogs(&mut self, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
+        use crate::ui::{Dialog, Tone, dialog_footer, form, icon, notice, palette, section};
         self.find_window(ctx);
         self.find_files_window(ctx);
+        let p = palette(ctx);
         if self.dialogs.about {
-            egui::Window::new("About Xylem").collapsible(false).resizable(false).open(&mut self.dialogs.about).show(ctx, |ui| {
-                ui.heading("Xylem");
-                ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                ui.label("A structured XML and S1000D editor written entirely in Rust.");
-                ui.label("Tags-on and normal views driven by CSS, schema-guided editing (XSD and DTD), CALS tables, BREX checking.");
+            let (x, close) = Dialog::new("About Xylem").width(380.0).show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(icon::TREE_STRUCTURE)
+                            .size(34.0)
+                            .color(p.accent),
+                    );
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new("Xylem")
+                                .size(20.0)
+                                .family(crate::ui::theme::strong_family()),
+                        );
+                        crate::ui::muted(ui, format!("Version {}", env!("CARGO_PKG_VERSION")));
+                    });
+                });
+                ui.add_space(8.0);
+                ui.label("A structured XML and S1000D editor, written in Rust.");
+                ui.add_space(4.0);
+                crate::ui::muted(
+                    ui,
+                    "CSS-driven tags-on and normal views, schema-guided editing (XSD and DTD), \
+                     CALS tables, tracked changes, BREX checking.",
+                );
+                ui.add_space(4.0);
+                crate::ui::muted(ui, "Released under the MIT licence.");
+                dialog_footer(ui, Some(("Close", true)), None, |_| {})
             });
+            if x || close.is_some_and(|r| r.confirmed || r.closed) {
+                self.dialogs.about = false;
+            }
         }
         if let Some(t) = &mut self.dialogs.table {
-            let mut open = true;
-            let mut insert = false;
-            egui::Window::new("Insert table")
-                .collapsible(false)
-                .open(&mut open)
-                .show(ctx, |ui| {
-                    egui::Grid::new("tbl").num_columns(2).show(ui, |ui| {
-                        ui.label("Rows");
-                        ui.add(egui::DragValue::new(&mut t.rows).range(1..=200));
-                        ui.end_row();
-                        ui.label("Columns");
-                        ui.add(egui::DragValue::new(&mut t.cols).range(1..=40));
-                        ui.end_row();
-                        ui.label("Title");
-                        ui.text_edit_singleline(&mut t.title);
-                        ui.end_row();
+            let (x, res) = Dialog::new("Insert table").width(380.0).show(ctx, |ui| {
+                form(ui, "table-form", |f| {
+                    f.row("Rows", |ui| {
+                        ui.add(egui::DragValue::new(&mut t.rows).range(1..=200))
                     });
-                    ui.checkbox(&mut t.header, "Header row");
-                    ui.horizontal(|ui| {
-                        ui.radio_value(&mut t.cals, true, "CALS (table/tgroup/row/entry)");
-                        ui.radio_value(&mut t.cals, false, "HTML (table/tr/td)");
+                    f.row("Columns", |ui| {
+                        ui.add(egui::DragValue::new(&mut t.cols).range(1..=40))
                     });
-                    let r = ui.button("Insert");
-                    crate::script::track("Insert", &r);
-                    insert = r.clicked();
+                    f.row("Title", |ui| {
+                        crate::ui::text_field(ui, "Table title", &mut t.title, "Optional", 220.0)
+                    });
+                    f.row("Model", |ui| {
+                        ui.vertical(|ui| {
+                            ui.radio_value(&mut t.cals, true, "CALS (table, tgroup, row, entry)");
+                            ui.radio_value(&mut t.cals, false, "HTML (table, tr, td)");
+                        })
+                    });
+                    f.row("", |ui| ui.checkbox(&mut t.header, "Header row"));
                 });
-            if insert {
+                dialog_footer(ui, Some(("Insert", true)), Some("Cancel"), |_| {})
+            });
+            let res = res.unwrap_or_default();
+            if res.confirmed {
                 let xml = if t.cals {
                     xylem_edit::table::cals_table_xml(
                         t.rows,
@@ -3394,39 +3481,50 @@ impl XylemApp {
                 if let Some(Err(e)) = self.insert_markup("table", &xml) {
                     self.toast(e.to_string(), true);
                 }
-            } else if !open {
+            } else if x || res.closed {
                 self.dialogs.table = None;
             }
         }
         if let Some(cd) = &mut self.dialogs.comment {
-            let mut open = true;
-            let mut apply = false;
             let title = if cd.node.is_some() {
                 "Edit comment"
             } else {
                 "New comment"
             };
-            egui::Window::new(title)
-                .collapsible(false)
-                .open(&mut open)
+            let author = self.settings.author();
+            let (x, res) = Dialog::new(title)
+                .id("comment")
+                .width(420.0)
                 .show(ctx, |ui| {
+                    crate::ui::muted(ui, format!("As {author}"));
+                    ui.add_space(4.0);
                     let r = ui.add(
                         egui::TextEdit::multiline(&mut cd.text)
-                            .desired_rows(4)
-                            .desired_width(360.0)
-                            .hint_text("Comment"),
+                            .desired_rows(5)
+                            .desired_width(f32::INFINITY)
+                            .margin(egui::Margin::symmetric(8, 6))
+                            .hint_text("Write a comment"),
                     );
+                    crate::ui::widgets::mark_multiline(ui, &r);
+                    crate::script::track("Comment text", &r);
                     if std::mem::take(&mut cd.focus) {
                         r.request_focus();
                     }
                     let ctrl_enter = r.has_focus()
                         && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
-                    ui.horizontal(|ui| {
-                        apply = ui.button("OK").clicked() || ctrl_enter;
-                        ui.weak("Ctrl+Enter");
-                    });
+                    let mut res = dialog_footer(
+                        ui,
+                        Some(("Save", !cd.text.trim().is_empty() || cd.node.is_some())),
+                        Some("Cancel"),
+                        |ui| {
+                            crate::ui::muted(ui, "Ctrl+Enter to save");
+                        },
+                    );
+                    res.confirmed |= ctrl_enter;
+                    res
                 });
-            if apply {
+            let res = res.unwrap_or_default();
+            if res.confirmed {
                 let (node, text) = (cd.node, cd.text.trim().to_string());
                 self.dialogs.comment = None;
                 let author = self.settings.author();
@@ -3442,31 +3540,40 @@ impl XylemApp {
                     }
                     None => {}
                 }
-            } else if !open {
+            } else if x || res.closed {
                 self.dialogs.comment = None;
             }
         }
         if let Some(ne) = &mut self.dialogs.node_edit {
-            let mut open = true;
-            let mut apply = false;
-            egui::Window::new("Edit node")
-                .collapsible(false)
-                .open(&mut open)
+            let title = if ne.target.is_empty() {
+                "Edit text"
+            } else {
+                "Edit processing instruction"
+            };
+            let (x, res) = Dialog::new(title)
+                .id("node-edit")
+                .width(440.0)
                 .show(ctx, |ui| {
                     if !ne.target.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.label("Target");
-                            ui.text_edit_singleline(&mut ne.target);
+                        form(ui, "node-form", |f| {
+                            f.row("Target", |ui| {
+                                crate::ui::text_field(ui, "PI target", &mut ne.target, "", 280.0)
+                            });
                         });
+                        ui.add_space(4.0);
                     }
-                    ui.add(
+                    let r = ui.add(
                         egui::TextEdit::multiline(&mut ne.text)
-                            .desired_rows(5)
-                            .desired_width(380.0),
+                            .desired_rows(6)
+                            .desired_width(f32::INFINITY)
+                            .code_editor()
+                            .margin(egui::Margin::symmetric(8, 6)),
                     );
-                    apply = ui.button("OK").clicked();
+                    crate::ui::widgets::mark_multiline(ui, &r);
+                    dialog_footer(ui, Some(("Apply", true)), Some("Cancel"), |_| {})
                 });
-            if apply {
+            let res = res.unwrap_or_default();
+            if res.confirmed {
                 let (n, target, text) = (ne.node, ne.target.clone(), ne.text.clone());
                 self.dialogs.node_edit = None;
                 self.with_editor(|ed, _| {
@@ -3486,69 +3593,100 @@ impl XylemApp {
                         Ok(())
                     })
                 });
-            } else if !open {
+            } else if x || res.closed {
                 self.dialogs.node_edit = None;
             }
         }
         if let Some(nd) = &mut self.dialogs.new_doc {
-            let mut open = true;
-            let mut create = false;
-            let names: Vec<(String, String)> =
-                std::iter::once(("generic".to_string(), "Generic XML (no schema)".to_string()))
-                    .chain(self.registry.packages().iter().map(|p| {
-                        (
-                            p.doctype.name.clone(),
-                            if p.doctype.description.is_empty() {
-                                p.doctype.name.clone()
-                            } else {
-                                format!("{} — {}", p.doctype.name, p.doctype.description)
-                            },
-                        )
-                    }))
-                    .collect();
-            egui::Window::new("New document")
-                .collapsible(false)
-                .open(&mut open)
-                .default_width(460.0)
-                .show(ctx, |ui| {
-                    ui.label("Document type");
-                    egui::ScrollArea::vertical()
-                        .max_height(260.0)
-                        .show(ui, |ui| {
-                            for (name, label) in &names {
-                                if ui.selectable_label(&nd.package == name, label).clicked() {
-                                    nd.package = name.clone();
-                                    nd.root.clear();
-                                }
-                            }
-                        });
-                    let roots: Vec<String> = self
-                        .registry
-                        .get(&nd.package)
-                        .map(|p| p.matching.roots.clone())
-                        .unwrap_or_default();
-                    ui.horizontal(|ui| {
-                        ui.label("Root element");
-                        egui::ComboBox::from_id_salt("newroot")
-                            .selected_text(if nd.root.is_empty() {
-                                roots.first().cloned().unwrap_or_else(|| "document".into())
-                            } else {
-                                nd.root.clone()
-                            })
-                            .show_ui(ui, |ui| {
-                                for r in &roots {
-                                    ui.selectable_value(&mut nd.root, r.clone(), r);
+            let packages: Vec<(String, String, String)> = std::iter::once((
+                "generic".to_string(),
+                "Generic XML".to_string(),
+                "No schema; any element can go anywhere".to_string(),
+            ))
+            .chain(self.registry.packages().iter().map(|pk| {
+                (
+                    pk.doctype.name.clone(),
+                    pk.doctype.name.clone(),
+                    pk.doctype.description.clone(),
+                )
+            }))
+            .collect();
+            let roots: Vec<String> = self
+                .registry
+                .get(&nd.package)
+                .map(|pk| pk.matching.roots.clone())
+                .unwrap_or_default();
+            let (x, res) = Dialog::new("New document").width(480.0).show(ctx, |ui| {
+                section(ui, "Document type");
+                egui::Frame::new()
+                    .fill(p.surface)
+                    .stroke(egui::Stroke::new(1.0_f32, p.border))
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::same(4))
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(240.0)
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                for (name, title, desc) in &packages {
+                                    let row = crate::ui::list_row(
+                                        ui,
+                                        crate::ui::Row {
+                                            icon: Some((
+                                                if name == "generic" {
+                                                    icon::FILE_CODE
+                                                } else {
+                                                    icon::FILE_TEXT
+                                                },
+                                                p.text_muted,
+                                            )),
+                                            text: title,
+                                            detail: Some(desc),
+                                            selected: &nd.package == name,
+                                            ..Default::default()
+                                        },
+                                    );
+                                    crate::script::track(title, &row.response);
+                                    if row.response.clicked() {
+                                        nd.package = name.clone();
+                                        nd.root.clear();
+                                    }
                                 }
                             });
-                        ui.text_edit_singleline(&mut nd.root);
                     });
-                    create = ui.button("Create").clicked();
+                ui.add_space(8.0);
+                form(ui, "newdoc-form", |f| {
+                    f.row("Root element", |ui| {
+                        ui.horizontal(|ui| {
+                            egui::ComboBox::from_id_salt("newroot")
+                                .selected_text(if nd.root.is_empty() {
+                                    roots.first().cloned().unwrap_or_else(|| "document".into())
+                                } else {
+                                    nd.root.clone()
+                                })
+                                .show_ui(ui, |ui| {
+                                    for r in &roots {
+                                        ui.selectable_value(&mut nd.root, r.clone(), r);
+                                    }
+                                });
+                            crate::ui::text_field(
+                                ui,
+                                "Root element",
+                                &mut nd.root,
+                                "or type a name",
+                                150.0,
+                            );
+                        });
+                    });
                 });
-            if create {
-                let (p, r) = (nd.package.clone(), nd.root.clone());
+                dialog_footer(ui, Some(("Create", true)), Some("Cancel"), |_| {})
+            });
+            let res = res.unwrap_or_default();
+            if res.confirmed {
+                let (pk, r) = (nd.package.clone(), nd.root.clone());
                 self.dialogs.new_doc = None;
-                self.new_from_package(&p, Some(&r));
-            } else if !open {
+                self.new_from_package(&pk, Some(&r));
+            } else if x || res.closed {
                 self.dialogs.new_doc = None;
             }
         }
@@ -3575,145 +3713,243 @@ impl XylemApp {
             }
         }
         if self.dialogs.info {
-            let mut open = true;
             let info = self
                 .docs
                 .get(self.active)
                 .map(|d| crate::s1000d_ui::info_text(&d.editor.doc))
                 .unwrap_or_default();
-            egui::Window::new("Data module")
-                .open(&mut open)
+            let (x, res) = Dialog::new("Data module")
+                .width(460.0)
+                .modeless()
                 .show(ctx, |ui| {
-                    ui.label(RichText::new(info).monospace());
+                    egui::Frame::new()
+                        .fill(p.surface)
+                        .stroke(egui::Stroke::new(1.0_f32, p.border))
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(RichText::new(info).monospace());
+                        });
+                    dialog_footer(ui, Some(("Close", true)), None, |_| {})
                 });
-            self.dialogs.info = open;
+            if x || res.is_some_and(|r| r.confirmed) {
+                self.dialogs.info = false;
+            }
         }
         if let Some(msg) = &self.dialogs.import_result {
-            let mut open = true;
-            egui::Window::new("XMAX import")
-                .open(&mut open)
-                .default_width(520.0)
-                .show(ctx, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(400.0)
-                        .show(ui, |ui| ui.label(RichText::new(msg).monospace()));
-                });
-            if !open {
+            let failed = msg.starts_with("Import failed");
+            let (x, res) = Dialog::new("XMAX import").width(540.0).show(ctx, |ui| {
+                if failed {
+                    notice(
+                        ui,
+                        Tone::Danger,
+                        "The customization could not be converted.",
+                    );
+                } else {
+                    notice(
+                        ui,
+                        Tone::Success,
+                        "Converted. The new doctype package is ready to use.",
+                    );
+                }
+                ui.add_space(6.0);
+                egui::Frame::new()
+                    .fill(p.surface)
+                    .stroke(egui::Stroke::new(1.0_f32, p.border))
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::same(10))
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(340.0)
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(RichText::new(msg).monospace().size(12.0));
+                            });
+                    });
+                dialog_footer(ui, Some(("Done", true)), None, |_| {})
+            });
+            if x || res.is_some_and(|r| r.confirmed) {
                 self.dialogs.import_result = None;
             }
         }
         if self.dialogs.prefs {
-            let mut open = true;
             let mut reload = false;
-            egui::Window::new("Preferences")
-                .open(&mut open)
-                .default_width(520.0)
-                .show(ctx, |ui| {
-                    ui.strong("Team configuration");
-                    match &self.team.source {
-                        Some(src) => {
-                            ui.label(src.display().to_string());
-                            for d in &self.team.package_dirs {
-                                ui.weak(format!("packages: {}", d.display()));
-                            }
-                        }
-                        None => {
-                            ui.weak("None (no xylem-team.toml found; see docs/team-setup.md).");
-                        }
-                    }
-                    for w in &self.team.warnings {
-                        ui.colored_label(ui.visuals().warn_fg_color, w);
-                    }
-                    ui.separator();
-                    ui.strong("Doctype package folders");
-                    let mut remove = None;
-                    for (i, d) in self.settings.package_dirs.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(d.display().to_string());
-                            if ui.small_button("✕").clicked() {
-                                remove = Some(i);
+            let mut theme_choice: Option<Option<bool>> = None;
+            let (x, res) = Dialog::new("Preferences").width(560.0).show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height((ui.ctx().content_rect().height() - 220.0).max(240.0))
+                    .show(ui, |ui| {
+                        section(ui, "Appearance");
+                        form(ui, "prefs-look", |f| {
+                            f.row("Theme", |ui| {
+                                let mut t = self.settings.dark_mode;
+                                if crate::ui::segmented(
+                                    ui,
+                                    &mut t,
+                                    &[(None, "System"), (Some(false), "Light"), (Some(true), "Dark")],
+                                ) {
+                                    theme_choice = Some(t);
+                                }
+                            });
+                            f.row("Open documents in", |ui| {
+                                crate::ui::segmented(
+                                    ui,
+                                    &mut self.settings.default_view,
+                                    &[(View::TagsOn, "Tags on"), (View::Normal, "Normal")],
+                                );
+                            });
+                        });
+                        crate::ui::divider(ui);
+                        section(ui, "Editing");
+                        form(ui, "prefs-edit", |f| {
+                            f.row("Validation", |ui| {
+                                ui.checkbox(&mut self.settings.auto_validate, "Validate as you type")
+                            });
+                            f.row("Spelling", |ui| {
+                                let mut on = self.settings.spell_check;
+                                if ui.checkbox(&mut on, "Check spelling").clicked() {
+                                    cmds.push(Cmd::SpellCheck);
+                                }
+                            });
+                            let mut spell_reload = false;
+                            f.row("Dictionaries", |ui| {
+                                path_pref(ui, &mut self.settings.dictionary_dir, true, &mut spell_reload)
+                            });
+                            f.row("Language", |ui| {
+                                if crate::ui::text_field(
+                                    ui,
+                                    "Dictionary language",
+                                    &mut self.settings.dictionary_lang,
+                                    "en_US",
+                                    120.0,
+                                )
+                                .lost_focus()
+                                {
+                                    spell_reload = true;
+                                }
+                            });
+                            if spell_reload {
+                                self.speller = None;
+                                reload = true;
                             }
                         });
-                    }
-                    if let Some(i) = remove {
-                        self.settings.package_dirs.remove(i);
-                        reload = true;
-                    }
-                    if ui.button("Add folder…").clicked()
-                        && let Some(p) = rfd::FileDialog::new().pick_folder()
-                    {
-                        self.settings.package_dirs.push(p);
-                        reload = true;
-                    }
-                    ui.separator();
-                    path_pref(
-                        ui,
-                        "Schema catalog (catalog.toml or OASIS XML)",
-                        &mut self.settings.catalog,
-                        false,
-                        &mut reload,
-                    );
-                    path_pref(
-                        ui,
-                        "S1000D schema folder (sub-folder per issue)",
-                        &mut self.settings.s1000d_schema_root,
-                        true,
-                        &mut reload,
-                    );
-                    path_pref(
-                        ui,
-                        "BREX data module",
-                        &mut self.settings.brex,
-                        false,
-                        &mut reload,
-                    );
-                    let mut spell_reload = false;
-                    path_pref(
-                        ui,
-                        "Hunspell dictionary folder",
-                        &mut self.settings.dictionary_dir,
-                        true,
-                        &mut spell_reload,
-                    );
-                    ui.horizontal(|ui| {
-                        ui.label("Dictionary language");
-                        if ui
-                            .text_edit_singleline(&mut self.settings.dictionary_lang)
-                            .lost_focus()
-                        {
-                            spell_reload = true;
+                        crate::ui::divider(ui);
+                        section(ui, "Files");
+                        form(ui, "prefs-files", |f| {
+                            f.row("On start", |ui| {
+                                ui.checkbox(
+                                    &mut self.settings.restore_session,
+                                    "Reopen the documents from last time",
+                                )
+                            });
+                            f.row_with_hint(
+                                "Autosave",
+                                "Seconds between recovery copies of unsaved work; 0 turns it off.",
+                                |ui| {
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.settings.autosave_seconds)
+                                            .range(0..=3600)
+                                            .suffix(" s"),
+                                    )
+                                },
+                            );
+                        });
+                        crate::ui::divider(ui);
+                        section(ui, "Review");
+                        form(ui, "prefs-review", |f| {
+                            f.row_with_hint(
+                                "Author",
+                                "Recorded on tracked changes and comments. Empty means your login name.",
+                                |ui| {
+                                    let hint = crate::review::os_user_name();
+                                    crate::ui::text_field(
+                                        ui,
+                                        "Review author",
+                                        &mut self.settings.review_author,
+                                        &hint,
+                                        240.0,
+                                    )
+                                },
+                            );
+                        });
+                        crate::ui::divider(ui);
+                        section(ui, "Document types");
+                        match &self.team.source {
+                            Some(src) => {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(icon::FOLDERS).color(p.text_muted));
+                                    ui.label("Team configuration");
+                                });
+                                crate::ui::muted(ui, src.display().to_string());
+                            }
+                            None => {
+                                crate::ui::muted(
+                                    ui,
+                                    "No team configuration (xylem-team.toml). See docs/team-setup.md.",
+                                );
+                            }
                         }
+                        for w in &self.team.warnings {
+                            notice(ui, Tone::Warning, w.clone());
+                        }
+                        ui.add_space(6.0);
+                        let mut remove = None;
+                        let team_dirs = self.team.package_dirs.clone();
+                        for d in team_dirs.iter() {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(icon::FOLDER_SIMPLE).color(p.text_faint));
+                                ui.label(d.display().to_string());
+                                crate::ui::badge(ui, "team", Tone::Neutral);
+                            });
+                        }
+                        for (i, d) in self.settings.package_dirs.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(icon::FOLDER_SIMPLE).color(p.text_muted));
+                                ui.label(d.display().to_string());
+                                if crate::ui::icon_button(ui, icon::X, "Remove folder", None).clicked() {
+                                    remove = Some(i);
+                                }
+                            });
+                        }
+                        if let Some(i) = remove {
+                            self.settings.package_dirs.remove(i);
+                            reload = true;
+                        }
+                        if crate::ui::button(ui, "Add folder…").clicked()
+                            && let Some(pth) = crate::script::file_dialog(|| rfd::FileDialog::new().pick_folder())
+                        {
+                            self.settings.package_dirs.push(pth);
+                            reload = true;
+                        }
+                        crate::ui::divider(ui);
+                        section(ui, "Schemas");
+                        form(ui, "prefs-schemas", |f| {
+                            f.row_with_hint(
+                                "Catalog",
+                                "catalog.toml or an OASIS XML catalog",
+                                |ui| path_pref(ui, &mut self.settings.catalog, false, &mut reload),
+                            );
+                            f.row_with_hint(
+                                "S1000D schemas",
+                                "A folder with one sub-folder per issue (S1000D_4-1, …)",
+                                |ui| path_pref(ui, &mut self.settings.s1000d_schema_root, true, &mut reload),
+                            );
+                            f.row("Project BREX", |ui| {
+                                path_pref(ui, &mut self.settings.brex, false, &mut reload)
+                            });
+                        });
                     });
-                    if spell_reload {
-                        self.speller = None;
-                        reload = true;
-                    }
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.label("Default view");
-                        ui.selectable_value(
-                            &mut self.settings.default_view,
-                            View::TagsOn,
-                            "Tags On",
-                        );
-                        ui.selectable_value(
-                            &mut self.settings.default_view,
-                            View::Normal,
-                            "Normal",
-                        );
-                    });
-                    ui.checkbox(&mut self.settings.auto_validate, "Validate as you type");
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.label("Review author");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.settings.review_author)
-                                .hint_text(crate::review::os_user_name()),
-                        );
-                    });
-                    ui.weak("Name recorded on tracked changes and comments. Empty means your login name.");
-                });
-            self.dialogs.prefs = open;
+                dialog_footer(ui, Some(("Done", true)), None, |_| {})
+            });
+            if let Some(t) = theme_choice {
+                self.settings.dark_mode = t;
+                let dark = t.unwrap_or_else(|| ctx.system_theme() == Some(egui::Theme::Dark));
+                crate::ui::theme::apply(ctx, dark);
+            }
+            if x || res.is_some_and(|r| r.confirmed) {
+                self.dialogs.prefs = false;
+            }
             if reload {
                 cmds.push(Cmd::ReloadPackages);
                 self.load_speller();
@@ -3721,24 +3957,25 @@ impl XylemApp {
         }
         if let Some(i) = self.dialogs.confirm_close {
             let title = self.docs.get(i).map(|d| d.title()).unwrap_or_default();
+            let title = title.trim_end_matches(" •").to_string();
             let mut choice = None;
-            egui::Window::new("Unsaved changes")
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label(format!("Save changes to {title}?"));
-                    ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() {
-                            choice = Some(0);
-                        }
-                        if ui.button("Don't save").clicked() {
-                            choice = Some(1);
-                        }
-                        if ui.button("Cancel").clicked() {
-                            choice = Some(2);
-                        }
-                    });
+            let (x, _) = Dialog::new("Unsaved changes").width(420.0).show(ctx, |ui| {
+                ui.label(format!("Save the changes to {title} before closing?"));
+                crate::ui::muted(ui, "If you don't save, your changes are lost.");
+                let r = dialog_footer(ui, Some(("Save", true)), Some("Cancel"), |ui| {
+                    if crate::ui::button(ui, "Don't save").clicked() {
+                        choice = Some(1);
+                    }
                 });
+                if r.confirmed {
+                    choice = Some(0);
+                } else if r.closed {
+                    choice = Some(2);
+                }
+            });
+            if x {
+                choice = Some(2);
+            }
             match choice {
                 Some(0) => {
                     self.active = i;
@@ -3764,23 +4001,29 @@ impl XylemApp {
         }
         if self.dialogs.confirm_exit {
             let mut choice = None;
-            egui::Window::new("Quit Xylem")
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    let n = self.docs.iter().filter(|d| d.is_dirty()).count();
-                    ui.label(format!(
-                        "{n} document(s) have unsaved changes. Quit anyway?"
-                    ));
-                    ui.horizontal(|ui| {
-                        if ui.button("Quit without saving").clicked() {
+            let n = self.docs.iter().filter(|d| d.is_dirty()).count();
+            let (x, _) = Dialog::new("Quit Xylem").width(420.0).show(ctx, |ui| {
+                ui.label(if n == 1 {
+                    "A document has unsaved changes.".to_string()
+                } else {
+                    format!("{n} documents have unsaved changes.")
+                });
+                crate::ui::muted(ui, "Quit anyway and lose them?");
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if crate::ui::danger_button(ui, "Quit without saving").clicked() {
                             choice = Some(true);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if crate::ui::button(ui, "Cancel").clicked() {
                             choice = Some(false);
                         }
                     });
                 });
+            });
+            if x {
+                choice = Some(false);
+            }
             match choice {
                 Some(true) => {
                     self.allow_close = true;
@@ -3869,19 +4112,39 @@ impl XylemApp {
         if self.toasts.is_empty() {
             return;
         }
+        let p = crate::ui::palette(ctx);
         egui::Area::new(egui::Id::new("toasts"))
             .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -40.0])
             .order(egui::Order::Tooltip)
             .show(ctx, |ui| {
-                for (msg, _, err) in &self.toasts {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_max_width(420.0);
-                        ui.label(RichText::new(msg).color(if *err {
-                            Color32::from_rgb(230, 90, 80)
-                        } else {
-                            ui.visuals().text_color()
-                        }));
-                    });
+                for (msg, age, err) in &self.toasts {
+                    // Fade out over the last half second.
+                    let alpha = ((6.0 - *age) / 0.5).clamp(0.0, 1.0) as f32;
+                    let (glyph, color) = if *err {
+                        (crate::ui::icon::WARNING_CIRCLE, p.danger)
+                    } else {
+                        (crate::ui::icon::INFO, p.accent)
+                    };
+                    ui.set_opacity(alpha);
+                    egui::Frame::new()
+                        .fill(p.raised)
+                        .stroke(egui::Stroke::new(1.0_f32, p.border))
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .shadow(ui.style().visuals.popup_shadow)
+                        .inner_margin(egui::Margin {
+                            left: 12,
+                            right: 14,
+                            top: 9,
+                            bottom: 9,
+                        })
+                        .show(ui, |ui| {
+                            ui.set_max_width(420.0);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(glyph).size(16.0).color(color));
+                                ui.add(egui::Label::new(RichText::new(msg).color(p.text)).wrap());
+                            });
+                        });
+                    ui.add_space(6.0);
                 }
             });
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
@@ -4102,55 +4365,81 @@ impl XylemApp {
             .fixed_pos(anchor)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(260.0);
-                    ui.label(
-                        RichText::new(if surround {
-                            "Surround selection with…"
-                        } else {
-                            "Insert element…"
-                        })
-                        .weak(),
-                    );
-                    let edit = ui.add(
-                        egui::TextEdit::singleline(&mut pal.query)
-                            .hint_text("type to filter")
-                            .desired_width(f32::INFINITY),
-                    );
-                    edit.request_focus();
-                    if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
-                        pal.selected = (pal.selected + 1).min(items.len().saturating_sub(1));
-                    }
-                    if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
-                        pal.selected = pal.selected.saturating_sub(1);
-                    }
-                    if ui.input(|i| i.key_pressed(Key::Escape)) {
-                        close = true;
-                    }
-                    if ui.input(|i| i.key_pressed(Key::Enter)) {
-                        chosen = items.get(pal.selected).map(|i| i.0.clone());
-                    }
-                    egui::ScrollArea::vertical()
-                        .max_height(260.0)
-                        .show(ui, |ui| {
-                            if items.is_empty() {
-                                ui.label(RichText::new("Nothing matches here.").weak());
-                            }
-                            for (k, (name, valid)) in items.iter().enumerate() {
-                                let mut text = RichText::new(name);
-                                if !valid {
-                                    text = text.weak();
+                let p = crate::ui::palette(ui.ctx());
+                egui::Frame::popup(ui.style())
+                    .inner_margin(egui::Margin::same(8))
+                    .show(ui, |ui| {
+                        ui.set_width(280.0);
+                        ui.label(
+                            RichText::new(if surround {
+                                "Surround the selection with"
+                            } else {
+                                "Insert an element"
+                            })
+                            .size(crate::ui::theme::size::SMALL)
+                            .color(p.text_muted),
+                        );
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut pal.query)
+                                .hint_text(format!(
+                                    "{}  Type to filter",
+                                    crate::ui::icon::MAGNIFYING_GLASS
+                                ))
+                                .margin(egui::Margin::symmetric(8, 5))
+                                .desired_width(f32::INFINITY),
+                        );
+                        edit.request_focus();
+                        if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
+                            pal.selected = (pal.selected + 1).min(items.len().saturating_sub(1));
+                        }
+                        if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
+                            pal.selected = pal.selected.saturating_sub(1);
+                        }
+                        if ui.input(|i| i.key_pressed(Key::Escape)) {
+                            close = true;
+                        }
+                        if ui.input(|i| i.key_pressed(Key::Enter)) {
+                            chosen = items.get(pal.selected).map(|i| i.0.clone());
+                        }
+                        ui.add_space(4.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(280.0)
+                            .show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                if items.is_empty() {
+                                    crate::ui::muted(ui, "Nothing matches here.");
                                 }
-                                let r = ui.selectable_label(k == pal.selected, text);
-                                if k == pal.selected {
-                                    r.scroll_to_me(None);
+                                for (k, (name, valid)) in items.iter().enumerate() {
+                                    let row = crate::ui::list_row(
+                                        ui,
+                                        crate::ui::Row {
+                                            text: name,
+                                            text_color: Some(if *valid {
+                                                p.text
+                                            } else {
+                                                p.text_faint
+                                            }),
+                                            selected: k == pal.selected,
+                                            ..Default::default()
+                                        },
+                                    );
+                                    if k == pal.selected {
+                                        row.response.scroll_to_me(None);
+                                    }
+                                    if row.response.clicked() {
+                                        chosen = Some(name.clone());
+                                    }
                                 }
-                                if r.clicked() {
-                                    chosen = Some(name.clone());
-                                }
-                            }
-                        });
-                });
+                            });
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(
+                                "\u{2191}\u{2193} to choose · Enter to insert · Esc to close",
+                            )
+                            .size(crate::ui::theme::size::SMALL)
+                            .color(p.text_faint),
+                        );
+                    });
             });
         if let Some(name) = chosen {
             cmds.push(if surround {
@@ -4172,56 +4461,94 @@ impl XylemApp {
         if !self.shortcuts_open {
             return;
         }
-        const KEYS: &[(&str, &str)] = &[
+        // Grouped like the menus. Keys separated by " / " are alternatives.
+        const GROUPS: &[(&str, &[(&str, &str)])] = &[
             (
-                "Ctrl+Space",
-                "Insert an element (or surround the selection)",
+                "Editing",
+                &[
+                    ("Ctrl+Space", "Insert an element, or surround the selection"),
+                    ("Enter", "Split the element, or start the one that follows"),
+                    ("Shift+Enter", "Line break inside the text"),
+                    ("Ctrl+B / Ctrl+I / Ctrl+U", "Bold, italic, underline"),
+                    ("Ctrl+E", "Select the current element"),
+                    ("Tab / Shift+Tab", "Next or previous table cell"),
+                    ("Ctrl+Z / Ctrl+Y", "Undo, redo"),
+                    ("Ctrl+Shift+V", "Paste as plain text"),
+                ],
             ),
             (
-                "Enter",
-                "Split the element, or start the element that follows it",
+                "Navigating",
+                &[
+                    ("Ctrl+click", "Follow a link or reference"),
+                    ("Double-click", "Edit an element's attributes (on a tag)"),
+                    (
+                        "Ctrl+Shift+- / Ctrl+Shift+=",
+                        "Collapse or expand the element",
+                    ),
+                    ("Ctrl+F", "Find and replace"),
+                    ("F3 / Shift+F3", "Find next, find previous"),
+                    ("Ctrl+Shift+F", "Find in files"),
+                ],
             ),
-            ("Shift+Enter", "Line break inside the text"),
             (
-                "Ctrl+B / I / U",
-                "Bold / italic / underline (per document type)",
+                "View",
+                &[
+                    ("F5 / F6 / F8", "Tags on, Normal, Source"),
+                    ("F7", "Validate"),
+                    ("Ctrl++ / Ctrl+- / Ctrl+0", "Zoom in, out, reset"),
+                ],
             ),
-            ("Ctrl+E", "Select the current element"),
-            ("Ctrl+Shift+- / =", "Collapse / expand the current element"),
-            ("Tab / Shift+Tab", "Next / previous table cell"),
-            ("Ctrl+click", "Follow a link or reference"),
-            ("Double-click a tag", "Edit the element's attributes"),
-            ("Ctrl+Z / Ctrl+Y", "Undo / redo"),
-            ("Ctrl+Shift+V", "Paste as plain text"),
             (
-                "Ctrl+F, F3, Shift+F3",
-                "Find and replace, find next, find previous",
+                "Review",
+                &[
+                    ("Ctrl+Shift+T", "Track changes on or off"),
+                    ("Ctrl+Shift+M", "New comment"),
+                    (
+                        "Ctrl+Shift+A / Ctrl+Shift+R",
+                        "Accept or reject all changes",
+                    ),
+                ],
             ),
-            ("F5 / F6 / F8", "Tags On / Normal / Source view"),
-            ("F7", "Validate"),
-            ("Ctrl+Shift+T", "Track changes on / off"),
-            ("Ctrl+Shift+M", "New comment"),
-            ("Ctrl+Shift+A / R", "Accept / reject all changes"),
-            ("Ctrl+S, Ctrl+Shift+S", "Save, save as"),
-            ("Ctrl+O, Ctrl+N, Ctrl+W", "Open, new, close"),
-            ("Ctrl++ / Ctrl+- / Ctrl+0", "Zoom in / out / reset"),
+            (
+                "Files",
+                &[
+                    ("Ctrl+N / Ctrl+O", "New, open"),
+                    ("Ctrl+S / Ctrl+Shift+S", "Save, save as"),
+                    ("Ctrl+W", "Close"),
+                    ("Ctrl+,", "Preferences"),
+                ],
+            ),
         ];
-        egui::Window::new("Keyboard shortcuts")
-            .open(&mut self.shortcuts_open)
-            .resizable(false)
+        let (x, res) = crate::ui::Dialog::new("Keyboard shortcuts")
+            .width(560.0)
+            .modeless()
             .show(ctx, |ui| {
-                egui::Grid::new("keys")
-                    .num_columns(2)
-                    .striped(true)
-                    .spacing([16.0, 4.0])
+                egui::ScrollArea::vertical()
+                    .max_height((ui.ctx().content_rect().height() - 200.0).max(240.0))
                     .show(ui, |ui| {
-                        for (k, what) in KEYS {
-                            ui.label(RichText::new(*k).monospace());
-                            ui.label(*what);
-                            ui.end_row();
+                        for (gi, (group, keys)) in GROUPS.iter().enumerate() {
+                            if gi > 0 {
+                                ui.add_space(6.0);
+                            }
+                            crate::ui::section(ui, group);
+                            egui::Grid::new(("keys", gi))
+                                .num_columns(2)
+                                .spacing([16.0, 6.0])
+                                .min_col_width(220.0)
+                                .show(ui, |ui| {
+                                    for (k, what) in keys.iter() {
+                                        crate::ui::kbd(ui, k);
+                                        ui.label(*what);
+                                        ui.end_row();
+                                    }
+                                });
                         }
                     });
+                crate::ui::dialog_footer(ui, Some(("Close", true)), None, |_| {})
             });
+        if x || res.is_some_and(|r| r.confirmed) {
+            self.shortcuts_open = false;
+        }
     }
 
     fn show_recovery(&mut self, ctx: &egui::Context) {
@@ -4230,24 +4557,36 @@ impl XylemApp {
         }
         let mut open_items = Vec::new();
         let mut discard_all = false;
-        egui::Window::new("Recover unsaved work")
-            .collapsible(false)
-            .resizable(false)
+        let p = crate::ui::palette(ctx);
+        crate::ui::Dialog::new("Recover unsaved work")
+            .width(480.0)
             .show(ctx, |ui| {
-                ui.label("Xylem closed without saving these documents. Open the recovered copies?");
-                ui.add_space(4.0);
+                crate::ui::notice(
+                    ui,
+                    crate::ui::Tone::Warning,
+                    "Xylem closed without saving these documents.",
+                );
+                ui.add_space(8.0);
                 for (k, r) in self.recovery.iter().enumerate() {
                     ui.horizontal(|ui| {
-                        ui.label(r.describe());
-                        if ui.button("Open").clicked() {
-                            open_items.push(k);
-                        }
+                        ui.label(RichText::new(crate::ui::icon::FILE_TEXT).color(p.text_muted));
+                        ui.add(egui::Label::new(r.describe()).truncate());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if crate::ui::primary_button(ui, "Recover").clicked() {
+                                open_items.push(k);
+                            }
+                        });
                     });
                 }
-                ui.add_space(4.0);
-                if ui.button("Discard all").clicked() {
-                    discard_all = true;
-                }
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    crate::ui::muted(ui, "Discarded copies cannot be brought back.");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if crate::ui::button(ui, "Discard all").clicked() {
+                            discard_all = true;
+                        }
+                    });
+                });
             });
         for k in open_items.into_iter().rev() {
             let r = self.recovery.remove(k);
@@ -4419,36 +4758,37 @@ fn table_menu(ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
     }
 }
 
-fn path_pref(
-    ui: &mut egui::Ui,
-    label: &str,
-    value: &mut Option<PathBuf>,
-    folder: bool,
-    changed: &mut bool,
-) {
+/// A file or folder setting: the current path, a Choose button and a
+/// clear button.
+fn path_pref(ui: &mut egui::Ui, value: &mut Option<PathBuf>, folder: bool, changed: &mut bool) {
+    use crate::ui::{icon, palette};
+    let p = palette(ui.ctx());
     ui.horizontal(|ui| {
-        ui.label(label);
-        ui.label(
-            RichText::new(
-                value
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "(not set)".into()),
-            )
-            .weak(),
-        );
-        if ui.small_button("Choose…").clicked() {
-            let picked = if folder {
-                rfd::FileDialog::new().pick_folder()
-            } else {
-                rfd::FileDialog::new().pick_file()
-            };
-            if let Some(p) = picked {
-                *value = Some(p);
+        let text = value
+            .as_ref()
+            .map(|v| v.display().to_string())
+            .unwrap_or_else(|| "Not set".into());
+        let color = if value.is_some() {
+            p.text
+        } else {
+            p.text_faint
+        };
+        ui.add(egui::Label::new(RichText::new(&text).color(color)).truncate())
+            .on_hover_text(&text);
+        if crate::ui::button(ui, "Choose…").clicked() {
+            let picked = crate::script::file_dialog(|| {
+                if folder {
+                    rfd::FileDialog::new().pick_folder()
+                } else {
+                    rfd::FileDialog::new().pick_file()
+                }
+            });
+            if let Some(path) = picked {
+                *value = Some(path);
                 *changed = true;
             }
         }
-        if value.is_some() && ui.small_button("✕").clicked() {
+        if value.is_some() && crate::ui::icon_button(ui, icon::X, "Clear", None).clicked() {
             *value = None;
             *changed = true;
         }
