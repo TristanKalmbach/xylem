@@ -50,6 +50,13 @@ cargo run --release -p xylem-customize --bin xylem-import -- --all <root> <out-r
 
 Put the output folders in a package folder; the default is `%APPDATA%\Xylem\doctypes` on Windows. Documents are matched to packages by root element, schema location, DOCTYPE public ID or file name. You can also import from inside the editor with File › Import XMAX customization.
 
+## Sharing settings with a team
+
+A team can keep its doctype packages, schemas, BREX and dictionaries in one
+shared folder and point every installation at it with a small
+`xylem-team.toml`. Xylem reads it from `XYLEM_TEAM_CONFIG`, from next to the
+executable, or from the config folder; see [docs/team-setup.md](docs/team-setup.md).
+
 ## S1000D schemas
 
 Xylem never downloads schemas. Get them from www.s1000d.org (each issue's

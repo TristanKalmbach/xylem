@@ -130,6 +130,8 @@ struct ContextMenu {
 
 pub struct XylemApp {
     pub settings: Settings,
+    /// Shared team defaults (see `team.rs`); never written back.
+    team: crate::team::TeamConfig,
     registry: DoctypeRegistry,
     catalog: xylem_schema::Catalog,
     docs: Vec<DocState>,
@@ -198,10 +200,12 @@ impl XylemApp {
             });
         }
         install_builtin_packages();
+        let team = crate::team::load();
         let mut app = Self {
-            registry: DoctypeRegistry::scan(&settings.package_dirs),
-            catalog: Self::load_catalog(&settings),
+            registry: DoctypeRegistry::scan(&all_package_dirs(&team, &settings)),
+            catalog: Self::load_catalog(&settings, &team),
             settings,
+            team,
             docs: Vec::new(),
             active: 0,
             next_id: 1,
@@ -244,17 +248,18 @@ impl XylemApp {
         app
     }
 
-    fn load_catalog(settings: &Settings) -> xylem_schema::Catalog {
+    fn load_catalog(settings: &Settings, team: &crate::team::TeamConfig) -> xylem_schema::Catalog {
         let mut cat = settings
             .catalog
             .as_ref()
+            .or(team.catalog.as_ref())
             .and_then(|p| xylem_schema::Catalog::load(p).ok())
             .unwrap_or_default();
         // Without a configured folder, use `<config>/schemas/s1000d` if present.
         let fallback = crate::settings::config_dir()
             .map(|c| c.join("schemas").join("s1000d"))
             .filter(|p| p.is_dir());
-        if let Some(root) = settings.s1000d_schema_root.clone().or(fallback) {
+        if let Some(root) = settings.s1000d_schema_root.clone().or_else(|| team.s1000d_schemas.clone()).or(fallback) {
             crate::s1000d_ui::add_s1000d_catalog(&mut cat, &root);
         }
         cat
@@ -263,8 +268,12 @@ impl XylemApp {
     fn load_speller(&mut self) {
         self.speller = if self.settings.spell_check {
             Speller::load(
-                self.settings.dictionary_dir.as_deref(),
-                &self.settings.dictionary_lang,
+                self.settings.dictionary_dir.as_deref().or(self.team.dictionary_dir.as_deref()),
+                self.team
+                    .dictionary_lang
+                    .as_deref()
+                    .filter(|_| self.settings.dictionary_lang == Settings::default().dictionary_lang)
+                    .unwrap_or(&self.settings.dictionary_lang),
             )
         } else {
             None
@@ -812,8 +821,8 @@ impl XylemApp {
             Cmd::Preferences => self.dialogs.prefs = true,
             Cmd::About => self.dialogs.about = true,
             Cmd::ReloadPackages => {
-                self.registry = DoctypeRegistry::scan(&self.settings.package_dirs);
-                self.catalog = Self::load_catalog(&self.settings);
+                self.registry = DoctypeRegistry::scan(&all_package_dirs(&self.team, &self.settings));
+                self.catalog = Self::load_catalog(&self.settings, &self.team);
                 let n = self.registry.packages().len();
                 let errs = self.registry.errors().len();
                 self.toast(
@@ -1118,11 +1127,11 @@ impl XylemApp {
     }
 
     fn run_reload(&mut self) {
-        self.registry = DoctypeRegistry::scan(&self.settings.package_dirs);
+        self.registry = DoctypeRegistry::scan(&all_package_dirs(&self.team, &self.settings));
     }
 
     fn check_brex(&mut self) {
-        let path = match self.settings.brex.clone().filter(|p| p.exists()) {
+        let path = match self.settings.brex.clone().or_else(|| self.team.brex.clone()).filter(|p| p.exists()) {
             Some(p) => p,
             None => match rfd::FileDialog::new()
                 .set_title("Choose a BREX data module")
@@ -3027,6 +3036,17 @@ impl XylemApp {
             }
         }
     }
+}
+
+/// Team package folders first, then the user's own.
+fn all_package_dirs(team: &crate::team::TeamConfig, settings: &Settings) -> Vec<PathBuf> {
+    let mut dirs = team.package_dirs.clone();
+    for d in &settings.package_dirs {
+        if !dirs.contains(d) {
+            dirs.push(d.clone());
+        }
+    }
+    dirs
 }
 
 fn table_menu(ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {

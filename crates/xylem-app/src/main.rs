@@ -12,6 +12,7 @@ mod s1000d_ui;
 mod script;
 mod settings;
 mod spell;
+mod team;
 mod view;
 
 use std::path::PathBuf;
