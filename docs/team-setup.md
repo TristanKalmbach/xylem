@@ -46,9 +46,11 @@ include = "//fileserver/xylem/xylem-team.toml"
 A user's own Preferences win over single values (schema folder, BREX,
 dictionary), so someone can try a different BREX without touching the shared
 file. Team package folders are scanned before the user's own. When several
-packages match a document equally well, the first one found wins: the team's,
-and within a folder the one whose folder name sorts first. Give a package a
-higher `priority` in its `doctype.toml` to prefer it.
+packages match a document, the higher `priority` wins, then the closer match
+(a package that matches the schema location and the root element beats one
+that matches the schema location alone). If that still leaves a tie, the
+first one found wins: the team's, and within a folder the one whose folder
+name sorts first.
 
 Unknown keys are reported rather than rejected, so older installations keep
 working when the shared file gains new settings. Problems with the file show
