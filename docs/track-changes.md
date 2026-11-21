@@ -1,9 +1,11 @@
 # Tracked changes and comments
 
-Xylem records review changes the way XMetaL does: as processing
+Xylem records review changes in XMetaL's style, as processing
 instructions inside the document. A reviewed file is still ordinary XML. It
 validates as before, because processing instructions sit outside the content
-model, and it can go back and forth between Xylem and XMetaL users.
+model. The markup is meant to match XMetaL's so files can go back and forth
+between Xylem and XMetaL users, but that has not been checked yet; see
+"Assumptions" below.
 
 ## Using it
 

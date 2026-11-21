@@ -2767,6 +2767,7 @@ impl XylemApp {
         let mut apply = None;
         let mut restart = None;
         egui::Window::new("Check for updates")
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 120.0])
             .collapsible(false)
             .resizable(false)
             .open(&mut open)

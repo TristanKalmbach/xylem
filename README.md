@@ -19,8 +19,8 @@ What it does:
   byte, including entities, quoting, whitespace and encoding.
 - Has CALS and HTML tables, find and replace, spell checking with Hunspell
   dictionaries, a structure tree, an attribute inspector and an issues list.
-- Tracks changes and keeps review comments in XMetaL's markup, so reviewed
-  files round-trip with XMetaL users; see
+- Tracks changes and keeps review comments as XMetaL-style processing
+  instructions (not yet checked against files written by XMetaL itself); see
   [docs/track-changes.md](docs/track-changes.md).
 - Finds and replaces across a folder of files (Edit › Find in files). It
   searches text, and attribute values on request, but never tags or
