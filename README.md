@@ -17,6 +17,12 @@ What it does:
   byte, including entities, quoting, whitespace and encoding.
 - Has CALS and HTML tables, find and replace, spell checking with Hunspell
   dictionaries, a structure tree, an attribute inspector and an issues list.
+- Finds and replaces across a folder of files (Edit › Find in files). It
+  searches text, and attribute values on request, but never tags or
+  comments, and rewrites only the matched text in each file.
+- Exports a styled, standalone HTML page that looks like the Normal view
+  (File › Export to HTML). File › Print preview opens it in your browser to
+  print or save as PDF.
 - For S1000D: a new data module wizard, DMC and CSDB file naming, BREX
   checking, dmRef navigation and a built-in stylesheet.
 - Converts XMAX customizations (`.ctm` folders and `.xac` archives) into Xylem
@@ -78,6 +84,7 @@ own, or:
 | F5 / F6 / F8 | Tags On / Normal / Source view |
 | F7 | validate |
 | Ctrl+F | find and replace |
+| Ctrl+Shift+F | find and replace in files |
 | Ctrl+click | follow a link (IDREF, href, dmRef) |
 | Ctrl+Shift+V | paste as plain text |
 | Ctrl+Space | insert an element (or surround the selection) |
@@ -111,7 +118,9 @@ The app has a scripted end-to-end harness for UI testing:
 XYLEM_SCRIPT="click 500 280;;type Hello;;key Enter;;shot out.png;;save out.xml;;quit" xylem file.xml
 ```
 
-The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `shot PATH`, `save PATH` and `quit`.
+The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `shot PATH`, `save PATH`, `pick PATH` (the answer the next file or folder dialog gives) and `quit`.
+
+Scripted runs never open a web browser: Print preview writes its page to `xylem-print` in the temporary folder and reports the path. Set `XYLEM_NO_BROWSER=1` to get the same behaviour outside the harness.
 
 See [PARITY.md](PARITY.md) for the XMAX feature checklist.
 

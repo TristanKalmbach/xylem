@@ -17,6 +17,9 @@ use xylem_dom::{Document, NodeId, NodeKind};
 use xylem_edit::pos::{container, first_editable};
 use xylem_edit::{EditError, Pos, Rules, Selection};
 
+mod export_ui;
+mod find_files_ui;
+
 /// Commands reachable from menus, the toolbar, shortcuts and context menus.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Cmd {
@@ -36,6 +39,9 @@ pub enum Cmd {
     SelectAll,
     SelectElement,
     Find,
+    FindInFiles,
+    ExportHtml,
+    PrintPreview,
     View(View),
     ZoomIn,
     ZoomOut,
@@ -143,6 +149,7 @@ pub struct XylemApp {
     fonts: FontSet,
     panel: PanelState,
     find: FindState,
+    find_files: find_files_ui::FindFilesState,
     dialogs: Dialogs,
     toasts: Vec<(String, f64, bool)>,
     context_menu: Option<ContextMenu>,
@@ -216,6 +223,7 @@ impl XylemApp {
             fonts,
             panel: PanelState::default(),
             find: FindState::default(),
+            find_files: Default::default(),
             dialogs: Dialogs::default(),
             toasts: Vec::new(),
             context_menu: None,
@@ -643,6 +651,9 @@ impl XylemApp {
                 });
             }
             Cmd::Find => self.find.open = true,
+            Cmd::FindInFiles => self.open_find_in_files(),
+            Cmd::ExportHtml => self.export_html(),
+            Cmd::PrintPreview => self.print_preview(),
             Cmd::View(v) => self.set_view(v),
             Cmd::ZoomIn => self.settings.zoom = (self.settings.zoom + 0.1).min(3.0),
             Cmd::ZoomOut => self.settings.zoom = (self.settings.zoom - 0.1).max(0.5),
@@ -1346,6 +1357,10 @@ impl XylemApp {
             if i.consume_shortcut(&sh(Key::N)) {
                 cmds.push(Cmd::New);
             }
+            // Before Ctrl+F, which would otherwise match with Shift held too.
+            if i.consume_shortcut(&shs(Key::F)) {
+                cmds.push(Cmd::FindInFiles);
+            }
             if i.consume_shortcut(&sh(Key::F)) || i.consume_shortcut(&sh(Key::H)) {
                 cmds.push(Cmd::Find);
             }
@@ -1454,6 +1469,22 @@ impl XylemApp {
                     cmds.push(Cmd::Close(self.active));
                 }
                 ui.separator();
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Export to HTML…"))
+                    .clicked()
+                {
+                    cmds.push(Cmd::ExportHtml);
+                }
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Print preview"))
+                    .on_hover_text(
+                        "Opens the document in your web browser, ready to print or save as PDF",
+                    )
+                    .clicked()
+                {
+                    cmds.push(Cmd::PrintPreview);
+                }
+                ui.separator();
                 if ui.button("Import XMAX customization…").clicked() {
                     cmds.push(Cmd::ImportXmax);
                 }
@@ -1486,6 +1517,10 @@ impl XylemApp {
                     if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
                         cmds.push(c);
                     }
+                }
+                // Works on files, so it needs no open document.
+                if ui.button("Find in files…\tCtrl+Shift+F").clicked() {
+                    cmds.push(Cmd::FindInFiles);
                 }
             });
             ui.menu_button("Insert", |ui| {
@@ -2392,6 +2427,7 @@ impl XylemApp {
 
     fn dialogs(&mut self, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
         self.find_window(ctx);
+        self.find_files_window(ctx);
         if self.dialogs.about {
             egui::Window::new("About Xylem").collapsible(false).resizable(false).open(&mut self.dialogs.about).show(ctx, |ui| {
                 ui.heading("Xylem");
@@ -2819,11 +2855,8 @@ impl XylemApp {
                                 if r.is_read_only(&ed.doc, ed.doc.parent(node).unwrap_or(node)) {
                                     continue;
                                 }
-                                let mut s = ed.doc.text(node).unwrap_or("").to_string();
-                                if range.end <= s.len() {
-                                    s.replace_range(range, &with);
-                                    ed.doc.set_text(node, s);
-                                }
+                                // Keeps the rest of the node's source as written.
+                                ed.doc.replace_text(node, range, &with);
                             }
                             Ok(())
                         })
