@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic S1000D-2.x-style DTD driver. -->
+<!ENTITY % draft "IGNORE">
+<!ENTITY % ISOEntities PUBLIC "ISO 8879-1986//ENTITIES Added Latin 1//EN//XML" "isolat1.ent">
+%ISOEntities;
+<!ENTITY % common SYSTEM "common.mod">
+%common;
+
+<!ENTITY % extra.blocks "note">
+<!ENTITY % blocks "para | randlist | %extra.blocks;">
+
+<!-- The data module root. -->
+<!ELEMENT dmodule (idstatus, content) >
+<!ATTLIST dmodule
+    %ident.att;
+    xmlns:xsi CDATA #IMPLIED
+    version CDATA #FIXED "2.3" >
+<!ELEMENT idstatus (#PCDATA) >
+<!ELEMENT content ((%blocks;)+, figure*) >
+<!ELEMENT para (#PCDATA | xref | emph)* >
+<!ELEMENT emph (#PCDATA) >
+<!ELEMENT note (para+) >
+<!ELEMENT randlist (item, item+) >
+<!ELEMENT item (para) >
+<!ELEMENT xref EMPTY >
+<!ATTLIST xref xrefid IDREF #REQUIRED
+               xidtype (figure | table | para) "para" >
+<!ELEMENT figure (title?, graphic+) >
+<!ELEMENT title (#PCDATA) >
+<!ELEMENT graphic EMPTY >
+<!ATTLIST graphic
+    boardno ENTITY #REQUIRED
+    fmt NOTATION (cgm | tiff) #IMPLIED
+    reprowid NMTOKEN #IMPLIED >
+
+<![ %draft; [
+<!ELEMENT remarks (#PCDATA) >
+]]>
+<![ INCLUDE [
+<!ELEMENT legacy (#PCDATA) >
+<![ IGNORE [ <!ELEMENT ignored (#PCDATA) > ]]>
+]]>
+
+<!NOTATION cgm PUBLIC "-//USA-DOD//NOTATION Computer Graphics Metafile//EN">
+<!NOTATION tiff SYSTEM "tiff">
+<!ENTITY company "Acme &amp; Co">
+<!ENTITY chapter1 SYSTEM "chapter1.xml">

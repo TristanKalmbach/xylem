@@ -1,0 +1,27 @@
+[package]
+name = "xylem-app"
+version = "0.1.0"
+edition = "2024"
+description = "Xylem: a structured XML and S1000D editor"
+
+[[bin]]
+name = "xylem"
+path = "src/main.rs"
+
+[dependencies]
+xylem-dom = { workspace = true }
+xylem-edit = { workspace = true }
+xylem-style = { workspace = true }
+xylem-schema = { workspace = true }
+xylem-customize = { workspace = true }
+xylem-s1000d = { workspace = true }
+xylem-xpath = { workspace = true }
+eframe = { version = "0.33", features = ["persistence"] }
+egui = "0.33"
+rfd = "0.18"
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
+regex = "1"
+spellbook = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff"] }

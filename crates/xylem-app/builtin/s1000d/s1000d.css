@@ -1,0 +1,138 @@
+/* Xylem built-in stylesheet for S1000D data modules and publication modules.
+   Covers issue 4.x-6.0 markup and legacy (2.x/3.0) markup. */
+
+dmodule, pm { display: block; font-family: "Segoe UI", Arial, sans-serif; font-size: 11pt; }
+
+/* ---------- Identification and status (4.x+) ---------- */
+identAndStatusSection, idstatus { display: block; background-color: #eef1f6; border: 1px solid #c5ccd8; padding: 6px; margin-bottom: 12px; font-size: 9pt; color: #334; }
+dmAddress, dmStatus, pmAddress, pmStatus, dmaddres, status { display: block; }
+dmIdent, pmIdent, dmAddressItems, pmAddressItems { display: block; }
+dmCode { display: block; font-family: Consolas, monospace; font-weight: bold; }
+dmCode:before { content: "DMC-" attr(modelIdentCode) "-" attr(systemDiffCode) "-" attr(systemCode) "-" attr(subSystemCode) attr(subSubSystemCode) "-" attr(assyCode) "-" attr(disassyCode) attr(disassyCodeVariant) "-" attr(infoCode) attr(infoCodeVariant) "-" attr(itemLocationCode); }
+pmCode:before { content: "PMC-" attr(modelIdentCode) "-" attr(pmIssuer) "-" attr(pmNumber) "-" attr(pmVolume); font-family: Consolas, monospace; font-weight: bold; }
+issueInfo:before { content: "Issue " attr(issueNumber) "-" attr(inWork) "   "; }
+language:before { content: "Language " attr(languageIsoCode) "-" attr(countryIsoCode) "   "; }
+issueDate:before { content: "Date " attr(year) "-" attr(month) "-" attr(day); }
+dmTitle, pmTitle, dmtitle { display: block; font-size: 15pt; font-weight: bold; color: #1b3a6b; margin: 6px 0; font-family: "Segoe UI", Arial, sans-serif; }
+techName, techname { display: inline; }
+infoName, infoname { display: inline; }
+infoName:before, infoname:before { content: " - "; }
+security:before { content: "Security class " attr(securityClassification) "   "; }
+responsiblePartnerCompany, originator, rpc, orig { display: block; }
+responsiblePartnerCompany:before { content: "Responsible: " attr(enterpriseCode) " "; }
+originator:before { content: "Originator: " attr(enterpriseCode) " "; }
+applic, brexDmRef, qualityAssurance, reasonForUpdate, remarks, systemBreakdownCode, functionalItemCode, skillLevel, dataRestrictions, logo { display: block; margin-top: 2px; }
+applic:before { content: "Applicability: "; font-weight: bold; }
+brexDmRef:before { content: "BREX: "; font-weight: bold; }
+qualityAssurance:before { content: "Quality assurance: "; font-weight: bold; }
+unverified:before { content: "unverified"; }
+firstVerification:before { content: "first verification (" attr(verificationType) ")"; }
+
+/* ---------- Content ---------- */
+content { display: block; counter-reset: lpara1 step1; }
+description, procedure, faultIsolation, faultReporting, crew, illustratedPartsCatalog, process, brex, commonRepository { display: block; }
+levelledPara { display: block; margin-top: 8px; counter-increment: lpara1; }
+levelledPara levelledPara { margin-left: 12px; }
+levelledPara > title { display: block; font-size: 13pt; font-weight: bold; color: #1b3a6b; margin: 4px 0; }
+title { display: block; font-weight: bold; }
+para { display: block; margin: 4px 0; }
+emphasis { font-weight: bold; }
+emphasis[emphasisType="em02"] { font-style: italic; font-weight: normal; }
+emphasis[emphasisType="em03"] { text-decoration: underline; font-weight: normal; }
+emphasis[emphasisType="em05"] { text-decoration: line-through; font-weight: normal; }
+superScript { vertical-align: super; }
+subScript { vertical-align: sub; }
+verbatimText { font-family: Consolas, monospace; }
+acronym, acronymTerm { display: inline; }
+acronymDefinition { display: none; }
+quantity, quantityValue, quantityTolerance { display: inline; }
+internalRef { color: #0b5fa5; text-decoration: underline; }
+internalRef:before { content: "[" attr(internalRefId) "]"; color: #0b5fa5; }
+dmRef { color: #0b5fa5; }
+dmRef:before { content: "→ "; }
+dmRefIdent, dmRefAddressItems { display: inline; }
+dmRefAddressItems { display: none; }
+externalPubRef { color: #0b5fa5; }
+
+/* Lists */
+randomList, sequentialList, definitionList { display: block; margin-left: 22px; margin-top: 4px; }
+listItem { display: list-item; list-style-type: disc; }
+sequentialList > listItem { list-style-type: decimal; }
+definitionListItem { display: block; }
+listItemTerm { display: block; font-weight: bold; }
+listItemDefinition { display: block; margin-left: 20px; }
+
+/* Warnings, cautions, notes */
+warning { display: block; border: 2px solid #c0392b; background-color: #fdecea; padding: 6px; margin: 8px 0; }
+warning:before { content: "WARNING"; font-weight: bold; color: #c0392b; }
+caution { display: block; border: 2px solid #d68910; background-color: #fef5e7; padding: 6px; margin: 8px 0; }
+caution:before { content: "CAUTION"; font-weight: bold; color: #b9770e; }
+note { display: block; border-left: 4px solid #2e86c1; padding-left: 8px; margin: 6px 0; }
+note:before { content: "NOTE"; font-weight: bold; color: #2e86c1; }
+warningAndCautionPara, notePara, attentionRandomList { display: block; }
+warningsAndCautions, warningsAndCautionsRef { display: block; }
+
+/* Procedures */
+preliminaryRqmts, closeRqmts, mainProcedure { display: block; margin-top: 8px; counter-reset: step1; }
+preliminaryRqmts:before { content: "Preliminary requirements"; font-weight: bold; font-size: 12pt; color: #1b3a6b; }
+mainProcedure:before { content: "Procedure"; font-weight: bold; font-size: 12pt; color: #1b3a6b; }
+closeRqmts:before { content: "Requirements after job completion"; font-weight: bold; font-size: 12pt; color: #1b3a6b; }
+proceduralStep { display: block; counter-increment: step1; margin: 4px 0 4px 18px; }
+mainProcedure > proceduralStep:before { content: counter(step1) ". "; font-weight: bold; }
+proceduralStep proceduralStep { counter-increment: step2; }
+reqCondGroup, reqPersons, reqSupportEquips, reqSupplies, reqSpares, reqSafety, reqTechInfoGroup { display: block; margin-left: 12px; }
+noConds:before, noSupportEquips:before, noSupplies:before, noSpares:before, noSafety:before { content: "None"; font-style: italic; }
+
+/* Fault isolation */
+isolationProcedure, isolationMainProcedure, isolationStep, isolationProcedureEnd, faultDescr, action, question, answer, yesAnswer, noAnswer { display: block; margin: 3px 0; }
+question:before { content: "Q: "; font-weight: bold; }
+yesAnswer:before { content: "Yes → "; font-weight: bold; }
+noAnswer:before { content: "No → "; font-weight: bold; }
+
+/* Figures and tables */
+figure { display: block; margin: 8px 0; }
+figure > title { text-align: center; font-style: italic; font-weight: normal; }
+graphic { display: block; }
+table { display: table; margin: 8px 0; }
+table > title { display: block; font-weight: bold; }
+tgroup, tbody, thead, tfoot { display: table-row-group; }
+colspec, spanspec { display: none; }
+row { display: table-row; }
+entry { display: table-cell; }
+thead entry { font-weight: bold; background-color: #e8eef7; }
+
+/* Illustrated parts data */
+catalogSeqNumber { display: block; border-top: 1px solid #ccd; padding: 4px; }
+catalogSeqNumber:before { content: "Item " attr(item) "  "; font-weight: bold; }
+itemSeqNumber, partRef, partIdent, descrForPart, quantityPerNextHigherAssy { display: block; margin-left: 12px; }
+partRef:before { content: "Part " attr(partNumberValue) "  CAGE " attr(manufacturerCodeValue); }
+
+/* BREX */
+structureObjectRuleGroup, structureObjectRule, contextRules, snsRules, notationRuleList { display: block; margin: 3px 0; }
+objectPath { display: block; font-family: Consolas, monospace; color: #6c3483; }
+objectUse { display: block; font-style: italic; }
+objectValue { display: block; margin-left: 12px; }
+objectValue:before { content: "value " attr(valueAllowed) ": "; font-family: Consolas, monospace; }
+
+/* ---------- Legacy (2.x / 3.0) markup ---------- */
+dmc, avee { display: block; font-family: Consolas, monospace; font-weight: bold; }
+avee:before { content: "DMC-"; }
+modelic, sdc, chapnum, section, subsect, subject, discode, discodev, incode, incodev, itemloc { display: inline; }
+sdc:before, chapnum:before, discode:before, incode:before, itemloc:before { content: "-"; }
+issno:before { content: "Issue " attr(issno) "-" attr(inwork) "   "; }
+issdate:before { content: "Date " attr(year) "-" attr(month) "-" attr(day); }
+para0 { display: block; margin-top: 8px; }
+para0 > title { font-size: 13pt; color: #1b3a6b; }
+subpara1, subpara2, subpara3, subpara4 { display: block; margin-left: 12px; }
+step1, step2, step3, step4, step5 { display: block; margin: 4px 0 4px 18px; }
+prelreqs, mainfunc, closereqs { display: block; margin-top: 8px; }
+mainfunc:before { content: "Procedure"; font-weight: bold; font-size: 12pt; color: #1b3a6b; }
+randlist, seqlist { display: block; margin-left: 22px; }
+item { display: list-item; list-style-type: disc; }
+seqlist > item { list-style-type: decimal; }
+refdm { color: #0b5fa5; }
+refdm:before { content: "→ "; }
+xref { color: #0b5fa5; text-decoration: underline; }
+xref:before { content: "[" attr(xrefid) "]"; }
+
+$COMMENT { color: green; font-style: italic; }

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:group name="blocks">
+    <xs:choice>
+      <xs:element ref="para"/>
+      <xs:element ref="list"/>
+      <xs:element ref="figure"/>
+      <xs:element ref="admonition"/>
+      <xs:element ref="extension"/>
+    </xs:choice>
+  </xs:group>
+
+  <xs:attributeGroup name="commonAtts">
+    <xs:attribute name="id" type="xs:ID">
+      <xs:annotation><xs:documentation>Unique identifier.</xs:documentation></xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="status" default="draft">
+      <xs:simpleType>
+        <xs:restriction base="xs:NMTOKEN">
+          <xs:enumeration value="draft"/>
+          <xs:enumeration value="final"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:attributeGroup>
+
+  <xs:element name="para">
+    <xs:annotation><xs:documentation>A paragraph.</xs:documentation></xs:annotation>
+    <xs:complexType mixed="true">
+      <xs:choice minOccurs="0" maxOccurs="unbounded">
+        <xs:element ref="emph"/>
+        <xs:element ref="xref"/>
+      </xs:choice>
+      <xs:attribute name="id" type="xs:ID"/>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="emph">
+    <xs:complexType>
+      <xs:simpleContent>
+        <xs:extension base="xs:string">
+          <xs:attribute name="role" type="xs:NMTOKEN"/>
+        </xs:extension>
+      </xs:simpleContent>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="xref">
+    <xs:complexType>
+      <xs:attribute name="target" type="xs:IDREF" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="list">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="item" minOccurs="2" maxOccurs="5">
+          <xs:complexType>
+            <xs:sequence><xs:element ref="para" maxOccurs="unbounded"/></xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="type" use="required">
+        <xs:simpleType>
+          <xs:restriction base="xs:NMTOKEN">
+            <xs:enumeration value="bullet"/>
+            <xs:enumeration value="ordered"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:attribute>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="figure">
+    <xs:complexType>
+      <xs:sequence>
+        <!-- 'title' here is an element-only local declaration, unlike book/title. -->
+        <xs:element name="title">
+          <xs:complexType><xs:sequence><xs:element ref="para"/></xs:sequence></xs:complexType>
+        </xs:element>
+        <xs:element name="graphic">
+          <xs:complexType>
+            <xs:attribute name="width" type="widthType"/>
+            <xs:attribute name="scale">
+              <xs:simpleType>
+                <xs:restriction base="xs:decimal">
+                  <xs:minExclusive value="0"/>
+                  <xs:maxInclusive value="10"/>
+                </xs:restriction>
+              </xs:simpleType>
+            </xs:attribute>
+            <xs:attribute name="kind" type="xs:string" fixed="raster"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:simpleType name="widthType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\d+(\.\d+)?(px|pt|mm)"/>
+      <xs:maxLength value="8"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Substitution group with an abstract head. -->
+  <xs:element name="admonition" abstract="true" type="admonitionType"/>
+  <xs:element name="warning" substitutionGroup="admonition"/>
+  <xs:element name="caution" substitutionGroup="admonition"/>
+  <xs:complexType name="admonitionType">
+    <xs:sequence><xs:element ref="para" maxOccurs="unbounded"/></xs:sequence>
+  </xs:complexType>
+
+  <!-- Wildcards. -->
+  <xs:element name="extension">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="lax">
+          <xs:complexType><xs:sequence><xs:any processContents="lax" minOccurs="0" maxOccurs="unbounded"/></xs:sequence></xs:complexType>
+        </xs:element>
+        <xs:element name="skip" minOccurs="0">
+          <xs:complexType><xs:sequence><xs:any processContents="skip" minOccurs="0" maxOccurs="unbounded"/></xs:sequence>
+          <xs:anyAttribute processContents="skip"/></xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="dateStamp">
+    <xs:simpleType>
+      <xs:restriction base="xs:date"/>
+    </xs:simpleType>
+  </xs:element>
+</xs:schema>

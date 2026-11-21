@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:n="urn:example:notes"
+           targetNamespace="urn:example:notes" elementFormDefault="qualified">
+  <xs:element name="notes">
+    <xs:complexType>
+      <xs:sequence><xs:element name="note" type="xs:string" maxOccurs="unbounded"/></xs:sequence>
+      <xs:attribute name="count" type="xs:nonNegativeInteger"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

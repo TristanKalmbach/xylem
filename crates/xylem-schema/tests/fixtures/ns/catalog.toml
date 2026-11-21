@@ -1,0 +1,2 @@
+[rewrite]
+"http://www.s1000d.org/S1000D_4-1/xml_schema_flat/" = "."

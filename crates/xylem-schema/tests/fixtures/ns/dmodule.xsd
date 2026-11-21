@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:xlink="http://www.w3.org/1999/xlink"
+           xmlns:dc="http://www.purl.org/dc/elements/1.1/"
+           elementFormDefault="unqualified">
+  <xs:import namespace="http://www.w3.org/1999/xlink"
+             schemaLocation="http://www.s1000d.org/S1000D_4-1/xml_schema_flat/xlink.xsd"/>
+  <xs:import namespace="http://www.purl.org/dc/elements/1.1/" schemaLocation="dc.xsd"/>
+  <xs:import namespace="http://www.w3.org/XML/1998/namespace"/>
+  <xs:element name="dmodule">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="dc:title" minOccurs="0"/>
+        <xs:element name="content">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="refs" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="dmRef" maxOccurs="unbounded">
+                      <xs:complexType>
+                        <xs:attributeGroup ref="xlink:XLINKATT"/>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+              <xs:element name="para" type="xs:string" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute ref="xml:lang"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

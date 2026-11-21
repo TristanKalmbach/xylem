@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:complexType name="noteType">
+    <xs:sequence><xs:element name="text" type="xs:string"/></xs:sequence>
+  </xs:complexType>
+  <xs:group name="extra"><xs:sequence><xs:element name="a" type="xs:string"/></xs:sequence></xs:group>
+  <xs:element name="note" type="noteType"/>
+</xs:schema>

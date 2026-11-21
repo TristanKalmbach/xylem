@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample schema for the Xylem "manual" demo doctype. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+  <xs:element name="manual">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="title"/>
+        <xs:element ref="chapter" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="id" type="xs:ID"/>
+      <xs:attribute name="status" default="draft">
+        <xs:simpleType><xs:restriction base="xs:string">
+          <xs:enumeration value="draft"/><xs:enumeration value="review"/><xs:enumeration value="released"/>
+        </xs:restriction></xs:simpleType>
+      </xs:attribute>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="title" type="inline"/>
+  <xs:element name="chapter">
+    <xs:annotation><xs:documentation>A numbered chapter.</xs:documentation></xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="title"/>
+        <xs:group ref="blocks" maxOccurs="unbounded"/>
+        <xs:element ref="section" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="id" type="xs:ID" use="required"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="section">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="title"/>
+        <xs:group ref="blocks" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="id" type="xs:ID"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:group name="blocks">
+    <xs:choice>
+      <xs:element ref="para"/>
+      <xs:element ref="warning"/>
+      <xs:element ref="list"/>
+      <xs:element ref="table"/>
+      <xs:element ref="figure"/>
+      <xs:element ref="code"/>
+    </xs:choice>
+  </xs:group>
+  <xs:complexType name="inline" mixed="true">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element ref="b"/><xs:element ref="i"/><xs:element ref="u"/>
+      <xs:element ref="sup"/><xs:element ref="sub"/><xs:element ref="xref"/>
+    </xs:choice>
+  </xs:complexType>
+  <xs:element name="para" type="inline"/>
+  <xs:element name="b" type="inline"/>
+  <xs:element name="i" type="inline"/>
+  <xs:element name="u" type="inline"/>
+  <xs:element name="sup" type="inline"/>
+  <xs:element name="sub" type="inline"/>
+  <xs:element name="xref">
+    <xs:complexType mixed="true"><xs:attribute name="linkend" type="xs:IDREF" use="required"/></xs:complexType>
+  </xs:element>
+  <xs:element name="code" type="xs:string"/>
+  <xs:element name="warning">
+    <xs:complexType><xs:sequence><xs:element ref="para" maxOccurs="unbounded"/></xs:sequence></xs:complexType>
+  </xs:element>
+  <xs:element name="list">
+    <xs:complexType>
+      <xs:sequence><xs:element ref="item" maxOccurs="unbounded"/></xs:sequence>
+      <xs:attribute name="type" default="bullet">
+        <xs:simpleType><xs:restriction base="xs:token"><xs:enumeration value="bullet"/><xs:enumeration value="numbered"/></xs:restriction></xs:simpleType>
+      </xs:attribute>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="item"><xs:complexType><xs:sequence><xs:element ref="para" maxOccurs="unbounded"/></xs:sequence></xs:complexType></xs:element>
+  <xs:element name="figure">
+    <xs:complexType>
+      <xs:sequence><xs:element ref="title"/><xs:element ref="graphic"/></xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="graphic"><xs:complexType><xs:attribute name="href" type="xs:string" use="required"/></xs:complexType></xs:element>
+  <xs:element name="table">
+    <xs:complexType><xs:sequence><xs:element ref="title" minOccurs="0"/><xs:element ref="tgroup"/></xs:sequence></xs:complexType>
+  </xs:element>
+  <xs:element name="tgroup">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="colspec" minOccurs="0" maxOccurs="unbounded"/>
+        <xs:element ref="thead" minOccurs="0"/>
+        <xs:element ref="tbody"/>
+      </xs:sequence>
+      <xs:attribute name="cols" type="xs:positiveInteger" use="required"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="colspec">
+    <xs:complexType>
+      <xs:attribute name="colname" type="xs:NMTOKEN"/><xs:attribute name="colnum" type="xs:positiveInteger"/><xs:attribute name="colwidth" type="xs:string"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:element name="thead"><xs:complexType><xs:sequence><xs:element ref="row" maxOccurs="unbounded"/></xs:sequence></xs:complexType></xs:element>
+  <xs:element name="tbody"><xs:complexType><xs:sequence><xs:element ref="row" maxOccurs="unbounded"/></xs:sequence></xs:complexType></xs:element>
+  <xs:element name="row"><xs:complexType><xs:sequence><xs:element ref="entry" maxOccurs="unbounded"/></xs:sequence></xs:complexType></xs:element>
+  <xs:element name="entry">
+    <xs:complexType mixed="true">
+      <xs:choice minOccurs="0" maxOccurs="unbounded"><xs:element ref="b"/><xs:element ref="i"/><xs:element ref="para"/></xs:choice>
+      <xs:attribute name="colname" type="xs:NMTOKEN"/><xs:attribute name="namest" type="xs:NMTOKEN"/>
+      <xs:attribute name="nameend" type="xs:NMTOKEN"/><xs:attribute name="morerows" type="xs:nonNegativeInteger"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

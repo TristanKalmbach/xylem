@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <xsd:include schemaLocation="common.xsd"/>
+
+  <xsd:element name="book">
+    <xsd:annotation><xsd:documentation>
+        The root of a book.
+    </xsd:documentation></xsd:annotation>
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="title" type="xsd:string"/>
+        <xsd:element ref="meta" minOccurs="0"/>
+        <xsd:element ref="chapter" maxOccurs="unbounded"/>
+      </xsd:sequence>
+      <xsd:attributeGroup ref="commonAtts"/>
+      <xsd:attribute name="lang" type="xsd:language" default="en"/>
+      <xsd:attribute name="version" type="versionType" use="required"/>
+    </xsd:complexType>
+  </xsd:element>
+
+  <xsd:element name="chapter">
+    <xsd:complexType>
+      <xsd:sequence>
+        <xsd:element name="title" type="inlineTitle"/>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:group ref="blocks"/>
+          <xsd:element ref="section"/>
+        </xsd:choice>
+      </xsd:sequence>
+      <xsd:attributeGroup ref="commonAtts"/>
+    </xsd:complexType>
+  </xsd:element>
+
+  <xsd:element name="section" type="sectionType"/>
+  <xsd:complexType name="sectionType">
+    <xsd:sequence>
+      <xsd:element name="title" type="inlineTitle" minOccurs="0"/>
+      <xsd:group ref="blocks" minOccurs="1" maxOccurs="unbounded"/>
+      <xsd:element ref="section" minOccurs="0" maxOccurs="unbounded"/>
+    </xsd:sequence>
+    <xsd:attributeGroup ref="commonAtts"/>
+  </xsd:complexType>
+
+  <xsd:element name="appendix">
+    <xsd:complexType>
+      <xsd:complexContent>
+        <xsd:extension base="sectionType">
+          <xsd:sequence>
+            <xsd:element name="signoff" type="xsd:string"/>
+          </xsd:sequence>
+          <xsd:attribute name="letter" use="required">
+            <xsd:simpleType>
+              <xsd:restriction base="xsd:string"><xsd:pattern value="[A-Z]"/></xsd:restriction>
+            </xsd:simpleType>
+          </xsd:attribute>
+        </xsd:extension>
+      </xsd:complexContent>
+    </xsd:complexType>
+  </xsd:element>
+
+  <xsd:complexType name="inlineTitle" mixed="true">
+    <xsd:choice minOccurs="0" maxOccurs="unbounded">
+      <xsd:element ref="emph"/>
+    </xsd:choice>
+  </xsd:complexType>
+
+  <xsd:element name="meta">
+    <xsd:complexType>
+      <xsd:all>
+        <xsd:element name="author" type="xsd:string"/>
+        <xsd:element name="year" type="yearType" minOccurs="0"/>
+        <xsd:element name="pages" type="xsd:positiveInteger"/>
+      </xsd:all>
+    </xsd:complexType>
+  </xsd:element>
+
+  <xsd:simpleType name="yearType">
+    <xsd:restriction base="xsd:gYear">
+      <xsd:minInclusive value="1900"/>
+      <xsd:maxInclusive value="2100"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+
+  <xsd:simpleType name="versionType">
+    <xsd:restriction base="xsd:token">
+      <xsd:pattern value="\d+\.\d+"/>
+    </xsd:restriction>
+  </xsd:simpleType>
+</xsd:schema>

@@ -1,0 +1,72 @@
+[doctype]
+name = "S1000D"
+description = "S1000D data modules and publication modules (issues 2.0 to 6.0). Schemas are resolved from the document via the schema catalog."
+version = "1.0"
+
+[match]
+roots = ["dmodule", "pm"]
+schema_locations = ["*s1000d*", "*S1000D*"]
+public_ids = ["S1000D"]
+priority = -10
+
+[files]
+style = "s1000d.css"
+
+[templates.levelledPara]
+xml = '<levelledPara><title><?xm-replace_text Paragraph title?></title><para><?xm-replace_text Paragraph text?></para></levelledPara>'
+
+[templates.proceduralStep]
+xml = '<proceduralStep><para><?xm-replace_text Step text?></para></proceduralStep>'
+
+[templates.warning]
+xml = '<warning><warningAndCautionPara><?xm-replace_text Warning text?></warningAndCautionPara></warning>'
+
+[templates.caution]
+xml = '<caution><warningAndCautionPara><?xm-replace_text Caution text?></warningAndCautionPara></caution>'
+
+[templates.note]
+xml = '<note><notePara><?xm-replace_text Note text?></notePara></note>'
+
+[templates.randomList]
+xml = '<randomList><listItem><para><?xm-replace_text List item?></para></listItem></randomList>'
+
+[templates.sequentialList]
+xml = '<sequentialList><listItem><para><?xm-replace_text List item?></para></listItem></sequentialList>'
+
+[templates.listItem]
+xml = '<listItem><para><?xm-replace_text List item?></para></listItem>'
+
+[templates.emphasis]
+xml = '<emphasis emphasisType="em01"/>'
+
+[templates.figure]
+xml = '<figure><title><?xm-replace_text Figure title?></title><graphic infoEntityIdent="ICN-XXXXX-00000-00001-A-01-1"/></figure>'
+
+[behaviour]
+paragraphs = ["para", "notePara", "warningAndCautionPara"]
+
+[behaviour.followed_by]
+title = "para"
+
+[behaviour.toggles]
+bold = "emphasis"
+superscript = "superScript"
+subscript = "subScript"
+
+[[behaviour.bulleted_lists]]
+name = "randomList"
+item = "listItem"
+
+[[behaviour.numbered_lists]]
+name = "sequentialList"
+item = "listItem"
+
+[[behaviour.images]]
+element = "graphic"
+source_attr = "infoEntityIdent"
+
+[descriptions]
+levelledPara = "A titled paragraph (may nest)."
+proceduralStep = "One step of a procedure."
+warningAndCautionPara = "Text of a warning or caution."
+dmRef = "Reference to another data module."

@@ -1,0 +1,7 @@
+[package]
+name = "xylem-edit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+xylem-dom = { workspace = true }

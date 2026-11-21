@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:redefine schemaLocation="base.xsd">
+    <xs:complexType name="noteType">
+      <xs:complexContent>
+        <xs:extension base="noteType">
+          <xs:sequence><xs:element name="author" type="xs:string"/></xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+    <xs:group name="extra">
+      <xs:sequence><xs:group ref="extra"/><xs:element name="b" type="xs:string"/></xs:sequence>
+    </xs:group>
+  </xs:redefine>
+  <xs:element name="notes">
+    <xs:complexType><xs:sequence><xs:element ref="note"/><xs:group ref="extra"/></xs:sequence></xs:complexType>
+  </xs:element>
+</xs:schema>

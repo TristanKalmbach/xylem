@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:xlink="http://www.w3.org/1999/xlink"
+           targetNamespace="http://www.w3.org/1999/xlink"
+           attributeFormDefault="qualified">
+  <xs:attribute name="type" fixed="simple" type="xs:string"/>
+  <xs:attribute name="href" type="xs:anyURI"/>
+  <xs:attributeGroup name="XLINKATT">
+    <xs:attribute ref="xlink:type"/>
+    <xs:attribute ref="xlink:href" use="required"/>
+    <xs:attribute name="title" type="xs:string"/>
+  </xs:attributeGroup>
+</xs:schema>

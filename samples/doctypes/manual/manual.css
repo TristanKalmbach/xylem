@@ -1,0 +1,34 @@
+/* Sample stylesheet for the Xylem "manual" demo doctype. */
+manual { display: block; font-family: "Segoe UI", Arial, sans-serif; font-size: 11pt; counter-reset: chapter; }
+manual > title { display: block; font-size: 22pt; font-weight: bold; color: #1b3a6b; margin-bottom: 12px; }
+chapter { display: block; counter-increment: chapter; counter-reset: section; margin-top: 14px; }
+chapter > title { display: block; font-size: 16pt; font-weight: bold; color: #1b3a6b; margin-bottom: 6px; }
+chapter > title:before { content: counter(chapter) ". "; }
+section { display: block; counter-increment: section; margin-top: 8px; margin-left: 8px; }
+section > title { display: block; font-size: 13pt; font-weight: bold; }
+section > title:before { content: counter(chapter) "." counter(section) " "; }
+para { display: block; margin-top: 4px; margin-bottom: 4px; }
+b { font-weight: bold; }
+i { font-style: italic; }
+u { text-decoration: underline; }
+sup { vertical-align: super; }
+sub { vertical-align: sub; }
+xref { color: #0b5fa5; text-decoration: underline; }
+xref:after { content: " [" attr(linkend) "]"; color: gray; font-size: 9pt; }
+code { display: block; white-space: pre; font-family: Consolas, monospace; background-color: #f3f3f3; padding: 6px; margin: 4px 0; }
+warning { display: block; border: 2px solid #c0392b; background-color: #fdecea; padding: 6px; margin: 8px 0; }
+warning:before { content: "WARNING"; font-weight: bold; color: #c0392b; }
+list { display: block; margin-left: 20px; }
+item { display: list-item; list-style-type: disc; }
+list[type="numbered"] > item { list-style-type: decimal; }
+figure { display: block; margin: 8px 0; }
+figure > title { display: block; font-style: italic; text-align: center; }
+graphic { display: block; }
+table { display: table; margin: 8px 0; }
+table > title { display: block; font-weight: bold; }
+tgroup, tbody, thead { display: table-row-group; }
+colspec { display: none; }
+row { display: table-row; }
+entry { display: table-cell; }
+thead entry { font-weight: bold; background-color: #e8eef7; }
+$COMMENT { color: green; font-style: italic; }

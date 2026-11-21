@@ -1,0 +1,8 @@
+[package]
+name = "xylem-style"
+version = "0.1.0"
+edition = "2024"
+description = "CSS engine computing XMetaL-style per-node styles for XML documents"
+
+[dependencies]
+xylem-dom = { workspace = true }

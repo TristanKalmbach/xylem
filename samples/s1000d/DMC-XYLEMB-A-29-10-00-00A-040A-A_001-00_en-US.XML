@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!DOCTYPE dmodule PUBLIC "-//S1000D//DTD Descriptive Data Module//EN" "descript.dtd" []>
+<!-- S1000D issue 3.0 -->
+<dmodule>
+  <idstatus>
+    <dmaddres>
+      <dmc>
+        <avee><modelic>XYLEMB</modelic><sdc>A</sdc><chapnum>29</chapnum><section>1</section><subsect>0</subsect><subject>00</subject><discode>00</discode><discodev>A</discodev><incode>040</incode><incodev>A</incodev><itemloc>A</itemloc></avee>
+      </dmc>
+      <dmtitle><techname>Hydraulic pump</techname><infoname>Description</infoname></dmtitle>
+      <issno issno="001" inwork="00" type="new"/>
+      <issdate year="2026" month="11" day="20"/>
+      <language language="en" country="US"/>
+    </dmaddres>
+    <dmstatus>
+      <security class="01"/>
+      <rpc rpcname="Placeholder">00000</rpc>
+      <orig origname="Placeholder">00000</orig>
+      <applic><model model="All"><version version="All"/></model></applic>
+      <qa><unverif/></qa>
+    </dmstatus>
+  </idstatus>
+  <content>
+    <descript>
+      <para0>
+        <title>Placeholder title</title>
+        <para>Placeholder paragraph.</para>
+      </para0>
+    </descript>
+  </content>
+</dmodule>

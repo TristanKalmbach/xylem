@@ -1,0 +1,51 @@
+[doctype]
+name = "manual"
+description = "Sample technical manual (Xylem demo doctype)"
+version = "1.0"
+
+[match]
+roots = ["manual"]
+schema_locations = ["manual.xsd"]
+
+[files]
+schema = "manual.xsd"
+style = "manual.css"
+
+[templates.chapter]
+xml = '<chapter id="new-chapter"><title><?xm-replace_text Type the chapter title?></title><para><?xm-replace_text Type a paragraph?></para></chapter>'
+
+[templates.list]
+xml = '<list><item><para><?xm-replace_text List item?></para></item></list>'
+
+[templates.warning]
+xml = '<warning><para><?xm-replace_text Warning text?></para></warning>'
+
+[behaviour]
+paragraphs = ["para"]
+
+[behaviour.followed_by]
+title = "para"
+
+[behaviour.toggles]
+bold = "b"
+italic = "i"
+underline = "u"
+superscript = "sup"
+subscript = "sub"
+
+[[behaviour.bulleted_lists]]
+name = "list"
+item = "item"
+
+[[behaviour.images]]
+element = "graphic"
+source_attr = "href"
+
+[behaviour.id_generation]
+elements = ["chapter", "section"]
+attr = "id"
+pattern = "{name}-{seq:3}"
+
+[descriptions]
+para = "A paragraph of text."
+warning = "A safety warning shown in a red box."

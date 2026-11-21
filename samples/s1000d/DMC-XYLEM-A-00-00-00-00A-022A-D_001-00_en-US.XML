@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample project BREX for the Xylem demo data modules. -->
+<dmodule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_4-1/xml_schema_flat/brex.xsd">
+  <identAndStatusSection>
+    <dmAddress>
+      <dmIdent>
+        <dmCode modelIdentCode="XYLEM" systemDiffCode="A" systemCode="00" subSystemCode="0" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="022" infoCodeVariant="A" itemLocationCode="D"/>
+        <language languageIsoCode="en" countryIsoCode="US"/>
+        <issueInfo issueNumber="001" inWork="00"/>
+      </dmIdent>
+      <dmAddressItems>
+        <issueDate year="2026" month="11" day="20"/>
+        <dmTitle><techName>Xylem demo</techName><infoName>Business rules exchange</infoName></dmTitle>
+      </dmAddressItems>
+    </dmAddress>
+  </identAndStatusSection>
+  <content>
+    <brex>
+      <contextRules>
+        <structureObjectRuleGroup>
+          <structureObjectRule id="BR-001">
+            <objectPath allowedObjectFlag="2">//security/@securityClassification</objectPath>
+            <objectUse>Only security classes 01 and 02 are allowed.</objectUse>
+            <objectValue valueForm="single" valueAllowed="01">Unclassified</objectValue>
+            <objectValue valueForm="single" valueAllowed="02">Restricted</objectValue>
+          </structureObjectRule>
+          <structureObjectRule id="BR-002">
+            <objectPath allowedObjectFlag="0">//emphasis[@emphasisType='em05']</objectPath>
+            <objectUse>Strike-through emphasis must not be used.</objectUse>
+          </structureObjectRule>
+          <structureObjectRule id="BR-003">
+            <objectPath allowedObjectFlag="1">//qualityAssurance</objectPath>
+            <objectUse>Quality assurance status is required.</objectUse>
+          </structureObjectRule>
+          <structureObjectRule id="BR-004">
+            <objectPath allowedObjectFlag="0">//para[contains(., 'Placeholder')]</objectPath>
+            <objectUse>Placeholder text must be replaced before release.</objectUse>
+          </structureObjectRule>
+        </structureObjectRuleGroup>
+      </contextRules>
+    </brex>
+  </content>
+</dmodule>
