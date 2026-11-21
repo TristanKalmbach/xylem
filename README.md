@@ -5,6 +5,8 @@ XMetaL XMAX for writing narrative XML, and it also handles S1000D (issues 2.0
 to 6.0). Everything is pure Rust, so it should run on Windows, macOS and
 Linux; so far it has been built and tested on Windows.
 
+![The normal view of a sample manual](docs/images/normal-view.png)
+
 What it does:
 
 - Shows the document styled by CSS, either with tags visible ("tags on") or as
@@ -35,6 +37,17 @@ What it does:
   [docs/doctype-packages.md](docs/doctype-packages.md).
 - Stays quick on long documents (incremental layout, collapsible elements) and
   keeps your work safe (autosave and crash recovery).
+
+## Screenshots
+
+Tracked changes and a review comment, with tags shown:
+
+![Tracked changes and the Review panel](docs/images/tracked-changes.png)
+
+An S1000D data module next to the Project tab, which lists the modules in a
+folder and checks the references between them:
+
+![S1000D module with the Project tab](docs/images/s1000d-project.png)
 
 ## Build and run
 
