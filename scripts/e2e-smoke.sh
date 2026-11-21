@@ -82,10 +82,14 @@ check zoom-persists "$out/cfg2/app.ron" "zoom:1.1"
 # author is the login name, so only the parts after it are checked.
 rm -rf "$out/cfg3"
 XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes \
-    XYLEM_SCRIPT="key T ctrl shift;;click 513 280;;type  Then bleed them.;;save $native/tracked-typing.xml;;quit" \
+    XYLEM_SCRIPT="key T ctrl shift;;click 513 280;;type  Then bleed them.;;key Enter;;type More;;save $native/tracked-typing.xml;;quit" \
     timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
 check tracked-typing-start "$out/tracked-typing.xml" 'lines<?xm-insertion_mark_start author="'
-check tracked-typing-end "$out/tracked-typing.xml" ' Then bleed them.<?xm-insertion_mark_end?>.</para>'
+check tracked-typing-end "$out/tracked-typing.xml" ' Then bleed them.<?xm-insertion_mark_end?></para>'
+check tracked-after-enter "$out/tracked-typing.xml" 'More<?xm-insertion_mark_end?>.</para>'
+starts=$(grep -o 'xm-insertion_mark_start' "$out/tracked-typing.xml" | wc -l)
+ends=$(grep -o 'xm-insertion_mark_end' "$out/tracked-typing.xml" | wc -l)
+if [ "$starts" -eq 2 ] && [ "$ends" -eq 2 ]; then echo "ok    tracked-marks-paired"; else echo "FAIL  tracked-marks-paired"; fail=1; fi
 XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes \
     XYLEM_SCRIPT="key T ctrl shift;;click 513 280;;key Backspace;;key Backspace;;key Backspace;;key Backspace;;key Backspace;;type hoses;;save $native/tracked-mid.xml;;key A ctrl shift;;wait 3;;save $native/accept-all.xml;;quit" \
     timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1

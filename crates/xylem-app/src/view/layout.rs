@@ -1024,24 +1024,7 @@ impl<'a> Layouter<'a> {
             }
             MarkKind::Deletion => {
                 let data = revision::mark_attrs(self.doc, n);
-                let text = revision::deleted_text(data.get("data").unwrap_or_default());
-                let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-                let lead = if text.starts_with(char::is_whitespace) {
-                    " "
-                } else {
-                    ""
-                };
-                let tail = if text.ends_with(char::is_whitespace) && !flat.is_empty() {
-                    " "
-                } else {
-                    ""
-                };
-                if flat.is_empty() {
-                    // Deleted markup with no text (an empty element, a line break).
-                    "\u{2205}".to_string()
-                } else {
-                    format!("{lead}{flat}{tail}")
-                }
+                crate::review::deleted_label(data.get("data").unwrap_or_default())
             }
             MarkKind::Comment | MarkKind::CommentStart => {
                 if kind == MarkKind::CommentStart {

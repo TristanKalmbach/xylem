@@ -3095,6 +3095,21 @@ impl XylemApp {
                                 if r.is_read_only(&ed.doc, ed.doc.parent(node).unwrap_or(node)) {
                                     continue;
                                 }
+                                if ed.is_tracking() {
+                                    // A tracked replacement keeps the text in
+                                    // front of the match in `node`, so the
+                                    // earlier matches' ranges stay valid.
+                                    if ed.doc.text(node).is_some_and(|t| range.end <= t.len()) {
+                                        ed.replace_text_range(
+                                            r,
+                                            node,
+                                            range.start,
+                                            range.end,
+                                            &with,
+                                        )?;
+                                    }
+                                    continue;
+                                }
                                 let mut s = ed.doc.text(node).unwrap_or("").to_string();
                                 if range.end <= s.len() {
                                     s.replace_range(range, &with);

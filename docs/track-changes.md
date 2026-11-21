@@ -47,7 +47,12 @@ When tracking is on:
 - When a deleted range covers inline markup, such as a `<b>` inside the
   deleted words, the markup goes into the deletion. Rejecting the deletion
   restores it exactly. When the range crosses paragraphs, the paragraphs stay
-  and only their text is marked deleted.
+  and only their text is marked deleted. Where text isn't allowed (between
+  list items, table rows or column specifications) nothing is deleted, so
+  selecting everything and pressing Backspace marks all the text deleted
+  and leaves the structure as it was.
+- Pressing Enter inside an insertion ends it at the split and starts it
+  again in the new paragraph, so each paragraph keeps a complete pair.
 - Typing inside someone else's insertion splits it: theirs ends, yours
   follows, and theirs resumes after it.
 
@@ -84,10 +89,10 @@ Reject all.
 
 ### Assumptions
 
-No file written by XMetaL was available when this was built, so the format
-follows the names XMetaL documents for these instructions, not files it has
-been seen to write. In particular, these points have not been checked against
-real XMetaL output:
+Neither a file written by XMetaL nor XMetaL's documentation was available
+when this was built. The instruction names and attributes come from a
+written description of XMetaL's markup, so none of it has been confirmed
+against what XMetaL really writes. In particular:
 
 - that `author`, `time` and `data` are the attribute names, and that the time
   has exactly this form;

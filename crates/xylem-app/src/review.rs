@@ -51,6 +51,44 @@ pub fn author_color(author: &str, dark: bool) -> Color32 {
     if dark { DARK[i] } else { LIGHT[i] }
 }
 
+/// What a deletion shows in the document: its text with runs of whitespace
+/// collapsed (keeping one at either end, since it separated words), or, for
+/// deleted markup with no text, what it was in brackets.
+pub fn deleted_label(xml: &str) -> String {
+    let frag = xylem_dom::parse_fragment(xml).ok();
+    let text = match &frag {
+        Some(f) => f.text_content(f.root()),
+        None => xml.to_string(),
+    };
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !flat.is_empty() {
+        let lead = if text.starts_with(char::is_whitespace) {
+            " "
+        } else {
+            ""
+        };
+        let tail = if text.ends_with(char::is_whitespace) {
+            " "
+        } else {
+            ""
+        };
+        return format!("{lead}{flat}{tail}");
+    }
+    if !text.is_empty() {
+        // A deleted space: still worth seeing struck through.
+        return " ".to_string();
+    }
+    let what = frag.as_ref().and_then(|f| {
+        f.children(f.root()).iter().find_map(|&c| match f.kind(c) {
+            xylem_dom::NodeKind::Element(e) => Some(e.name.clone()),
+            xylem_dom::NodeKind::Comment(_) => Some("comment".to_string()),
+            xylem_dom::NodeKind::Pi { target, .. } => Some(target.clone()),
+            _ => None,
+        })
+    });
+    format!("[{}]", what.as_deref().unwrap_or("deleted"))
+}
+
 /// "Ann Reviewer" -> "AR", "bob" -> "B", "" -> "?".
 pub fn initials(author: &str) -> String {
     let s: String = author

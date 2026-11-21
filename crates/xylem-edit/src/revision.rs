@@ -11,9 +11,10 @@
 //! <?xm-annotation_start author="ann" time="..." data="Check this"?>commented text<?xm-annotation_end?>
 //! ```
 //!
-//! There was no file written by XMetaL to compare against when this was
-//! built, so the names and attributes follow XMetaL's documentation rather
-//! than observed output. Reading is lenient: either quote style, any
+//! There was no file written by XMetaL, and no XMetaL documentation, to
+//! check against when this was built. The instruction names and attributes
+//! come from a description of XMetaL's markup given with the task, so treat
+//! them as unconfirmed. Reading is lenient: either quote style, any
 //! attribute order, and attributes we don't know are kept when a mark is
 //! rewritten. Writing always uses the form above.
 //!
@@ -315,7 +316,10 @@ pub fn partner(doc: &Document, n: NodeId) -> Option<NodeId> {
     }
 }
 
-/// The insertion start marker whose range contains `p`, if any.
+/// The insertion start marker whose range contains `p`, if any: the nearest
+/// insertion mark before `p` in document order is a start. This agrees with
+/// [`partner`], so a range that crosses element boundaries (after a
+/// paragraph split, or in a file from elsewhere) still counts as one.
 pub fn enclosing_insertion(doc: &Document, p: Pos) -> Option<NodeId> {
     let (mut parent, mut idx) = match doc.parent(p.node) {
         Some(par) if doc.is_text(p.node) => (par, doc.index_in_parent(p.node)?),
@@ -324,19 +328,37 @@ pub fn enclosing_insertion(doc: &Document, p: Pos) -> Option<NodeId> {
     loop {
         let kids = doc.children(parent);
         for &c in kids[..idx.min(kids.len())].iter().rev() {
-            match mark_kind(doc, c) {
-                Some(MarkKind::InsertionStart) => return Some(c),
-                Some(MarkKind::InsertionEnd) => return None,
-                _ => {}
+            if let Some(m) = last_insertion_mark(doc, c) {
+                return (mark_kind(doc, m) == Some(MarkKind::InsertionStart)).then_some(m);
             }
         }
         let gp = doc.parent(parent)?;
-        if !doc.is_element(gp) {
-            return None;
-        }
         idx = doc.index_in_parent(parent)?;
         parent = gp;
     }
+}
+
+/// The last insertion start or end mark in `n`'s subtree, in document order.
+fn last_insertion_mark(doc: &Document, n: NodeId) -> Option<NodeId> {
+    if matches!(
+        mark_kind(doc, n),
+        Some(MarkKind::InsertionStart | MarkKind::InsertionEnd)
+    ) {
+        return Some(n);
+    }
+    doc.children(n)
+        .iter()
+        .rev()
+        .find_map(|&c| last_insertion_mark(doc, c))
+}
+
+/// True if `author` has any insertion in the document. Bulk deletions use it
+/// to skip looking for one around every node they visit.
+fn has_insertion_by(doc: &Document, author: &str) -> bool {
+    doc.descendants(doc.root()).any(|n| {
+        mark_kind(doc, n) == Some(MarkKind::InsertionStart)
+            && mark_attrs(doc, n).get("author") == Some(author)
+    })
 }
 
 fn is_empty_text(doc: &Document, n: NodeId) -> bool {
@@ -623,6 +645,22 @@ impl Editor {
         }
     }
 
+    /// Before an element is split at `p`: an insertion running through `p`
+    /// is ended there, and a copy of its start mark begins the other side,
+    /// so each part keeps a complete pair. Returns the split point, which is
+    /// between the two marks. This holds with tracking on or off.
+    pub(crate) fn break_insertion_at(&mut self, p: Pos) -> Pos {
+        let Some(start) = enclosing_insertion(&self.doc, p) else {
+            return p;
+        };
+        let b = self.split_at_boundary(p);
+        let reopen = self.doc.create_node(self.doc.kind(start).clone());
+        self.doc.insert_child(b.node, b.offset, reopen);
+        let end = new_end(&mut self.doc, INSERTION_END);
+        self.doc.insert_child(b.node, b.offset, end);
+        Pos::new(b.node, b.offset + 1)
+    }
+
     /// Deletes bytes `s..e` of text node `n` with tracking on. Text the
     /// author inserted is simply removed; anything else is replaced by a
     /// deletion mark, merged into an adjacent one of the same author. The
@@ -714,9 +752,10 @@ impl Editor {
     /// Deletes the range `a..b` with tracking on (a selection, cut, or the
     /// text find-and-replace replaces). Returns the caret, after the marks.
     ///
-    /// Elements are never removed: block elements in the range keep their
-    /// tags and only their content is marked deleted, while inline elements
-    /// that lie wholly inside go into the deletion mark as markup.
+    /// Block elements in the range keep their tags and only their content
+    /// is marked deleted; inline elements that lie wholly inside go into the
+    /// deletion mark as markup. Where text isn't allowed (between table rows
+    /// or list items) nothing is deleted, only the content further in.
     pub(crate) fn tracked_delete_range(
         &mut self,
         rules: &dyn Rules,
@@ -740,9 +779,10 @@ impl Editor {
                 return Err(EditError::Protected);
             }
         }
+        let own = has_insertion_by(&self.doc, &author);
         let mut touched = vec![a.node, b.node];
         for d in doomed {
-            self.track_delete_node(rules, d, &author, &time, &mut touched)?;
+            self.track_delete_node(rules, d, (&author, &time, own), &mut touched)?;
         }
         let mut caret = match after {
             Some(n) if self.doc.parent(n) == Some(b.node) => {
@@ -764,36 +804,44 @@ impl Editor {
         Ok(caret)
     }
 
+    /// One node of a tracked range deletion. `who` is (author, time, whether
+    /// the author has any insertion that the node could be part of).
     fn track_delete_node(
         &mut self,
         rules: &dyn Rules,
         d: NodeId,
-        author: &str,
-        time: &str,
+        who: (&str, &str, bool),
         touched: &mut Vec<NodeId>,
     ) -> EditResult {
+        let (author, time, has_own) = who;
         if is_mark(&self.doc, d) || is_ignorable(&self.doc, rules, d) {
             return Ok(());
         }
         let parent = self.doc.parent(d).unwrap();
         let idx = self.doc.index_in_parent(d).unwrap();
-        if let Some(s) = enclosing_insertion(&self.doc, Pos::new(parent, idx))
+        if has_own
+            && let Some(s) = enclosing_insertion(&self.doc, Pos::new(parent, idx))
             && self.is_own(s, author)
         {
             self.doc.detach(d);
             touched.push(parent);
             return Ok(());
         }
+        // Where text isn't allowed (between table rows, list items, colspecs)
+        // everything is structure: keep it and look inside the elements.
+        let in_text = rules.can_contain_text(&self.doc, parent);
         if self.doc.is_element(d) {
             if rules.is_read_only(&self.doc, d) || rules.is_non_removable(&self.doc, d) {
                 return Err(EditError::ReadOnly);
             }
-            if rules.is_block(&self.doc, d) || contains_mark(&self.doc, d) {
+            if !in_text || rules.is_block(&self.doc, d) || contains_mark(&self.doc, d) {
                 for c in self.doc.children(d).to_vec() {
-                    self.track_delete_node(rules, c, author, time, touched)?;
+                    self.track_delete_node(rules, c, who, touched)?;
                 }
                 return Ok(());
             }
+        } else if !in_text {
+            return Ok(());
         }
         let xml = match self.doc.text(d) {
             Some(t) => {

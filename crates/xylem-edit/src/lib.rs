@@ -1038,7 +1038,10 @@ impl Editor {
 
     /// Splits `target` (an ancestor of `p`) at `p`; returns the new right part.
     pub fn split_element(&mut self, rules: &dyn Rules, target: NodeId, p: Pos) -> NodeId {
+        let p = self.break_insertion_at(p);
         let mut b = self.split_at_boundary(p);
+        let inner = b.node;
+        let mut inner_copy = None;
         loop {
             let cur = b.node;
             let el = self.doc.element(cur).unwrap().clone();
@@ -1055,7 +1058,14 @@ impl Editor {
             let parent = self.doc.parent(cur).unwrap();
             let idx = self.doc.index_in_parent(cur).unwrap() + 1;
             self.doc.insert_child(parent, idx, copy);
+            inner_copy.get_or_insert(copy);
             if cur == target {
+                // Splitting at either end of an insertion leaves an empty
+                // pair on one side.
+                self.tidy_marks(inner, None);
+                if let Some(c) = inner_copy {
+                    self.tidy_marks(c, None);
+                }
                 return copy;
             }
             b = Pos::new(parent, idx);

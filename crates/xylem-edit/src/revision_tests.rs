@@ -486,3 +486,103 @@ fn listing_reports_every_change_in_order() {
     );
     let _ = NoRules;
 }
+
+#[test]
+fn enter_after_tracked_typing_keeps_each_paragraph_paired() {
+    let mut e = tracked("<doc><p>ab</p></doc>");
+    e.set_caret(at(&e, "ab", 2));
+    type_str(&mut e, "x");
+    e.enter(&R).unwrap();
+    type_str(&mut e, "y");
+    assert_balanced(&e);
+    assert_eq!(
+        xml(&e),
+        format!("<doc><p>ab{INS}x{END}</p><p>{INS}y{END}</p></doc>")
+    );
+    // The new text is still the author's own: Backspace just removes it.
+    e.delete_backward(&R).unwrap();
+    assert_eq!(xml(&e), format!("<doc><p>ab{INS}x{END}</p><p/></doc>"));
+    assert_balanced(&e);
+}
+
+#[test]
+fn splitting_inside_an_insertion_ends_and_restarts_it() {
+    let src = format!("<doc><p>a{INS}xy{END}b</p></doc>");
+    for tracking in [true, false] {
+        let mut e = tracked(&src);
+        if !tracking {
+            e.tracking = None;
+        }
+        e.set_caret(at(&e, "xy", 1));
+        e.enter(&R).unwrap();
+        assert_eq!(
+            xml(&e),
+            format!("<doc><p>a{INS}x{END}</p><p>{INS}y{END}b</p></doc>")
+        );
+        assert_balanced(&e);
+        assert!(e.undo());
+        assert_eq!(xml(&e), src);
+    }
+}
+
+#[test]
+fn an_insertion_across_paragraphs_counts_as_one() {
+    // As a file from elsewhere might have it.
+    let mut e = tracked(&format!("<doc><p>{INS}ab</p><p>cd{END}e</p></doc>"));
+    e.set_caret(at(&e, "cd", 1));
+    type_str(&mut e, "Z");
+    assert_eq!(
+        xml(&e),
+        format!("<doc><p>{INS}ab</p><p>cZd{END}e</p></doc>")
+    );
+    e.delete_backward(&R).unwrap();
+    e.delete_backward(&R).unwrap();
+    assert_eq!(xml(&e), format!("<doc><p>{INS}ab</p><p>d{END}e</p></doc>"));
+    let c = e.change_at(at(&e, "d", 0)).unwrap();
+    assert_eq!(c.kind, ChangeKind::Insertion);
+    e.accept_change(&R, c.node).unwrap();
+    assert_eq!(xml(&e), "<doc><p>ab</p><p>de</p></doc>");
+}
+
+#[test]
+fn surrounding_part_of_an_insertion_keeps_it_working() {
+    let mut e = tracked(&format!("<doc><p>a{INS}xy{END}b</p></doc>"));
+    e.sel = Selection {
+        anchor: at(&e, "a", 0),
+        focus: at(&e, "xy", 1),
+    };
+    e.surround(&R, "b", &|_, _, _, _| true).unwrap();
+    assert_balanced(&e);
+    // Text typed inside the moved part is still the author's insertion.
+    e.set_caret(at(&e, "x", 1));
+    type_str(&mut e, "Q");
+    assert_balanced(&e);
+    let marks = e
+        .doc
+        .descendants(e.doc.root())
+        .filter(|&n| is_mark(&e.doc, n))
+        .count();
+    assert_eq!(marks, 2, "{}", xml(&e));
+}
+
+#[test]
+fn replacing_several_matches_in_one_text_node() {
+    // Replace all works from the last match backwards.
+    let mut e = tracked("<doc><p>cat and cat</p></doc>");
+    let n = at(&e, "cat and", 0).node;
+    e.transact(|ed| {
+        ed.replace_text_range(&R, n, 8, 11, "dog")?;
+        ed.replace_text_range(&R, n, 0, 3, "dog")
+    })
+    .unwrap();
+    assert_eq!(
+        xml(&e),
+        format!(
+            "<doc><p>{}{INS}dog{END} and {}{INS}dog{END}</p></doc>",
+            del("cat"),
+            del("cat")
+        )
+    );
+    assert!(e.undo());
+    assert_eq!(xml(&e), "<doc><p>cat and cat</p></doc>");
+}
