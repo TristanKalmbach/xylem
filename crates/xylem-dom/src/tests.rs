@@ -135,3 +135,15 @@ fn subtree_stamps_follow_changes() {
     doc.set_attr(b, "k", "v");
     assert!(doc.subtree_stamp(b) > sb);
 }
+
+#[test]
+fn revisions_are_unique_across_documents() {
+    let a = Document::from_str("<r/>").unwrap();
+    let b = Document::from_str("<r/>").unwrap();
+    assert_ne!(a.revision(), b.revision());
+    assert_ne!(a.structure_revision(), b.structure_revision());
+    let ra = a.document_element().unwrap();
+    let rb = b.document_element().unwrap();
+    assert_eq!(ra, rb, "same node ids...");
+    assert_ne!(a.subtree_stamp(ra), b.subtree_stamp(rb), "...but different stamps");
+}

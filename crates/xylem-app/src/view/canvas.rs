@@ -60,6 +60,9 @@ pub struct Canvas {
     caret_hint: Option<(Pos, Loc)>,
     /// The caret's rectangle on screen in the last frame (for popups).
     pub caret_screen: Option<Rect>,
+    /// Identity of the document instance the node-keyed state below belongs
+    /// to (the high bits of its revisions; see `Document::new`).
+    doc_instance: u64,
     /// Textures for CSS generated-content images, by file.
     icons: std::collections::HashMap<std::path::PathBuf, Option<egui::TextureHandle>>,
     /// Elements collapsed to a single line in this document.
@@ -176,6 +179,20 @@ impl Canvas {
         actions: &mut Vec<CanvasAction>,
     ) {
         let width = ui.available_width().max(200.0);
+        // A wholesale replacement (source view, or undoing one) brings a new
+        // document whose node IDs mean something else: drop node-keyed state.
+        let instance = ed.doc.structure_revision() >> 32;
+        if instance != self.doc_instance {
+            self.doc_instance = instance;
+            self.collapsed.clear();
+            self.collapsed_rev += 1;
+            self.caret_hint = None;
+            self.highlights.clear();
+            self.misspelled.clear();
+            self.misspelled_rev = None;
+            self.flagged.clear();
+            self.key = None;
+        }
         // Content the caret moved into must be visible.
         if !self.collapsed.is_empty() && ed.doc.contains(ed.sel.focus.node) {
             let hidden: Vec<NodeId> = ed

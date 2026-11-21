@@ -161,6 +161,12 @@ impl Default for Document {
 
 impl Document {
     pub fn new() -> Self {
+        // Every document gets its own range of revision numbers, so a
+        // revision (or subtree stamp) never means the same thing for two
+        // different documents. Views key their caches on these numbers and
+        // rely on that when a document is replaced wholesale.
+        static NEXT_BASE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let base = NEXT_BASE.fetch_add(1 << 32, std::sync::atomic::Ordering::Relaxed);
         let root = Node {
             kind: NodeKind::Document,
             parent: None,
@@ -172,10 +178,10 @@ impl Document {
             nodes: vec![root],
             root: NodeId(0),
             encoding: Encoding::Utf8,
-            revision: 0,
-            structure_revision: 0,
+            revision: base,
+            structure_revision: base,
             journal: None,
-            stamps: vec![0],
+            stamps: vec![base],
         }
     }
 
