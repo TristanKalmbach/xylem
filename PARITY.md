@@ -97,11 +97,11 @@ See [docs/doctype-packages.md](docs/doctype-packages.md) for the package format.
 | Feature | Status | Notes |
 |---|---|---|
 | Built-in styled rendering | verified | 4.1 descriptive and procedural; legacy markup is tested only. |
-| New data module wizard | verified | 4.1 descriptive. Other issues/kinds are unit-tested; some skeletons still need checking against the real schemas. |
+| New data module wizard | verified | Every issue and kind it offers (52 combinations, 2.0 to 6.0) produces a module that validates against the official schemas (`tests/real_schemas.rs`). |
 | BREX check | verified | |
 | Data module info; rename to the CSDB file name | verified | |
 | dmRef navigation | verified | |
-| Validation against the real S1000D schemas | tested | No S1000D schemas are available locally yet. |
+| Validation against the real S1000D schemas | verified | Official schemas for all issues; schema-guided insertion checked in the app on a 4.1 module. |
 
 ## Performance (release build, Windows)
 

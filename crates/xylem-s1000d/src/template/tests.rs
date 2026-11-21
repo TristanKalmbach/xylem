@@ -37,12 +37,8 @@ fn every_supported_combination_is_well_formed_and_detectable() {
             assert_eq!(info.issue, issue, "{issue} {kind:?}");
             assert_eq!(info.schema, kind, "{issue} {kind:?}");
             assert_eq!(info.root, "dmodule");
-            let expected_source = if issue.is_legacy() {
-                DetectSource::DocType
-            } else {
-                DetectSource::SchemaLocation
-            };
-            assert_eq!(info.source, expected_source);
+            // Every template references its official XML schema.
+            assert_eq!(info.source, DetectSource::SchemaLocation);
 
             let ident = DmIdent::from_document(&doc)
                 .unwrap_or_else(|| panic!("{issue} {kind:?}: no ident"));
@@ -118,14 +114,15 @@ fn content_per_kind() {
     let brex =
         Brex::from_document(&Document::from_str(&build(Issue::V4_1, SchemaKind::Brex)).unwrap());
     assert_eq!(brex.rules.len(), 1);
-    assert_eq!(brex.rules[0].path, "//para");
+    assert_eq!(brex.rules[0].path, "//content");
 }
 
 #[test]
 fn legacy_module_layout() {
     let xml = build(Issue::V3_0, SchemaKind::Descript);
-    assert!(xml.contains(r#"<!DOCTYPE dmodule PUBLIC "-//S1000D//DTD Descriptive Data Module//EN" "descript.dtd" []>"#));
-    assert!(xml.contains("<!-- S1000D issue 3.0 -->"));
+    assert!(xml.contains(r#"xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_3-0/xml_schema_flat/descript.xsd""#));
+    assert!(xml.contains("<status>"));
+    assert!(xml.contains("<brexref>"));
     assert!(xml.contains("<idstatus>"));
     assert!(xml.contains("<chapnum>D00</chapnum>"));
     assert!(xml.contains(r#"<issno issno="001" inwork="00" type="new"/>"#));
@@ -136,9 +133,14 @@ fn legacy_module_layout() {
     assert!(!xml.contains("identAndStatusSection"));
 
     let proced = build(Issue::V2_2, SchemaKind::Proced);
-    assert!(proced.contains(r#"PUBLIC "-//S1000D//DTD Procedural Data Module//EN" "proced.dtd""#));
-    assert!(proced.contains("<!-- S1000D issue 2.2 -->"));
+    assert!(proced.contains("S1000D_2-2/xml_schema/dm/procedschema.xsd"));
+    assert!(proced.contains("<closereqs>"));
     assert!(proced.contains("<step1>"));
+    // 2.0 and 2.1 predate BREX references and close procedures differently.
+    let old = build(Issue::V2_0, SchemaKind::Proced);
+    assert!(old.contains("<refs><norefs/></refs>"));
+    assert!(old.contains("<closeup/>"));
+    assert!(!old.contains("<brexref>"));
 }
 
 #[test]

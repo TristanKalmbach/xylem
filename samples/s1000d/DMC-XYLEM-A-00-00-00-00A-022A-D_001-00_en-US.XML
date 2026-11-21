@@ -13,6 +13,14 @@
         <dmTitle><techName>Xylem demo</techName><infoName>Business rules exchange</infoName></dmTitle>
       </dmAddressItems>
     </dmAddress>
+    <dmStatus>
+      <security securityClassification="01"/>
+      <responsiblePartnerCompany enterpriseCode="00000"><enterpriseName>Placeholder</enterpriseName></responsiblePartnerCompany>
+      <originator enterpriseCode="00000"><enterpriseName>Placeholder</enterpriseName></originator>
+      <applic><displayText><simplePara>All</simplePara></displayText></applic>
+      <brexDmRef><dmRef><dmRefIdent><dmCode modelIdentCode="S1000D" systemDiffCode="E" systemCode="04" subSystemCode="1" subSubSystemCode="0" assyCode="0301" disassyCode="00" disassyCodeVariant="A" infoCode="022" infoCodeVariant="A" itemLocationCode="D"/></dmRefIdent></dmRef></brexDmRef>
+      <qualityAssurance><unverified/></qualityAssurance>
+    </dmStatus>
   </identAndStatusSection>
   <content>
     <brex>

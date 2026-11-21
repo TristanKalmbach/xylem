@@ -482,3 +482,12 @@ fn gap_typing_follows_the_preferred_side() {
     e.insert_text(&TestRules, "2").unwrap();
     assert_eq!(xml(&e), "<doc><section><p>a1</p><p>2b</p></section></doc>");
 }
+
+#[test]
+fn enter_moves_into_a_waiting_placeholder() {
+    let mut e = ed("<doc><title>Head</title><p><?xm-replace_text Type here?></p></doc>");
+    e.set_caret(text_pos(&e, "Head", 4));
+    e.enter(&TestRules).unwrap();
+    e.insert_text(&TestRules, "Body").unwrap();
+    assert_eq!(xml(&e), "<doc><title>Head</title><p>Body</p></doc>");
+}

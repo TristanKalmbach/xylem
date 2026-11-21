@@ -945,6 +945,16 @@ impl Editor {
                 && let Some(next) = rules.followed_by(&name)
                 && next != name
             {
+                // A template often already has an empty element waiting after
+                // this one (a title followed by a placeholder paragraph): go
+                // there instead of adding another.
+                if let Some(sib) = ed.next_element_sibling(rules, target)
+                    && ed.doc.name(sib) == Some(next.as_str())
+                    && is_placeholder_only(&ed.doc, rules, sib)
+                {
+                    ed.sel = Selection::caret(first_editable(&ed.doc, rules, sib));
+                    return Ok(());
+                }
                 let parent = ed.doc.parent(target).unwrap();
                 let idx = ed.doc.index_in_parent(target).unwrap() + 1;
                 if rules.can_insert(&ed.doc, parent, idx, &next) {
@@ -1469,6 +1479,19 @@ impl Editor {
             Ok(())
         })
     }
+}
+
+/// True when an element holds nothing but whitespace and `xm-replace_text`
+/// placeholders, i.e. it is waiting to be filled in.
+fn is_placeholder_only(doc: &Document, rules: &dyn Rules, el: NodeId) -> bool {
+    doc.descendants(el).skip(1).all(|n| match doc.kind(n) {
+        NodeKind::Element(_) => true,
+        NodeKind::Text(_) => {
+            is_ignorable(doc, rules, n) || doc.text(n).is_some_and(|t| t.trim().is_empty())
+        }
+        NodeKind::Pi { target, .. } => target == "xm-replace_text",
+        _ => false,
+    })
 }
 
 /// The next content token after `p` that is still inside `scope`, skipping tags.

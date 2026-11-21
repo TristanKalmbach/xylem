@@ -322,13 +322,40 @@ impl Parts<'_> {
                  </closeRqmts>\n\
                  </procedure>"
             }
+            // Checked against the official fault.xsd of issues 4.0 to 6.0.
             SchemaKind::Fault => {
                 "<faultIsolation>\n\
+                 <faultIsolationProcedure>\n\
+                 <isolationProcedure>\n\
+                 <preliminaryRqmts>\n\
+                 <reqCondGroup>\n\
+                 <noConds/>\n\
+                 </reqCondGroup>\n\
+                 <reqSupportEquips>\n\
+                 <noSupportEquips/>\n\
+                 </reqSupportEquips>\n\
+                 <reqSupplies>\n\
+                 <noSupplies/>\n\
+                 </reqSupplies>\n\
+                 <reqSpares>\n\
+                 <noSpares/>\n\
+                 </reqSpares>\n\
+                 <reqSafety>\n\
+                 <noSafety/>\n\
+                 </reqSafety>\n\
+                 </preliminaryRqmts>\n\
                  <isolationMainProcedure>\n\
-                 <isolationStep>\n\
-                 <action>Placeholder action.</action>\n\
+                 <isolationStep id=\"stp-0001\">\n\
+                 <title>Placeholder step</title>\n\
                  </isolationStep>\n\
                  </isolationMainProcedure>\n\
+                 <closeRqmts>\n\
+                 <reqCondGroup>\n\
+                 <noConds/>\n\
+                 </reqCondGroup>\n\
+                 </closeRqmts>\n\
+                 </isolationProcedure>\n\
+                 </faultIsolationProcedure>\n\
                  </faultIsolation>"
             }
             SchemaKind::Crew => {
@@ -343,19 +370,46 @@ impl Parts<'_> {
                  </crewRefCard>\n\
                  </crew>"
             }
-            SchemaKind::Ipd => {
+            // 4.0 and 4.0.1 put the part data inline in itemSequenceNumber;
+            // from 4.1 it is itemSeqNumber with a partRef.
+            SchemaKind::Ipd if self.issue < Issue::V4_1 => {
                 "<illustratedPartsCatalog>\n\
                  <catalogSeqNumber indenture=\"1\">\n\
-                 <itemSeqNumber itemSeqNumberValue=\"001\">\n\
-                 <partRef manufacturerCodeValue=\"00000\" partNumberValue=\"PLACEHOLDER\"/>\n\
+                 <itemSequenceNumber itemSeqNumberValue=\"001\">\n\
                  <quantityPerNextHigherAssy>1</quantityPerNextHigherAssy>\n\
+                 <manufacturerCode>00000</manufacturerCode>\n\
+                 <partNumber>PLACEHOLDER</partNumber>\n\
+                 <locationRcmdSegment>\n\
+                 <locationRcmd>\n\
+                 <service>Placeholder</service>\n\
+                 <sourceMaintRecoverability>Placeholder</sourceMaintRecoverability>\n\
+                 </locationRcmd>\n\
+                 </locationRcmdSegment>\n\
+                 </itemSequenceNumber>\n\
+                 </catalogSeqNumber>\n\
+                 </illustratedPartsCatalog>"
+            }
+            SchemaKind::Ipd => {
+                "<illustratedPartsCatalog>\n\
+                 <catalogSeqNumber figureNumber=\"01\" item=\"001\" indenture=\"1\">\n\
+                 <itemSeqNumber itemSeqNumberValue=\"001\">\n\
+                 <quantityPerNextHigherAssy>1</quantityPerNextHigherAssy>\n\
+                 <partRef manufacturerCodeValue=\"00000\" partNumberValue=\"PLACEHOLDER\"/>\n\
                  </itemSeqNumber>\n\
                  </catalogSeqNumber>\n\
                  </illustratedPartsCatalog>"
             }
             SchemaKind::Process => {
                 "<process>\n\
-                 <dmNode id=\"nod-0001\"/>\n\
+                 <dmSeq>\n\
+                 <dmNode>\n\
+                 <dmRef>\n\
+                 <dmRefIdent>\n\
+                 <dmCode modelIdentCode=\"XXXXX\" systemDiffCode=\"A\" systemCode=\"00\" subSystemCode=\"0\" subSubSystemCode=\"0\" assyCode=\"00\" disassyCode=\"00\" disassyCodeVariant=\"A\" infoCode=\"000\" infoCodeVariant=\"A\" itemLocationCode=\"A\"/>\n\
+                 </dmRefIdent>\n\
+                 </dmRef>\n\
+                 </dmNode>\n\
+                 </dmSeq>\n\
                  </process>"
             }
             SchemaKind::Brex => {
@@ -363,8 +417,8 @@ impl Parts<'_> {
                  <contextRules>\n\
                  <structureObjectRuleGroup>\n\
                  <structureObjectRule>\n\
-                 <objectPath allowedObjectFlag=\"2\">//para</objectPath>\n\
-                 <objectUse>Placeholder rule</objectUse>\n\
+                 <objectPath allowedObjectFlag=\"1\">//content</objectPath>\n\
+                 <objectUse>Every data module has a content section.</objectUse>\n\
                  </structureObjectRule>\n\
                  </structureObjectRuleGroup>\n\
                  </contextRules>\n\
@@ -379,9 +433,27 @@ impl Parts<'_> {
     fn legacy(&self) -> String {
         let o = self.options;
         let d = self.dmc;
-        let (public_id, system_id) = match self.kind {
-            SchemaKind::Proced => ("Procedural", "proced.dtd"),
-            _ => ("Descriptive", "descript.dtd"),
+        // Legacy XML data modules reference the issue's XML schema. Issues 2.3
+        // and 3.0 ship flattened schemas; 2.0 to 2.2 keep them under xml_schema/dm.
+        let schema = if self.issue >= Issue::V2_3 {
+            format!(
+                "http://www.s1000d.org/S1000D_{}/xml_schema_flat/{}.xsd",
+                self.issue.schema_token(),
+                self.kind.stem()
+            )
+        } else {
+            // The complete module schema is `<kind>schema.xsd` (2.1 spells it
+            // `<kind>Schema.xsd`); `<kind>.xsd` holds only the content part.
+            let suffix = if self.issue == Issue::V2_1 {
+                "Schema"
+            } else {
+                "schema"
+            };
+            format!(
+                "http://www.s1000d.org/S1000D_{}/xml_schema/dm/{}{suffix}.xsd",
+                self.issue.schema_token(),
+                self.kind.stem()
+            )
         };
         let infoname = self
             .info_name
@@ -403,8 +475,33 @@ impl Parts<'_> {
         .iter()
         .map(|(n, v)| format!("<{n}>{}</{n}>", text(v)))
         .collect::<String>();
+        // 3.0 describes applicability as display text; earlier issues use
+        // model/version.
+        let applic = if self.issue >= Issue::V3_0 {
+            format!(
+                "<applic><displaytext>{}</displaytext></applic>",
+                text(&o.applic_text)
+            )
+        } else {
+            let a = attr_value(&o.applic_text);
+            format!("<applic><model model=\"{a}\"><version version=\"{a}\"/></model></applic>")
+        };
+        // BREX references arrived in 2.2; 2.0 and 2.1 instead open the
+        // content with a (here empty) reference list.
+        let (brexref, refs) = if self.issue >= Issue::V2_2 {
+            (
+                format!("<brexref><refdm><avee>{avee}</avee></refdm></brexref>"),
+                "",
+            )
+        } else {
+            (
+                String::new(),
+                "<refs><norefs/></refs>
+",
+            )
+        };
         let flat = format!(
-            "<dmodule>\n\
+            "<dmodule xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"{schema}\">\n\
              <idstatus>\n\
              <dmaddres>\n\
              <dmc>\n\
@@ -415,16 +512,17 @@ impl Parts<'_> {
              <issdate year=\"{y}\" month=\"{m}\" day=\"{day}\"/>\n\
              <language language=\"{lang}\" country=\"{country}\"/>\n\
              </dmaddres>\n\
-             <dmstatus>\n\
+             <status>\n\
              <security class=\"{security}\"/>\n\
              <rpc rpcname=\"{name}\">{code}</rpc>\n\
              <orig origname=\"{name}\">{code}</orig>\n\
-             <applic><model model=\"{applic}\"><version version=\"{applic}\"/></model></applic>\n\
+             {applic}\n\
+             {brexref}\n\
              <qa><unverif/></qa>\n\
-             </dmstatus>\n\
+             </status>\n\
              </idstatus>\n\
              <content>\n\
-             {content}\n\
+             {refs}{content}\n\
              </content>\n\
              </dmodule>",
             tech = text(self.tech_name),
@@ -438,63 +536,46 @@ impl Parts<'_> {
             security = attr_value(&o.security_classification),
             name = attr_value(&o.enterprise_name),
             code = text(&o.enterprise_code),
-            applic = attr_value(&o.applic_text),
             content = self.legacy_content(),
+            schema = attr_value(&schema),
         );
-        format!(
-            "<?xml version=\"1.0\"?>\n\
-             <!DOCTYPE dmodule PUBLIC \"-//S1000D//DTD {public_id} Data Module//EN\" \"{system_id}\" []>\n\
-             <!-- S1000D issue {issue} -->\n\
-             {}\n",
-            Self::reindent(&flat),
-            issue = self.issue,
-        )
+        format!("<?xml version=\"1.0\"?>\n{}\n", Self::reindent(&flat),)
     }
 
-    fn legacy_content(&self) -> &'static str {
+    fn legacy_content(&self) -> String {
         match self.kind {
             SchemaKind::Proced => {
-                "<proced>\n\
-                 <prelreqs>\n\
-                 <reqconds>\n\
-                 <noconds/>\n\
-                 </reqconds>\n\
-                 <reqpers>\n\
-                 <nopers/>\n\
-                 </reqpers>\n\
-                 <supequi>\n\
-                 <nosupeq/>\n\
-                 </supequi>\n\
-                 <supplies>\n\
-                 <nosupply/>\n\
-                 </supplies>\n\
-                 <spares>\n\
-                 <nospares/>\n\
-                 </spares>\n\
-                 <safety>\n\
-                 <nosafety/>\n\
-                 </safety>\n\
-                 </prelreqs>\n\
-                 <mainfunc>\n\
-                 <step1>\n\
-                 <para>Placeholder step.</para>\n\
-                 </step1>\n\
-                 </mainfunc>\n\
-                 <closereqs>\n\
-                 <reqconds>\n\
-                 <noconds/>\n\
-                 </reqconds>\n\
-                 </closereqs>\n\
-                 </proced>"
+                // 2.0 and 2.1 close a procedure with closeup; 2.2 onwards with closereqs.
+                let close = if self.issue >= Issue::V2_2 {
+                    "<closereqs><reqconds><noconds/></reqconds></closereqs>"
+                } else {
+                    "<closeup/>"
+                };
+                format!(
+                    "<proced>\n\
+                     <prelreqs>\n\
+                     <reqconds><noconds/></reqconds>\n\
+                     <supequip><nosupeq/></supequip>\n\
+                     <supplies><nosupply/></supplies>\n\
+                     <spares><nospares/></spares>\n\
+                     <safety><nosafety/></safety>\n\
+                     </prelreqs>\n\
+                     <mainfunc>\n\
+                     <step1>\n\
+                     <para>Placeholder step.</para>\n\
+                     </step1>\n\
+                     </mainfunc>\n\
+                     {close}\n\
+                     </proced>"
+                )
             }
-            _ => {
-                "<descript>\n\
+            _ => "<descript>\n\
                  <para0>\n\
                  <title>Placeholder title</title>\n\
                  <para>Placeholder paragraph.</para>\n\
                  </para0>\n\
                  </descript>"
-            }
+                .to_string(),
         }
     }
 }

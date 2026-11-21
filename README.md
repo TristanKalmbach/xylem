@@ -52,7 +52,10 @@ Put the output folders in a package folder; the default is `%APPDATA%\Xylem\doct
 
 ## S1000D schemas
 
-Xylem never downloads schemas. To use them, either:
+Xylem never downloads schemas. Get them from www.s1000d.org (each issue's
+`xml_schema_flat` folder, or `xml_schema` for 2.0–2.2) and either put them in
+`<config folder>/schemas/s1000d/S1000D_4-1/...`, which Xylem picks up on its
+own, or:
 
 - Schema folder: set *File › Preferences › S1000D schema folder* to a folder that contains one sub-folder per issue, for example `S1000D_4-1/…`. `http://www.s1000d.org/S1000D_4-1/...` URLs are then resolved there.
 - Catalog: point *Schema catalog* at a `catalog.toml` or an OASIS XML catalog.

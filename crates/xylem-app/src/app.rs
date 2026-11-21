@@ -165,6 +165,9 @@ impl XylemApp {
             .storage
             .and_then(|s| eframe::get_value(s, "settings"))
             .unwrap_or_default();
+        if let Some(root) = std::env::var_os("XYLEM_S1000D_SCHEMAS") {
+            settings.s1000d_schema_root = Some(PathBuf::from(root));
+        }
         if let Some(dict) = std::env::var_os("XYLEM_DICTIONARY") {
             settings.dictionary_dir = Some(PathBuf::from(dict));
             settings.spell_check = true;
@@ -245,8 +248,12 @@ impl XylemApp {
             .as_ref()
             .and_then(|p| xylem_schema::Catalog::load(p).ok())
             .unwrap_or_default();
-        if let Some(root) = &settings.s1000d_schema_root {
-            crate::s1000d_ui::add_s1000d_catalog(&mut cat, root);
+        // Without a configured folder, use `<config>/schemas/s1000d` if present.
+        let fallback = crate::settings::config_dir()
+            .map(|c| c.join("schemas").join("s1000d"))
+            .filter(|p| p.is_dir());
+        if let Some(root) = settings.s1000d_schema_root.clone().or(fallback) {
+            crate::s1000d_ui::add_s1000d_catalog(&mut cat, &root);
         }
         cat
     }

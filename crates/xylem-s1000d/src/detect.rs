@@ -169,7 +169,13 @@ pub(crate) fn parse_schema_url(url: &str) -> (Option<Issue>, Option<SchemaKind>)
         .and_then(|i| issue_from_numbers_at(&url[i + "S1000D_".len()..]));
     let file = url.rsplit(['/', '\\']).next().unwrap_or(url);
     let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
-    (issue, SchemaKind::from_stem(stem))
+    // Issues 2.0 to 2.2 name the complete module schema `descriptschema.xsd`
+    // (or `descriptSchema.xsd`).
+    let kind = SchemaKind::from_stem(stem).or_else(|| {
+        let lower = stem.to_ascii_lowercase();
+        lower.strip_suffix("schema").and_then(SchemaKind::from_stem)
+    });
+    (issue, kind)
 }
 
 /// Parses `4-0-1/...` or `5.0 ...` at the start of `s`.

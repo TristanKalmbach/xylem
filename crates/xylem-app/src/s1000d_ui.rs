@@ -10,11 +10,13 @@ use xylem_s1000d::{self as s1000d, Dmc, IssueDate, SchemaKind};
 /// laid out as `<root>/S1000D_x-y/...` (or `<root>/x.y/...`).
 pub fn add_s1000d_catalog(cat: &mut xylem_schema::Catalog, root: &Path) {
     for issue in s1000d::Issue::ALL {
-        let token = issue.schema_token();
-        for folder in [root.join(token), root.join(issue.as_str())] {
+        let dir = format!("S1000D_{}", issue.schema_token());
+        // Accept either the official folder name or the plain issue number.
+        for folder in [root.join(&dir), root.join(issue.as_str())] {
             if folder.is_dir() {
-                cat.add_prefix(&format!("http://www.s1000d.org/{token}/"), folder.clone());
-                cat.add_prefix(&format!("https://www.s1000d.org/{token}/"), folder.clone());
+                for scheme in ["http", "https"] {
+                    cat.add_prefix(&format!("{scheme}://www.s1000d.org/{dir}/"), folder.clone());
+                }
                 break;
             }
         }
