@@ -38,7 +38,7 @@ pub struct XmlClipboard {
 #[derive(Default)]
 pub struct Canvas {
     pub layout: DocLayout,
-    key: Option<(u64, u64, u32, ViewMode, u32, bool)>,
+    key: Option<(u64, u64, u64, u32, ViewMode, u32, bool)>,
     cache: LayoutCache,
     /// Desired x for vertical caret movement.
     goal_x: Option<f32>,
@@ -58,6 +58,9 @@ pub struct Canvas {
     /// blocks shows up twice (end of one line, start of the next); this keeps
     /// the caret on the line the user put it on.
     caret_hint: Option<(Pos, Loc)>,
+    /// Elements collapsed to a single line in this document.
+    pub collapsed: std::collections::HashSet<NodeId>,
+    collapsed_rev: u64,
 }
 
 pub struct CanvasCtx<'a> {
@@ -86,6 +89,21 @@ impl Canvas {
         self.misspelled_rev = Some(rev);
     }
 
+    /// Collapses or expands `el` in the document view.
+    pub fn set_collapsed(&mut self, el: NodeId, collapsed: bool) {
+        let changed = if collapsed { self.collapsed.insert(el) } else { self.collapsed.remove(&el) };
+        if changed {
+            self.collapsed_rev += 1;
+        }
+    }
+
+    pub fn expand_all(&mut self) {
+        if !self.collapsed.is_empty() {
+            self.collapsed.clear();
+            self.collapsed_rev += 1;
+        }
+    }
+
     pub fn invalidate(&mut self) {
         self.key = None;
     }
@@ -93,6 +111,7 @@ impl Canvas {
     fn ensure_layout(&mut self, ui: &Ui, ed: &Editor, cx: &CanvasCtx, width: f32) {
         let key = (
             ed.doc.revision(),
+            self.collapsed_rev,
             cx.style_revision,
             width.round() as u32,
             cx.view,
@@ -111,6 +130,7 @@ impl Canvas {
             tag_colors: cx.tag_colors,
             dark: ui.visuals().dark_mode,
             image_size: cx.image_size,
+            collapsed: &self.collapsed,
         };
         let t = std::time::Instant::now();
         self.caret_hint = None;
@@ -147,6 +167,15 @@ impl Canvas {
         actions: &mut Vec<CanvasAction>,
     ) {
         let width = ui.available_width().max(200.0);
+        // Content the caret moved into must be visible.
+        if !self.collapsed.is_empty() && ed.doc.contains(ed.sel.focus.node) {
+            let hidden: Vec<NodeId> = ed.doc.ancestors(ed.sel.focus.node).filter(|a| self.collapsed.contains(a)).collect();
+            for a in hidden {
+                if a != ed.sel.focus.node {
+                    self.set_collapsed(a, false);
+                }
+            }
+        }
         self.ensure_layout(ui, ed, cx, width);
         let mut scroll = egui::ScrollArea::both()
             .auto_shrink([false, false])
@@ -287,6 +316,14 @@ impl Canvas {
                             actions.push(CanvasAction::Changed);
                             return;
                         }
+                    }
+                    if let SegKind::Generated(el) = seg.kind
+                        && self.collapsed.contains(&el)
+                        && resp.clicked()
+                    {
+                        self.set_collapsed(el, false);
+                        actions.push(CanvasAction::Changed);
+                        return;
                     }
                     if let SegKind::Atom(n) = seg.kind
                         && resp.clicked()

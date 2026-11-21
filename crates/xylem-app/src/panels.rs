@@ -19,6 +19,8 @@ pub enum PanelAction {
     RemoveTags(NodeId),
     DeleteElement(NodeId),
     MoveElement(NodeId, bool),
+    /// Collapse (true) or expand (false) an element in the document view.
+    Collapse(NodeId, bool),
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -151,6 +153,11 @@ fn structure_node(
             }
             if ui.button("Delete element").clicked() {
                 out.push(PanelAction::DeleteElement(n));
+                ui.close();
+            }
+            let collapsed = ds.canvas.collapsed.contains(&n);
+            if ui.button(if collapsed { "Expand in document" } else { "Collapse in document" }).clicked() {
+                out.push(PanelAction::Collapse(n, !collapsed));
                 ui.close();
             }
             if ui.button("Move up").clicked() {

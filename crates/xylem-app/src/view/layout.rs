@@ -358,6 +358,8 @@ pub struct LayoutParams<'a> {
     pub tag_colors: &'a HashMap<String, Color32>,
     pub dark: bool,
     pub image_size: &'a dyn Fn(NodeId) -> Option<(String, Vec2)>,
+    /// Elements shown as a single collapsed line.
+    pub collapsed: &'a HashSet<NodeId>,
 }
 
 /// What the layout keeps between runs: shaped galleys (egui only keeps
@@ -521,6 +523,9 @@ impl<'a> Layouter<'a> {
         let context = {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             (params.view, params.zoom.to_bits(), params.dark).hash(&mut h);
+            let mut collapsed: Vec<NodeId> = params.collapsed.iter().copied().collect();
+            collapsed.sort();
+            collapsed.hash(&mut h);
             h.finish()
         };
         if cache.context != context {
@@ -1088,6 +1093,9 @@ impl<'a> Layouter<'a> {
     /// Lays out a block-level element.
     fn block_inner(&mut self, el: NodeId) {
         let s = self.styles.get(el);
+        if s.display != Display::None && self.params.collapsed.contains(&el) {
+            return self.collapsed_block(el);
+        }
         match s.display {
             Display::None => return,
             Display::Table => return self.table(el, &s),
@@ -1247,6 +1255,43 @@ impl<'a> Layouter<'a> {
         self.y += m[2];
         self.x = outer_x;
         self.width = outer_w;
+    }
+
+    /// A collapsed element: one line with its tags around a "..." marker that
+    /// expands it again when clicked.
+    fn collapsed_block(&mut self, el: NodeId) {
+        self.break_before_block();
+        let first = self.out.paras.len();
+        self.begin_para(el, TextAlign::Left, 0.0);
+        let name = self.doc.name(el).unwrap_or("").to_string();
+        let mut fmt = self.tag_fmt(&name);
+        fmt.color = if self.params.dark { Color32::from_gray(170) } else { Color32::from_gray(90) };
+        let hidden = self.doc.descendants(el).filter(|&n| self.doc.is_element(n)).count().saturating_sub(1);
+        let label = if self.tags() {
+            format!("  ... {hidden} hidden  ")
+        } else {
+            format!("[+] {name} ... ({hidden} hidden) ")
+        };
+        if self.tags() {
+            self.start_tag(el, false);
+        } else {
+            let before = self.before_of(el);
+            self.para().stop(before);
+        }
+        {
+            let pb = self.para();
+            pb.push(&label, fmt, SegKind::Generated(el));
+            pb.has_content = true;
+        }
+        if self.tags() {
+            self.end_tag(el);
+        } else {
+            let after = self.after_of(el);
+            self.para().stop(after);
+        }
+        self.flush(true);
+        let last = self.out.paras.len().saturating_sub(1);
+        self.out.element_paras.insert(el, (first, last.max(first)));
     }
 
     /// Table layout: rows of cells on an equal or `colwidth`-proportional grid.

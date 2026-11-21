@@ -75,6 +75,11 @@ pub enum Cmd {
     RenameToCsdb,
     FollowLink(NodeId),
     SpellCheck,
+    /// Collapse (true) or expand (false) the current element in the view.
+    Collapse(bool),
+    /// Collapse every block child of the current element.
+    CollapseChildren,
+    ExpandAll,
     Replace(NodeId, std::ops::Range<usize>, String),
     AddToDictionary(String),
 }
@@ -738,6 +743,40 @@ impl XylemApp {
             Cmd::S1000dInfo => self.dialogs.info = true,
             Cmd::RenameToCsdb => self.rename_to_csdb(),
             Cmd::FollowLink(n) => self.follow_link(n),
+            Cmd::Collapse(on) => {
+                if let Some(ds) = self.docs.get_mut(self.active) {
+                    let el = panels_current(&ds.editor);
+                    if Some(el) != ds.editor.doc.document_element() || !on {
+                        ds.canvas.set_collapsed(el, on);
+                        if on {
+                            // Keep the caret outside the hidden content.
+                            let doc = &ds.editor.doc;
+                            if let (Some(parent), Some(i)) = (doc.parent(el), doc.index_in_parent(el)) {
+                                ds.editor.set_caret(Pos::new(parent, i));
+                            }
+                        }
+                    }
+                }
+            }
+            Cmd::CollapseChildren => {
+                if let Some(ds) = self.docs.get_mut(self.active) {
+                    let el = panels_current(&ds.editor);
+                    let kids: Vec<NodeId> = ds
+                        .editor
+                        .doc
+                        .element_children(el)
+                        .filter(|&c| ds.editor.doc.element_children(c).next().is_some())
+                        .collect();
+                    for k in kids {
+                        ds.canvas.set_collapsed(k, true);
+                    }
+                }
+            }
+            Cmd::ExpandAll => {
+                if let Some(ds) = self.docs.get_mut(self.active) {
+                    ds.canvas.expand_all();
+                }
+            }
             Cmd::SpellCheck => {
                 self.settings.spell_check = !self.settings.spell_check;
                 self.load_speller();
@@ -1063,6 +1102,13 @@ impl XylemApp {
             if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F8)) {
                 cmds.push(Cmd::View(View::Source));
             }
+            // Shift variants first: egui's matching ignores an extra Shift.
+            if i.consume_shortcut(&shs(Key::Minus)) {
+                cmds.push(Cmd::Collapse(true));
+            }
+            if i.consume_shortcut(&shs(Key::Equals)) || i.consume_shortcut(&shs(Key::Plus)) {
+                cmds.push(Cmd::Collapse(false));
+            }
             if i.consume_shortcut(&sh(Key::Plus)) || i.consume_shortcut(&sh(Key::Equals)) {
                 cmds.push(Cmd::ZoomIn);
             }
@@ -1087,6 +1133,7 @@ impl XylemApp {
             if i.consume_shortcut(&shs(Key::V)) {
                 cmds.push(Cmd::PasteText);
             }
+
         });
         cmds
     }
@@ -1218,6 +1265,19 @@ impl XylemApp {
                     if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
                         cmds.push(Cmd::View(v));
                     }
+                }
+                ui.separator();
+                if ui.add_enabled(has_doc, egui::Button::new("Collapse element\tCtrl+Shift+-")).clicked() {
+                    cmds.push(Cmd::Collapse(true));
+                }
+                if ui.add_enabled(has_doc, egui::Button::new("Expand element\tCtrl+Shift+=")).clicked() {
+                    cmds.push(Cmd::Collapse(false));
+                }
+                if ui.add_enabled(has_doc, egui::Button::new("Collapse children")).clicked() {
+                    cmds.push(Cmd::CollapseChildren);
+                }
+                if ui.add_enabled(has_doc, egui::Button::new("Expand all")).clicked() {
+                    cmds.push(Cmd::ExpandAll);
                 }
                 ui.separator();
                 ui.checkbox(&mut self.settings.show_structure, "Structure");
@@ -1706,6 +1766,8 @@ impl XylemApp {
                             &mut picked,
                         );
                         item(ui, "Edit attributes", Cmd::EditAttributes, &mut picked);
+                    item(ui, &format!("Collapse <{name}>"), Cmd::Collapse(true), &mut picked);
+                    item(ui, "Collapse children", Cmd::CollapseChildren, &mut picked);
                         item(ui, "Follow link", Cmd::FollowLink(menu.node), &mut picked);
                     }
                     if in_table {
@@ -1849,6 +1911,11 @@ impl XylemApp {
             }
             PanelAction::DeleteElement(n) => {
                 self.with_editor(|ed, r| ed.delete_element(r, n));
+            }
+            PanelAction::Collapse(n, on) => {
+                if let Some(ds) = self.doc() {
+                    ds.canvas.set_collapsed(n, on);
+                }
             }
             PanelAction::MoveElement(n, up) => {
                 self.with_editor(|ed, r| ed.move_element(r, n, up));
