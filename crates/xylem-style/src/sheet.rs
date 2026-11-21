@@ -61,6 +61,7 @@ pub struct Stylesheet {
 }
 
 impl Stylesheet {
+    /// An empty stylesheet.
     pub fn new() -> Self {
         Self::default()
     }
@@ -131,6 +132,7 @@ impl Stylesheet {
         self.unresolved_imports.extend(other.unresolved_imports);
     }
 
+    /// XMetaL-specific switches found while parsing (see [`SheetFlags`]).
     pub fn flags(&self) -> &SheetFlags {
         &self.flags
     }

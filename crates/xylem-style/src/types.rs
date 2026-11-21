@@ -26,6 +26,7 @@ pub enum Display {
     InlineTable,
 }
 
+/// CSS `text-align`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum TextAlign {
     #[default]
@@ -35,6 +36,7 @@ pub enum TextAlign {
     Justify,
 }
 
+/// CSS `text-transform`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum TextTransform {
     #[default]
@@ -44,6 +46,7 @@ pub enum TextTransform {
     Capitalize,
 }
 
+/// CSS `white-space`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum WhiteSpace {
     #[default]
@@ -54,6 +57,7 @@ pub enum WhiteSpace {
     PreLine,
 }
 
+/// CSS `vertical-align` (keyword values only).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum VerticalAlign {
     #[default]
@@ -82,6 +86,7 @@ pub enum ListStyle {
     LowerGreek,
 }
 
+/// CSS `border-style`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum BorderStyle {
     #[default]
@@ -105,6 +110,7 @@ pub struct Border {
     pub color: Option<Color>,
 }
 
+/// The four border edges of a box.
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
 pub struct Borders {
     pub top: Border,
@@ -123,10 +129,12 @@ pub struct Sides {
 }
 
 impl Sides {
+    /// Left plus right.
     pub fn horizontal(&self) -> f32 {
         self.left + self.right
     }
 
+    /// Top plus bottom.
     pub fn vertical(&self) -> f32 {
         self.top + self.bottom
     }

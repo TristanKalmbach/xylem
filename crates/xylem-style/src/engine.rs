@@ -129,6 +129,7 @@ pub struct StyleEngine {
 }
 
 impl StyleEngine {
+    /// Prepares `sheet` for matching (rules are indexed by element name).
     pub fn new(sheet: Stylesheet) -> Self {
         let index = RuleIndex::build(&sheet.rules);
         Self {
@@ -138,6 +139,7 @@ impl StyleEngine {
         }
     }
 
+    /// The stylesheet this engine was built from.
     pub fn stylesheet(&self) -> &Stylesheet {
         &self.sheet
     }
@@ -162,6 +164,7 @@ impl StyleEngine {
         }
     }
 
+    /// Removes what [`set_inline_style`](Self::set_inline_style) set.
     pub fn clear_inline_style(&mut self, node: NodeId) {
         self.inline.remove(&node);
     }
