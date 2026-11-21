@@ -3,20 +3,20 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/TristanKalmbach/xylem"
 rust-version = "1.88"
 
 [workspace.dependencies]
-xylem-dom = { path = "crates/xylem-dom", version = "0.2.0" }
-xylem-schema = { path = "crates/xylem-schema", version = "0.2.0" }
-xylem-style = { path = "crates/xylem-style", version = "0.2.0" }
-xylem-s1000d = { path = "crates/xylem-s1000d", version = "0.2.0" }
-xylem-customize = { path = "crates/xylem-customize", version = "0.2.0" }
-xylem-xpath = { path = "crates/xylem-xpath", version = "0.2.0" }
-xylem-edit = { path = "crates/xylem-edit", version = "0.2.0" }
+xylem-dom = { path = "crates/xylem-dom", version = "0.3.0" }
+xylem-schema = { path = "crates/xylem-schema", version = "0.3.0" }
+xylem-style = { path = "crates/xylem-style", version = "0.3.0" }
+xylem-s1000d = { path = "crates/xylem-s1000d", version = "0.3.0" }
+xylem-customize = { path = "crates/xylem-customize", version = "0.3.0" }
+xylem-xpath = { path = "crates/xylem-xpath", version = "0.3.0" }
+xylem-edit = { path = "crates/xylem-edit", version = "0.3.0" }
 
 [profile.release]
 opt-level = 3
