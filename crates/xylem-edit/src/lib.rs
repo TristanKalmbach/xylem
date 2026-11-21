@@ -8,6 +8,7 @@
 
 pub mod format;
 pub mod pos;
+pub mod revision;
 pub mod table;
 
 pub use pos::{Pos, Selection, Token, cmp_pos};
@@ -136,6 +137,8 @@ pub struct Editor {
     /// the gap. The view sets this when the caret is drawn at the end of a
     /// line (after a closing tag) rather than at the start of the next one.
     pub gap_prefers_before: bool,
+    /// When set, typing and deleting are recorded as tracked changes.
+    pub tracking: Option<revision::Tracking>,
 }
 
 impl Editor {
@@ -156,6 +159,7 @@ impl Editor {
             break_undo_group: false,
             undo_limit: 1000,
             gap_prefers_before: false,
+            tracking: None,
         }
     }
 
@@ -384,7 +388,11 @@ impl Editor {
             ed.check_writable(rules, p.node)?;
             // Typing onto an `xm-replace_text` placeholder replaces it.
             let p = ed.consume_placeholder(rules, p);
-            let p = ed.insert_text_at(rules, p, text)?;
+            let p = if ed.is_tracking() {
+                ed.tracked_insert(rules, p, text)?
+            } else {
+                ed.insert_text_at(rules, p, text)?
+            };
             ed.sel = Selection::caret(p);
             Ok(())
         })
@@ -407,7 +415,33 @@ impl Editor {
         p
     }
 
+    /// Where text typed at `p` goes: `p` itself, or for a gap between blocks
+    /// the neighbouring element that takes text.
+    fn text_insert_target(&self, rules: &dyn Rules, p: Pos) -> EditResult<Pos> {
+        if self.doc.is_text(p.node) {
+            return Ok(p);
+        }
+        if !self.doc.is_element(p.node) {
+            return Err(EditError::NotAllowed(
+                "Text cannot be entered outside the root element.".into(),
+            ));
+        }
+        if !rules.can_contain_text(&self.doc, p.node) {
+            // Between two blocks: type into the following element (or the
+            // preceding one) when it takes text, as a word processor would.
+            if let Some(target) = self.text_target_near(rules, p.node, p.offset) {
+                return Ok(target);
+            }
+            let name = self.doc.name(p.node).unwrap_or("?");
+            return Err(EditError::NotAllowed(format!(
+                "Text is not allowed directly in <{name}>."
+            )));
+        }
+        Ok(p)
+    }
+
     fn insert_text_at(&mut self, rules: &dyn Rules, p: Pos, text: &str) -> EditResult<Pos> {
+        let p = self.text_insert_target(rules, p)?;
         if let Some(t) = self.doc.text(p.node) {
             let mut s = t.to_string();
             s.insert_str(p.offset, text);
@@ -415,22 +449,6 @@ impl Editor {
             return Ok(Pos::new(p.node, p.offset + text.len()));
         }
         let parent = p.node;
-        if !self.doc.is_element(parent) {
-            return Err(EditError::NotAllowed(
-                "Text cannot be entered outside the root element.".into(),
-            ));
-        }
-        if !rules.can_contain_text(&self.doc, parent) {
-            // Between two blocks: type into the following element (or the
-            // preceding one) when it takes text, as a word processor would.
-            if let Some(target) = self.text_target_near(rules, parent, p.offset) {
-                return self.insert_text_at(rules, target, text);
-            }
-            let name = self.doc.name(parent).unwrap_or("?");
-            return Err(EditError::NotAllowed(format!(
-                "Text is not allowed directly in <{name}>."
-            )));
-        }
         // Reuse an adjacent (ignorable) whitespace text node if present.
         let ch = self.doc.children(parent).to_vec();
         if let Some(&c) = ch.get(p.offset)
@@ -491,7 +509,11 @@ impl Editor {
 
     fn delete_selection_inner(&mut self, rules: &dyn Rules) -> EditResult {
         let (a, b) = self.sel.ordered(&self.doc);
-        let p = self.delete_range(rules, a, b)?;
+        let p = if self.is_tracking() {
+            self.tracked_delete_range(rules, a, b)?
+        } else {
+            self.delete_range(rules, a, b)?
+        };
         self.sel = Selection::caret(p);
         Ok(())
     }
@@ -511,6 +533,38 @@ impl Editor {
             return Ok(a);
         }
         let (a, b) = self.split_pair(a, b);
+        let (na, ia) = (a.node, a.offset);
+        let mut doomed = self.range_nodes(a, b);
+        for &d in &doomed {
+            self.check_writable(rules, d)?;
+            if rules.is_protected(&self.doc, d) {
+                return Err(EditError::Protected);
+            }
+            for n in self.doc.descendants(d) {
+                if self.doc.is_element(n)
+                    && (rules.is_read_only(&self.doc, n) || rules.is_non_removable(&self.doc, n))
+                {
+                    return Err(EditError::ReadOnly);
+                }
+            }
+        }
+        self.keep_lone_marks(&mut doomed);
+        for d in doomed {
+            self.doc.detach(d);
+        }
+        // Caret at the start boundary, preferring text on the left.
+        let caret = canonical_left(
+            &self.doc,
+            rules,
+            Pos::new(na, ia.min(self.doc.children(na).len())),
+        );
+        let caret = self.normalize_keep(rules, caret);
+        Ok(self.tidy_keep(rules, container(&self.doc, caret), caret))
+    }
+
+    /// The nodes wholly inside the range between two element boundaries,
+    /// as the highest nodes that lie inside it (DOM Range "contained" nodes).
+    fn range_nodes(&self, a: Pos, b: Pos) -> Vec<NodeId> {
         let (na, ia) = (a.node, a.offset);
         let (nb, ib) = (b.node, b.offset);
         let c = common_ancestor(&self.doc, na, nb);
@@ -542,30 +596,7 @@ impl Editor {
         if start_idx < end_idx {
             doomed.extend_from_slice(&self.doc.children(c)[start_idx..end_idx]);
         }
-        for &d in &doomed {
-            self.check_writable(rules, d)?;
-            if rules.is_protected(&self.doc, d) {
-                return Err(EditError::Protected);
-            }
-            for n in self.doc.descendants(d) {
-                if self.doc.is_element(n)
-                    && (rules.is_read_only(&self.doc, n) || rules.is_non_removable(&self.doc, n))
-                {
-                    return Err(EditError::ReadOnly);
-                }
-            }
-        }
-        for d in doomed {
-            self.doc.detach(d);
-        }
-        // Caret at the start boundary, preferring text on the left.
-        let caret = canonical_left(
-            &self.doc,
-            rules,
-            Pos::new(na, ia.min(self.doc.children(na).len())),
-        );
-        let caret = self.normalize_keep(rules, caret);
-        Ok(caret)
+        doomed
     }
 
     /// Splits text at both ends of an ordered range, returning element-level
@@ -651,26 +682,18 @@ impl Editor {
         self.transact_kind(kind, |ed| {
             let p = ed.caret();
             match token_before(&ed.doc, rules, p) {
-                Some(Token::Char(n, off, len)) => {
-                    ed.check_writable(rules, n)?;
-                    let mut s = ed.doc.text(n).unwrap().to_string();
-                    s.replace_range(off..off + len, "");
-                    ed.doc.set_text(n, s);
-                    let caret = ed.remove_if_emptied(rules, n, Pos::new(n, off));
-                    ed.sel = Selection::caret(caret);
-                    Ok(())
+                Some(Token::Char(n, off, len)) => ed.delete_char(rules, n, off, len, false),
+                // Deletion and comment marks are not text: step over them.
+                Some(Token::Atom(n)) if revision::is_mark(&ed.doc, n) => {
+                    ed.sel = Selection::caret(pos_before_token(&ed.doc, rules, Token::Atom(n)));
+                    ed.delete_backward_inner(rules)
                 }
                 Some(Token::Atom(n)) => {
                     ed.check_writable(rules, n)?;
                     if rules.is_protected(&ed.doc, n) {
                         return Err(EditError::Protected);
                     }
-                    let parent = ed.doc.parent(n).unwrap();
-                    let idx = ed.doc.index_in_parent(n).unwrap();
-                    ed.doc.detach(n);
-                    let c = ed.normalize_keep(rules, Pos::new(parent, idx));
-                    ed.sel = Selection::caret(c);
-                    Ok(())
+                    ed.delete_atom(rules, n, false)
                 }
                 Some(Token::End(e)) => {
                     // Step into the element and delete its last character.
@@ -713,31 +736,69 @@ impl Editor {
         })
     }
 
+    /// Deletes one character, as a tracked deletion when tracking is on.
+    fn delete_char(
+        &mut self,
+        rules: &dyn Rules,
+        n: NodeId,
+        off: usize,
+        len: usize,
+        forward: bool,
+    ) -> EditResult {
+        self.check_writable(rules, n)?;
+        let caret = if self.is_tracking() {
+            self.tracked_delete_text(rules, n, off, off + len, forward)?
+        } else {
+            let mut s = self.doc.text(n).unwrap().to_string();
+            s.replace_range(off..off + len, "");
+            self.doc.set_text(n, s);
+            self.remove_if_emptied(rules, n, Pos::new(n, off))
+        };
+        self.sel = Selection::caret(caret);
+        Ok(())
+    }
+
+    /// Deletes a comment, PI, CDATA section or entity reference the caret is
+    /// next to. With tracking on it becomes a deletion mark instead.
+    fn delete_atom(&mut self, rules: &dyn Rules, n: NodeId, forward: bool) -> EditResult {
+        let parent = self.doc.parent(n).unwrap();
+        let idx = self.doc.index_in_parent(n).unwrap();
+        if self.is_tracking() {
+            let (a, b) = (Pos::new(parent, idx), Pos::new(parent, idx + 1));
+            let caret = self.tracked_delete_range(rules, a, b)?;
+            let caret = match self.doc.children(parent).get(idx).copied() {
+                // Backspace leaves the caret in front of the new mark.
+                Some(m) if !forward && revision::is_mark(&self.doc, m) => {
+                    canonical_left(&self.doc, rules, Pos::new(parent, idx))
+                }
+                _ => caret,
+            };
+            self.sel = Selection::caret(caret);
+            return Ok(());
+        }
+        self.doc.detach(n);
+        let c = self.normalize_keep(rules, Pos::new(parent, idx));
+        self.sel = Selection::caret(c);
+        Ok(())
+    }
+
     fn delete_backward_inner(&mut self, rules: &dyn Rules) -> EditResult {
         let p = self.caret();
         match token_before(&self.doc, rules, p) {
-            Some(Token::Char(n, off, len)) => {
-                self.check_writable(rules, n)?;
-                let mut s = self.doc.text(n).unwrap().to_string();
-                s.replace_range(off..off + len, "");
-                self.doc.set_text(n, s);
-                let caret = self.remove_if_emptied(rules, n, Pos::new(n, off));
-                self.sel = Selection::caret(caret);
-                Ok(())
-            }
+            Some(Token::Char(n, off, len)) => self.delete_char(rules, n, off, len, false),
             Some(Token::End(e)) => {
                 self.sel = Selection::caret(pos_before_token(&self.doc, rules, Token::End(e)));
+                self.delete_backward_inner(rules)
+            }
+            Some(Token::Atom(n)) if revision::is_mark(&self.doc, n) => {
+                self.sel = Selection::caret(pos_before_token(&self.doc, rules, Token::Atom(n)));
                 self.delete_backward_inner(rules)
             }
             Some(Token::Atom(n)) => {
                 if rules.is_protected(&self.doc, n) {
                     return Err(EditError::Protected);
                 }
-                let parent = self.doc.parent(n).unwrap();
-                let idx = self.doc.index_in_parent(n).unwrap();
-                self.doc.detach(n);
-                self.sel = Selection::caret(self.normalize_keep(rules, Pos::new(parent, idx)));
-                Ok(())
+                self.delete_atom(rules, n, false)
             }
             _ => Ok(()),
         }
@@ -748,71 +809,65 @@ impl Editor {
         if !self.sel.is_caret() {
             return self.delete_selection(rules);
         }
-        self.transact_kind(EditKind::Typing, |ed| {
-            let p = ed.caret();
-            match token_after(&ed.doc, rules, p) {
-                Some(Token::Char(n, off, len)) => {
-                    ed.check_writable(rules, n)?;
-                    let mut s = ed.doc.text(n).unwrap().to_string();
-                    s.replace_range(off..off + len, "");
-                    ed.doc.set_text(n, s);
-                    let caret = ed.remove_if_emptied(rules, n, Pos::new(n, off));
-                    ed.sel = Selection::caret(caret);
+        self.transact_kind(EditKind::Typing, |ed| ed.delete_forward_inner(rules))
+            .or_else(|e| {
+                if e == EditError::Nothing {
                     Ok(())
+                } else {
+                    Err(e)
                 }
-                Some(Token::Atom(n)) => {
-                    ed.check_writable(rules, n)?;
-                    if rules.is_protected(&ed.doc, n) {
-                        return Err(EditError::Protected);
-                    }
-                    let parent = ed.doc.parent(n).unwrap();
-                    let idx = ed.doc.index_in_parent(n).unwrap();
-                    ed.doc.detach(n);
-                    ed.sel = Selection::caret(ed.normalize_keep(rules, Pos::new(parent, idx)));
-                    Ok(())
-                }
-                Some(Token::Start(e)) => {
-                    if ed
-                        .doc
-                        .children(e)
-                        .iter()
-                        .all(|&c| is_ignorable(&ed.doc, rules, c))
-                        && !rules.is_non_removable(&ed.doc, e)
-                    {
-                        return ed.remove_element_keep_caret(rules, e);
-                    }
-                    ed.sel = Selection::caret(pos_after_token(&ed.doc, rules, Token::Start(e)));
-                    Err(EditError::Nothing)
-                }
-                Some(Token::End(e)) => {
-                    if ed
-                        .doc
-                        .children(e)
-                        .iter()
-                        .all(|&c| is_ignorable(&ed.doc, rules, c))
-                        && !rules.is_non_removable(&ed.doc, e)
-                    {
-                        return ed.remove_element_keep_caret(rules, e);
-                    }
-                    if rules.is_block(&ed.doc, e)
-                        && let Some(next) = ed.next_element_sibling(rules, e)
-                        && ed.doc.name(next) == ed.doc.name(e)
-                    {
-                        return ed.join(rules, e, next);
-                    }
-                    ed.sel = Selection::caret(next_pos(&ed.doc, rules, p, false));
-                    Err(EditError::Nothing)
-                }
-                None => Err(EditError::Nothing),
+            })
+    }
+
+    fn delete_forward_inner(&mut self, rules: &dyn Rules) -> EditResult {
+        let p = self.caret();
+        match token_after(&self.doc, rules, p) {
+            Some(Token::Char(n, off, len)) => self.delete_char(rules, n, off, len, true),
+            Some(Token::Atom(n)) if revision::is_mark(&self.doc, n) => {
+                self.sel = Selection::caret(pos_after_token(&self.doc, rules, Token::Atom(n)));
+                self.delete_forward_inner(rules)
             }
-        })
-        .or_else(|e| {
-            if e == EditError::Nothing {
-                Ok(())
-            } else {
-                Err(e)
+            Some(Token::Atom(n)) => {
+                self.check_writable(rules, n)?;
+                if rules.is_protected(&self.doc, n) {
+                    return Err(EditError::Protected);
+                }
+                self.delete_atom(rules, n, true)
             }
-        })
+            Some(Token::Start(e)) => {
+                if self
+                    .doc
+                    .children(e)
+                    .iter()
+                    .all(|&c| is_ignorable(&self.doc, rules, c))
+                    && !rules.is_non_removable(&self.doc, e)
+                {
+                    return self.remove_element_keep_caret(rules, e);
+                }
+                self.sel = Selection::caret(pos_after_token(&self.doc, rules, Token::Start(e)));
+                Err(EditError::Nothing)
+            }
+            Some(Token::End(e)) => {
+                if self
+                    .doc
+                    .children(e)
+                    .iter()
+                    .all(|&c| is_ignorable(&self.doc, rules, c))
+                    && !rules.is_non_removable(&self.doc, e)
+                {
+                    return self.remove_element_keep_caret(rules, e);
+                }
+                if rules.is_block(&self.doc, e)
+                    && let Some(next) = self.next_element_sibling(rules, e)
+                    && self.doc.name(next) == self.doc.name(e)
+                {
+                    return self.join(rules, e, next);
+                }
+                self.sel = Selection::caret(next_pos(&self.doc, rules, p, false));
+                Err(EditError::Nothing)
+            }
+            None => Err(EditError::Nothing),
+        }
     }
 
     fn prev_element_sibling(&self, rules: &dyn Rules, e: NodeId) -> Option<NodeId> {
@@ -852,6 +907,10 @@ impl Editor {
         let mut parent = self.doc.parent(text).unwrap();
         let mut idx = self.doc.index_in_parent(text).unwrap();
         self.doc.detach(text);
+        // The text may have been all there was of a tracked insertion.
+        if let Some(Some(g)) = self.tidy_marks(parent, Some(idx)) {
+            idx = g;
+        }
         // Remove empty inline ancestors.
         while self.doc.is_element(parent)
             && self.doc.children(parent).is_empty()
@@ -1347,7 +1406,8 @@ impl Editor {
     /// Pastes an XML fragment (falls back to plain text when it does not parse
     /// or is not allowed).
     pub fn paste(&mut self, rules: &dyn Rules, xml_or_text: &str, as_xml: bool) -> EditResult {
-        if as_xml && let Ok(frag) = xylem_dom::parse_fragment(xml_or_text) {
+        if as_xml && let Ok(mut frag) = xylem_dom::parse_fragment(xml_or_text) {
+            revision::clean_pasted_fragment(&mut frag, self.is_tracking());
             let has_markup = frag.children(frag.root()).iter().any(|&c| !frag.is_text(c));
             if has_markup {
                 let r = self.transact(|ed| {
@@ -1404,10 +1464,29 @@ impl Editor {
             self.doc.insert_child(target.node, target.offset + k, n);
             last = Some(n);
         }
-        let end = last
+        let mut end = last
             .map(|l| self.doc.index_in_parent(l).unwrap() + 1)
             .unwrap_or(target.offset);
+        // Pasted markup inside text counts as one tracked insertion; pasted
+        // blocks are structure and stay untracked.
+        if self.is_tracking()
+            && end > target.offset
+            && rules.can_contain_text(&self.doc, target.node)
+        {
+            let (author, time) = self.stamp();
+            self.wrap_tracked(target.node, target.offset, end, &author, &time);
+            // Just past the new end mark, where typing extends the insertion.
+            if let Some(l) = last {
+                end = self.doc.index_in_parent(l).unwrap() + 1;
+                if self.doc.children(target.node).get(end).is_some_and(|&m| {
+                    revision::mark_kind(&self.doc, m) == Some(revision::MarkKind::InsertionEnd)
+                }) {
+                    end += 1;
+                }
+            }
+        }
         let caret = self.normalize_keep(rules, Pos::new(target.node, end));
+        let caret = self.tidy_keep(rules, target.node, caret);
         self.sel = Selection::caret(caret);
         Ok(())
     }
@@ -1472,6 +1551,17 @@ impl Editor {
     ) -> EditResult {
         self.transact(|ed| {
             ed.check_writable(rules, node)?;
+            if ed.is_tracking() {
+                let p =
+                    ed.tracked_delete_range(rules, Pos::new(node, start), Pos::new(node, end))?;
+                let p = if with.is_empty() {
+                    p
+                } else {
+                    ed.tracked_insert(rules, p, with)?
+                };
+                ed.sel = Selection::caret(p);
+                return Ok(());
+            }
             let mut s = ed.doc.text(node).ok_or(EditError::Nothing)?.to_string();
             s.replace_range(start..end, with);
             ed.doc.set_text(node, s);
