@@ -75,6 +75,14 @@ pub struct DocState {
     pub validated_revision: Option<u64>,
     pub s1000d: Option<xylem_s1000d::S1000dInfo>,
     pub read_only: bool,
+    /// Size and time of the file when last loaded or saved.
+    pub disk: Option<crate::files::Stamp>,
+    /// A version on disk the user chose to keep their own changes over.
+    pub disk_ignored: Option<crate::files::Stamp>,
+    /// Already told the user the file disappeared from disk.
+    pub missing_warned: bool,
+    /// Shown instead of the file name (copies of other versions).
+    pub title_override: Option<String>,
     pub inline_styles: HashMap<NodeId, String>,
     pub image_cache: HashMap<String, Option<egui::TextureHandle>>,
     pub image_sizes: HashMap<String, Option<egui::Vec2>>,
@@ -142,6 +150,10 @@ impl DocState {
             validated_revision: None,
             s1000d,
             read_only: false,
+            disk: None,
+            disk_ignored: None,
+            missing_warned: false,
+            title_override: None,
             inline_styles: HashMap::new(),
             image_cache: HashMap::new(),
             image_sizes: HashMap::new(),
@@ -224,12 +236,13 @@ impl DocState {
     }
 
     pub fn title(&self) -> String {
-        let name = self
-            .path
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Untitled".into());
+        let name = self.title_override.clone().unwrap_or_else(|| {
+            self.path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Untitled".into())
+        });
         if self.is_dirty() {
             format!("{name} •")
         } else {

@@ -99,3 +99,19 @@ scripts. An older version in the folder is never installed over a newer one.
 Bump `version` under `[workspace.package]` in the top-level `Cargo.toml` before building a release,
 since that is what the check compares. Each platform needs its own update
 folder, because the executables differ.
+
+## When something goes wrong
+
+Xylem writes a log to `logs/xylem.log` in the config folder (Help › Open log
+folder) and keeps the last three. If it crashes, a crash report goes in the
+same folder and the next start offers to show it; please send it along with
+a description of what you were doing.
+
+Unsaved work is copied to the `autosave` folder every minute and offered back
+after a crash. Each save also keeps the version it replaced (the last ten per
+document, in `backups`), reachable through File › Previous versions.
+
+While a document is open, Xylem leaves a hidden `.~lock.<name>#` file next to
+it. Anyone else opening the file is told who has it and offered a read-only
+copy. A lock left behind by a crash on your own machine is ignored; one left
+by someone else's crash can simply be deleted.

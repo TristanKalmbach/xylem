@@ -15,7 +15,8 @@
 //!   Scripted runs never show a real file dialog.
 //! * `type TEXT`, `paste TEXT`, `key NAME [ctrl] [shift] [alt]`.
 //! * `wait N` (frames), `shot PATH`, `save PATH` (the active document's
-//!   XML), `drop FILE`, `crash` (exit at once, as a crash would), `quit`.
+//!   XML), `drop FILE`, `crash` (exit at once, as a crash would), `panic`
+//!   (a real panic, for the crash report), `quit`.
 //! * Coordinates, for when nothing else will do: `click X Y`, `dblclick`,
 //!   `rclick`, `ctrlclick`, `hover`.
 
@@ -56,6 +57,7 @@ pub enum Step {
     Drop(PathBuf),
     Quit,
     Crash,
+    Panic,
     /// Runs an app command by name (`cmd SaveAs`, `cmd InsertElement para`).
     Command(String, String),
     /// Puts the caret at, or selects, the first occurrence of some text.
@@ -229,6 +231,8 @@ impl Script {
                 // Ends the process on the spot, as a crash would: no save
                 // prompt, no settings written (crash-recovery tests).
                 "crash" => Step::Crash,
+                // A real panic, to test the crash report.
+                "panic" => Step::Panic,
                 "pick" => {
                     // Queued now and consumed in order by whatever dialogs open.
                     let answer = (rest.trim() != "-").then(|| PathBuf::from(rest.trim()));
@@ -369,6 +373,7 @@ impl Script {
             }),
             Step::Quit => self.quit = true,
             Step::Crash => std::process::exit(3),
+            Step::Panic => panic!("panic requested by a test script"),
             Step::Command(name, arg) => self.pending_cmds.push((name, arg)),
             Step::Caret(text, at) => self.pending_caret = Some((text, at)),
             Step::ClickAnchor(offset, kind) => match self.anchor {

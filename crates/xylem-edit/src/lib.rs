@@ -1614,4 +1614,6 @@ fn token_after_skipping_tags_within(
 }
 
 #[cfg(test)]
+mod fuzz_tests;
+#[cfg(test)]
 mod tests;

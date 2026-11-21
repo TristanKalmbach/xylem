@@ -5,11 +5,13 @@
 mod app;
 mod autosave;
 mod doc;
+mod files;
 mod find;
 mod find_files;
 mod fonts;
 mod html_export;
 mod install;
+mod logging;
 mod panels;
 mod project_ui;
 mod review;
@@ -24,13 +26,19 @@ mod view;
 use std::path::PathBuf;
 
 fn main() -> eframe::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    crate::logging::init();
     // --install, --uninstall and friends run and exit without opening a window.
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = install::run_cli(&args) {
         std::process::exit(code);
     }
     install::clean_up_old();
+    log::info!(
+        "Xylem {} starting on {} {}",
+        install::VERSION,
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
     let files: Vec<PathBuf> = std::env::args_os()
         .skip(1)
         .map(PathBuf::from)

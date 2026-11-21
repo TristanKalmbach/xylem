@@ -594,7 +594,7 @@ impl XylemApp {
     }
 
     /// Replaces an open, unmodified document with a fresh copy from disk.
-    fn reload_document(&mut self, i: usize) -> bool {
+    pub(super) fn reload_document(&mut self, i: usize) -> bool {
         let Some(path) = self.docs[i].path.clone() else {
             return false;
         };

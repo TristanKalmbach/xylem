@@ -76,6 +76,10 @@ pub enum Cmd {
     ImportXmax,
     Preferences,
     About,
+    /// File > Previous versions.
+    PreviousVersions,
+    /// Help > Open log folder.
+    OpenLogFolder,
     CheckUpdates,
     ReloadPackages,
     S1000dInfo,
@@ -184,6 +188,8 @@ impl Cmd {
             "TrackChanges" => Cmd::TrackChanges,
             "ReviewPanel" => Cmd::ReviewPanel,
             "NewComment" => Cmd::NewComment,
+            "PreviousVersions" => Cmd::PreviousVersions,
+            "OpenLogFolder" => Cmd::OpenLogFolder,
             "InsertElement" => Cmd::InsertElement(arg.to_string()),
             "Surround" => Cmd::Surround(arg.to_string()),
             "Toggle" => Cmd::Toggle(arg.to_string()),
@@ -223,6 +229,23 @@ struct Dialogs {
     confirm_exit: bool,
     import_result: Option<String>,
     comment: Option<CommentDialog>,
+    /// Files someone else has open, waiting for the user's choice.
+    locked: Vec<(PathBuf, crate::files::LockOwner)>,
+    disk_changed: Option<DiskChanged>,
+    versions: bool,
+    /// A crash report from the last session, announced once.
+    crash_report: Option<PathBuf>,
+}
+
+/// What a background disk check reports: each open file and its stamp now.
+type DiskStamps = Vec<(PathBuf, Option<crate::files::Stamp>)>;
+
+/// A file that changed on disk while it had unsaved changes here.
+#[derive(Clone)]
+struct DiskChanged {
+    path: PathBuf,
+    /// Raised by Save, which then continues if the user keeps their version.
+    saving: bool,
 }
 
 /// New comment (no node yet) or an existing one being edited.
@@ -289,6 +312,11 @@ pub struct XylemApp {
     last_autosave: f64,
     /// Autosaved documents found at startup, offered for recovery.
     recovery: Vec<crate::autosave::Recovered>,
+    /// Lock files for the open documents (see `files.rs`), by path. `None`
+    /// where the folder could not take one.
+    locks: HashMap<PathBuf, Option<crate::files::Lock>>,
+    disk_poll: Option<std::sync::mpsc::Receiver<DiskStamps>>,
+    last_disk_poll: f64,
     update: UpdateState,
     script: Option<crate::script::Script>,
     shot_path: Option<PathBuf>,
@@ -371,6 +399,9 @@ impl XylemApp {
             shortcuts_open: false,
             last_autosave: 0.0,
             recovery: Vec::new(),
+            locks: HashMap::new(),
+            disk_poll: None,
+            last_disk_poll: 0.0,
             update: UpdateState::Idle,
             script: crate::script::Script::from_env(),
             shot_path: None,
@@ -397,6 +428,7 @@ impl XylemApp {
         if !scripted && app.team.update_source.is_some() {
             app.start_update_check(true);
         }
+        app.dialogs.crash_report = crate::logging::take_unseen_crash_report();
         if !app.team.warnings.is_empty() {
             app.toast(
                 "Team configuration has problems; see File › Preferences.",
@@ -473,6 +505,18 @@ impl XylemApp {
             self.active = i;
             return;
         }
+        if let Some(owner) = crate::files::held_by_someone_else(&path) {
+            if !self.dialogs.locked.iter().any(|(p, _)| *p == path) {
+                self.dialogs.locked.push((path, owner));
+            }
+            return;
+        }
+        self.open_path_now(path, false);
+    }
+
+    /// Opens `path` without the lock check; `read_only` for a copy that
+    /// must not be saved over someone else's work.
+    fn open_path_now(&mut self, path: PathBuf, read_only: bool) {
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(e) => return self.toast(format!("Cannot open {}: {e}", path.display()), true),
@@ -480,6 +524,9 @@ impl XylemApp {
         match Document::from_bytes(&bytes) {
             Ok(doc) => {
                 self.add_doc(doc, Some(path.clone()));
+                if let Some(ds) = self.docs.last_mut() {
+                    ds.read_only = read_only;
+                }
             }
             Err(e) => {
                 // Not well-formed: open in source view so it can be fixed.
@@ -517,6 +564,7 @@ impl XylemApp {
         let id = self.next_id;
         self.next_id += 1;
         let mut ds = DocState::new(id, doc, path, pkg);
+        ds.disk = ds.path.as_deref().and_then(crate::files::stamp);
         ds.repaint = Some(self.ctx.clone());
         ds.view = self.settings.default_view;
         ds.load_styles();
@@ -613,6 +661,23 @@ impl XylemApp {
         let Some(ds) = self.docs.get_mut(self.active) else {
             return;
         };
+        if ds.read_only && !save_as {
+            return self.toast(
+                "This copy is read-only. Use Save as to keep it under another name.",
+                true,
+            );
+        }
+        // Someone else changed the file since it was opened: ask first.
+        if !save_as && let Some(p) = ds.path.clone() {
+            let now = crate::files::stamp(&p);
+            if now.is_some() && now != ds.disk && now != ds.disk_ignored {
+                self.dialogs.disk_changed = Some(DiskChanged {
+                    path: p,
+                    saving: true,
+                });
+                return;
+            }
+        }
         let path = if save_as || ds.path.is_none() {
             let mut d = rfd::FileDialog::new().add_filter("XML", &["xml", "XML"]);
             if let Some(dir) = ds.dir() {
@@ -631,6 +696,7 @@ impl XylemApp {
             ds.path.clone().unwrap()
         };
         let bytes = ds.editor.doc.to_bytes();
+        crate::files::back_up(&path);
         let tmp = path.with_extension("xylem-tmp");
         let result = std::fs::write(&tmp, &bytes).and_then(|_| std::fs::rename(&tmp, &path));
         match result {
@@ -639,6 +705,11 @@ impl XylemApp {
                 crate::autosave::discard(ds.id_key());
                 ds.forget_recovery();
                 ds.path = Some(path.clone());
+                ds.disk = crate::files::stamp(&path);
+                ds.disk_ignored = None;
+                ds.missing_warned = false;
+                ds.title_override = None;
+                ds.read_only = false;
                 self.settings.add_recent(path.clone());
                 self.toast(format!("Saved {}", path.display()), false);
             }
@@ -1078,6 +1149,15 @@ impl XylemApp {
                 }
             }
             Cmd::About => self.dialogs.about = true,
+            Cmd::PreviousVersions => self.dialogs.versions = true,
+            Cmd::OpenLogFolder => {
+                if let Some(dir) = crate::logging::log_dir() {
+                    let _ = std::fs::create_dir_all(&dir);
+                    if let Err(e) = crate::html_export::open_in_browser(&dir) {
+                        self.toast(format!("Could not open {}: {e}", dir.display()), true);
+                    }
+                }
+            }
             Cmd::CheckUpdates => {
                 self.dialogs.update = true;
                 self.start_update_check(false);
@@ -1842,6 +1922,16 @@ impl XylemApp {
                 if item(ui, has_doc, None, "Close", Some("Ctrl+W")) {
                     cmds.push(Cmd::Close(self.active));
                 }
+                let has_file = self.docs.get(self.active).is_some_and(|d| d.path.is_some());
+                if item(
+                    ui,
+                    has_file,
+                    Some(icon::CLOCK_COUNTER_CLOCKWISE),
+                    "Previous versions…",
+                    None,
+                ) {
+                    cmds.push(Cmd::PreviousVersions);
+                }
                 ui.separator();
                 if item(ui, has_doc, Some(icon::FILE_HTML), "Export to HTML…", None) {
                     cmds.push(Cmd::ExportHtml);
@@ -2149,6 +2239,9 @@ impl XylemApp {
                     None,
                 ) {
                     cmds.push(Cmd::CheckUpdates);
+                }
+                if item(ui, true, Some(icon::FOLDER_OPEN), "Open log folder", None) {
+                    cmds.push(Cmd::OpenLogFolder);
                 }
                 if item(ui, true, Some(icon::INFO), "About Xylem", None) {
                     cmds.push(Cmd::About);
@@ -3492,7 +3585,384 @@ impl XylemApp {
         }
     }
 
+    /// Holds a lock file for every open document that may be saved, and
+    /// lets go of the rest (dropping a lock removes its file).
+    fn sync_locks(&mut self) {
+        let open: std::collections::HashSet<PathBuf> = self
+            .docs
+            .iter()
+            .filter(|d| !d.read_only)
+            .filter_map(|d| d.path.clone())
+            .collect();
+        self.locks.retain(|p, _| open.contains(p));
+        for p in open {
+            self.locks
+                .entry(p)
+                .or_insert_with_key(|p| crate::files::Lock::acquire(p));
+        }
+    }
+
+    /// Every couple of seconds, checks on a worker thread (network shares
+    /// can be slow) whether open files changed on disk.
+    fn poll_disk(&mut self, ctx: &egui::Context) {
+        const INTERVAL: f64 = 2.0;
+        if let Some(rx) = &self.disk_poll {
+            match rx.try_recv() {
+                Ok(results) => {
+                    self.disk_poll = None;
+                    self.apply_disk_results(results);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.disk_poll = None,
+            }
+        }
+        let paths: Vec<PathBuf> = self.docs.iter().filter_map(|d| d.path.clone()).collect();
+        if paths.is_empty() {
+            return;
+        }
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(INTERVAL));
+        let now = ctx.input(|i| i.time);
+        if now - self.last_disk_poll < INTERVAL {
+            return;
+        }
+        self.last_disk_poll = now;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let stamps = paths
+                .into_iter()
+                .map(|p| {
+                    let s = crate::files::stamp(&p);
+                    (p, s)
+                })
+                .collect();
+            if tx.send(stamps).is_ok() {
+                ctx.request_repaint();
+            }
+        });
+        self.disk_poll = Some(rx);
+    }
+
+    fn apply_disk_results(&mut self, results: Vec<(PathBuf, Option<crate::files::Stamp>)>) {
+        for (path, now) in results {
+            let Some(i) = self
+                .docs
+                .iter()
+                .position(|d| d.path.as_ref() == Some(&path))
+            else {
+                continue;
+            };
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let ds = &mut self.docs[i];
+            if now == ds.disk || (now.is_some() && now == ds.disk_ignored) {
+                continue;
+            }
+            let Some(now) = now else {
+                if !ds.missing_warned {
+                    ds.missing_warned = true;
+                    self.toast(
+                        format!(
+                            "{name} was moved or deleted outside Xylem. Save to write it again."
+                        ),
+                        true,
+                    );
+                }
+                continue;
+            };
+            ds.missing_warned = false;
+            if self
+                .dialogs
+                .disk_changed
+                .as_ref()
+                .is_some_and(|d| d.path == path)
+            {
+                continue;
+            }
+            if !ds.is_dirty() && ds.source.is_none() {
+                // Nothing to lose: take the new version, as other editors do.
+                if self.reload_document(i) {
+                    self.toast(
+                        format!("Reloaded {name}: it was changed outside Xylem."),
+                        false,
+                    );
+                } else {
+                    self.docs[i].disk_ignored = Some(now);
+                    self.toast(
+                        format!("{name} was changed outside Xylem and can't be read now; your copy is unchanged."),
+                        true,
+                    );
+                }
+            } else {
+                self.dialogs.disk_changed = Some(DiskChanged {
+                    path,
+                    saving: false,
+                });
+            }
+        }
+    }
+
+    /// Lock, changed-on-disk, previous-version and crash dialogs.
+    fn safety_dialogs(&mut self, ctx: &egui::Context) {
+        use crate::ui::{Dialog, Tone, dialog_footer, icon, notice, palette};
+        let p = palette(ctx);
+        let name_of = |path: &Path| {
+            path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
+
+        // Someone else has the file open.
+        if let Some((path, owner)) = self.dialogs.locked.first().cloned() {
+            let name = name_of(&path);
+            let mut choice = None;
+            let mut cancel = false;
+            let (x, _) = Dialog::new("Document in use")
+                .id("locked")
+                .width(460.0)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "{name} is open by {} on {} (since {}).",
+                        owner.user,
+                        owner.host,
+                        crate::files::readable_stamp(&owner.since)
+                    ));
+                    crate::ui::muted(
+                        ui,
+                        "If you both edit it, whoever saves last overwrites the other's changes.",
+                    );
+                    let r =
+                        dialog_footer(ui, Some(("Open read-only", true)), Some("Cancel"), |ui| {
+                            if crate::ui::button(ui, "Open anyway")
+                                .on_hover_text("Edit it as well; agree with them who saves")
+                                .clicked()
+                            {
+                                choice = Some(false);
+                            }
+                        });
+                    if r.confirmed {
+                        choice = Some(true);
+                    } else if r.closed {
+                        cancel = true;
+                    }
+                });
+            if x || cancel {
+                self.dialogs.locked.retain(|(q, _)| *q != path);
+            }
+            if let Some(read_only) = choice {
+                self.dialogs.locked.retain(|(q, _)| *q != path);
+                self.open_path_now(path, read_only);
+                if read_only && let Some(ds) = self.docs.last_mut() {
+                    ds.title_override = Some(format!("{name} (read-only)"));
+                }
+            }
+        }
+
+        // Changed on disk while edited here.
+        if let Some(dc) = self.dialogs.disk_changed.clone() {
+            let Some(i) = self
+                .docs
+                .iter()
+                .position(|d| d.path.as_ref() == Some(&dc.path))
+            else {
+                self.dialogs.disk_changed = None;
+                return;
+            };
+            let name = name_of(&dc.path);
+            let mut action = None;
+            let (x, _) = Dialog::new("Changed on disk")
+                .id("disk-changed")
+                .width(480.0)
+                .show(ctx, |ui| {
+                    notice(
+                        ui,
+                        Tone::Warning,
+                        format!("{name} was changed outside Xylem after you opened it."),
+                    );
+                    ui.add_space(6.0);
+                    crate::ui::muted(
+                        ui,
+                        "Keeping yours overwrites the other version when you save. Reloading \
+                     discards your unsaved changes here.",
+                    );
+                    let keep = if dc.saving {
+                        "Save mine anyway"
+                    } else {
+                        "Keep my version"
+                    };
+                    let r = dialog_footer(ui, Some((keep, true)), None, |ui| {
+                        if crate::ui::danger_button(ui, "Reload from disk").clicked() {
+                            action = Some("reload");
+                        }
+                        if crate::ui::button(ui, "Open the disk version")
+                            .on_hover_text("Open the other version read-only, to compare")
+                            .clicked()
+                        {
+                            action = Some("compare");
+                        }
+                    });
+                    if r.confirmed {
+                        action = Some("keep");
+                    }
+                });
+            if x {
+                action = Some("keep-quietly");
+            }
+            if let Some(a) = action {
+                self.dialogs.disk_changed = None;
+                let now = crate::files::stamp(&dc.path);
+                match a {
+                    "reload" => {
+                        if !self.reload_document(i) {
+                            self.toast(format!("{name} can't be read now."), true);
+                        }
+                    }
+                    "compare" => {
+                        self.docs[i].disk_ignored = now;
+                        match std::fs::read(&dc.path)
+                            .map_err(|e| e.to_string())
+                            .and_then(|b| Document::from_bytes(&b).map_err(|e| e.to_string()))
+                        {
+                            Ok(doc) => {
+                                self.add_doc(doc, None);
+                                if let Some(ds) = self.docs.last_mut() {
+                                    ds.read_only = true;
+                                    ds.title_override = Some(format!("{name} (on disk)"));
+                                    ds.editor.mark_saved();
+                                }
+                            }
+                            Err(e) => self.toast(format!("Can't open the disk version: {e}"), true),
+                        }
+                    }
+                    _ => {
+                        self.docs[i].disk_ignored = now;
+                        if dc.saving && a == "keep" {
+                            self.active = i;
+                            self.save(false);
+                        }
+                    }
+                }
+            }
+        }
+
+        // File > Previous versions.
+        if self.dialogs.versions {
+            let path = self.docs.get(self.active).and_then(|d| d.path.clone());
+            let backups = path
+                .as_deref()
+                .map(crate::files::backups)
+                .unwrap_or_default();
+            let mut open = None;
+            let (x, res) = Dialog::new("Previous versions").width(480.0).show(ctx, |ui| {
+                match &path {
+                    None => {
+                        crate::ui::muted(ui, "Save the document first; earlier versions are kept from then on.");
+                    }
+                    Some(path) if backups.is_empty() => {
+                        crate::ui::empty_state(
+                            ui,
+                            icon::CLOCK_COUNTER_CLOCKWISE,
+                            "No earlier versions yet",
+                            &format!(
+                                "Each time {} is saved, the version it replaces is kept here (the last ten).",
+                                name_of(path)
+                            ),
+                        );
+                    }
+                    Some(path) => {
+                        crate::ui::muted(
+                            ui,
+                            format!(
+                                "The versions {} had before recent saves. Opening one gives a read-only copy; use Save as to keep it.",
+                                name_of(path)
+                            ),
+                        );
+                        ui.add_space(6.0);
+                        for (file, when) in &backups {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(icon::FILE_TEXT).color(p.text_muted));
+                                // The backup's name carries its UTC time stamp.
+                                let stamp = file
+                                    .file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .and_then(|s| s.rsplit('.').next())
+                                    .map(|s| crate::files::readable_stamp(&s.replace('Z', "+")))
+                                    .unwrap_or_default();
+                                ui.label(format!("Saved {}", crate::files::age(*when)))
+                                    .on_hover_text(&stamp);
+                                crate::ui::muted(ui, stamp.trim_end_matches(" UTC").get(11..).unwrap_or("").to_string() + " UTC");
+                                let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
+                                crate::ui::muted(ui, format!("{:.1} KB", size as f64 / 1024.0));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if crate::ui::button(ui, "Open copy").clicked() {
+                                        open = Some((file.clone(), *when));
+                                    }
+                                });
+                            });
+                        }
+                    }
+                }
+                dialog_footer(ui, Some(("Close", true)), None, |ui| {
+                    if let Some(dir) = path.as_deref().and_then(crate::files::backups_folder)
+                        && dir.is_dir()
+                        && crate::ui::link_button(ui, "Open folder").clicked()
+                    {
+                        let _ = crate::html_export::open_in_browser(&dir);
+                    }
+                })
+            });
+            if let Some((file, when)) = open {
+                let name = path.as_deref().map(name_of).unwrap_or_default();
+                match std::fs::read(&file)
+                    .map_err(|e| e.to_string())
+                    .and_then(|b| Document::from_bytes(&b).map_err(|e| e.to_string()))
+                {
+                    Ok(doc) => {
+                        self.add_doc(doc, None);
+                        if let Some(ds) = self.docs.last_mut() {
+                            ds.read_only = true;
+                            ds.title_override =
+                                Some(format!("{name} (saved {})", crate::files::age(when)));
+                            ds.editor.mark_saved();
+                        }
+                        self.dialogs.versions = false;
+                    }
+                    Err(e) => self.toast(format!("Can't open that version: {e}"), true),
+                }
+            } else if x || res.is_some_and(|r| r.confirmed) {
+                self.dialogs.versions = false;
+            }
+        }
+
+        // The last session crashed.
+        if let Some(report) = self.dialogs.crash_report.clone() {
+            let (x, res) = Dialog::new("Xylem closed unexpectedly")
+                .id("crash")
+                .width(460.0)
+                .show(ctx, |ui| {
+                    ui.label("The last session ended with an error.");
+                    crate::ui::muted(
+                        ui,
+                        "A crash report was saved. Sending it to whoever looks after Xylem helps \
+                     get it fixed. Unsaved work is offered for recovery separately.",
+                    );
+                    dialog_footer(ui, Some(("Close", true)), None, |ui| {
+                        if crate::ui::button(ui, "Show report").clicked() {
+                            let dir = report.parent().map(Path::to_path_buf).unwrap_or_default();
+                            let _ = crate::html_export::open_in_browser(&dir);
+                        }
+                    })
+                });
+            if x || res.is_some_and(|r| r.confirmed) {
+                self.dialogs.crash_report = None;
+            }
+        }
+    }
+
     fn dialogs(&mut self, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
+        self.safety_dialogs(ctx);
         use crate::ui::{Dialog, Tone, dialog_footer, form, icon, notice, palette, section};
         self.find_window(ctx);
         self.find_files_window(ctx);
@@ -5082,6 +5552,8 @@ impl eframe::App for XylemApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let frame_start = std::time::Instant::now();
         crate::ui::widgets::begin_frame(ctx);
+        self.sync_locks();
+        self.poll_disk(ctx);
         self.poll_update_check();
         self.update_dialog(ctx);
         for p in std::mem::take(&mut self.pending_open) {

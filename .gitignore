@@ -3,3 +3,6 @@
 # Local agent worktrees and settings
 .claude/
 /target-ui
+
+# Lock files Xylem leaves next to open documents
+.~lock.*#

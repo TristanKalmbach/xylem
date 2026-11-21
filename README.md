@@ -131,7 +131,12 @@ own, or:
 ```
 cargo test --workspace
 XYLEM_SCHEMA_CORPUS=<folder of real XSDs and instances> cargo test -p xylem-schema --release --test corpus -- --ignored --nocapture
+XYLEM_XML_CORPUS=<folders or files of real XML> cargo test -p xylem-dom --release --test roundtrip_corpus -- --ignored --nocapture
+XYLEM_FUZZ_RUNS=3000 cargo test -p xylem-edit --release random_edits
 ```
+
+The corpus test checks that every well-formed file saves back byte for byte;
+run it on a real content export before relying on Xylem for that content.
 
 The app has a scripted end-to-end harness for UI testing:
 

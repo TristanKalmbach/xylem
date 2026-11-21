@@ -112,7 +112,13 @@ XMetaL itself.
 | Spell check with suggestions and a user dictionary | verified | With a small local dictionary. No dictionary ships with Xylem; point Preferences at Hunspell `.aff`/`.dic` files. |
 | Format document (pretty-print) | verified | Indent amount and per-element "indent content" from the package; mixed content is never touched. |
 | Save (lossless, atomic) | verified | |
-| Autosave and crash recovery | verified | Killed mid-edit and relaunched: the work was offered back, stayed unsaved until saved, and the copy was removed after saving. |
+| Autosave and crash recovery | verified | Killed mid-edit and relaunched: the work was offered back, stayed unsaved until saved, and the copy was removed after saving. "Later" keeps the copies for the next start. |
+| Changed on disk by another program | verified | A document without unsaved changes reloads by itself; one with unsaved changes asks (keep mine, reload, or open the disk version read-only). Save checks again before overwriting. |
+| Two people opening the same file | verified | A hidden `.~lock.<name>#` file next to the document names who has it open; others are offered a read-only copy. |
+| Previous versions kept on save | verified | The last ten versions per document, in the config folder; File › Previous versions opens one read-only. |
+| Log file and crash reports | verified | `logs/xylem.log` in the config folder (rotated); a panic writes a crash report there and the next start says so. Help › Open log folder. |
+| Byte-for-byte round trip on real files | tested | Every well-formed XML file in a corpus folder (`XYLEM_XML_CORPUS`) saves back unchanged, and a one-text edit leaves the rest alone. Run on 264 files including a 33k-element manual. |
+| Random editing keeps documents well-formed, undo is exact | tested | 180,000 seeded random edits (typing, deleting, Enter, replacing selections) with a well-formedness check after each, then full undo and redo. |
 | Reopen the previous session | verified | |
 
 ## Customisation

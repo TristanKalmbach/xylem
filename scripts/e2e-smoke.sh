@@ -123,4 +123,11 @@ XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes \
 check tracked-deletion "$out/tracked-mid.xml" 'data="lines"?><?xm-insertion_mark_start author="'
 check tracked-replacement "$out/tracked-mid.xml" 'hoses<?xm-insertion_mark_end?>.</para>'
 check accept-all "$out/accept-all.xml" '<para>Inspect the hydraulic hoses.</para>'
+# Saving keeps the previous version, and the lock file goes when the
+# document is closed.
+rm -rf "$out/safe" && mkdir -p "$out/safe/docs" && cp samples/manual-sample.xml "$out/safe/docs/s.xml"
+XYLEM_CONFIG_DIR="$native/safe/cfg" XYLEM_PACKAGES=samples/doctypes     XYLEM_SCRIPT="caretend Inspect the hydraulic lines;;type SAVED;;key S ctrl;;wait 5;;quit"     timeout 90 "$bin" "$native/safe/docs/s.xml" > /dev/null 2>&1
+check save-writes-file "$out/safe/docs/s.xml" "hydraulic linesSAVED"
+check save-keeps-backup "$(ls "$out"/safe/cfg/backups/*/s.*.xml 2>/dev/null | head -1)" "Inspect the hydraulic lines.</para>"
+if ls -a "$out/safe/docs" | grep -q lock; then echo "FAIL  lock-removed-on-close"; fail=1; else echo "ok    lock-removed-on-close"; fi
 exit $fail
