@@ -170,11 +170,11 @@ fn backspace_on_original_text_makes_a_deletion_that_grows() {
     e.delete_backward(&R).unwrap();
     e.delete_backward(&R).unwrap();
     assert_eq!(xml(&e), format!("<doc><p>a{}</p></doc>", del("bc")));
-    // The caret stays in front of the deletion.
+    // The caret stays in front of the deletion, but new text goes after it.
     e.insert_text(&R, "Q").unwrap();
     assert_eq!(
         xml(&e),
-        format!("<doc><p>a{INS}Q{END}{}</p></doc>", del("bc"))
+        format!("<doc><p>a{}{INS}Q{END}</p></doc>", del("bc"))
     );
     // Backspacing and typing coalesce into one undo step, as untracked.
     assert!(e.undo());

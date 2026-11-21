@@ -87,6 +87,18 @@ pub enum Cmd {
     ExpandAll,
     Replace(NodeId, std::ops::Range<usize>, String),
     AddToDictionary(String),
+    /// Turn change tracking on or off for the active document.
+    TrackChanges,
+    /// Show or hide the Review panel.
+    ReviewPanel,
+    /// Add a comment at the caret or on the selection.
+    NewComment,
+    /// Accept (true) or reject the change at the caret.
+    ResolveAtCaret(bool),
+    /// Accept (true) or reject every change.
+    ResolveAll(bool),
+    /// Accept (true) or reject one change, by its marker.
+    Resolve(NodeId, bool),
 }
 
 #[derive(Default)]
@@ -102,6 +114,14 @@ struct Dialogs {
     confirm_close: Option<usize>,
     confirm_exit: bool,
     import_result: Option<String>,
+    comment: Option<CommentDialog>,
+}
+
+/// New comment (no node yet) or an existing one being edited.
+struct CommentDialog {
+    node: Option<NodeId>,
+    text: String,
+    focus: bool,
 }
 
 struct TableDialog {
@@ -163,6 +183,7 @@ pub struct XylemApp {
     update: UpdateState,
     script: Option<crate::script::Script>,
     shot_path: Option<PathBuf>,
+    review: crate::review::ReviewState,
 }
 
 impl XylemApp {
@@ -233,6 +254,7 @@ impl XylemApp {
             update: UpdateState::Idle,
             script: crate::script::Script::from_env(),
             shot_path: None,
+            review: Default::default(),
         };
         app.load_speller();
         let scripted = app.script.is_some() || app.screenshot.is_some();
@@ -843,6 +865,71 @@ impl XylemApp {
             }
             Cmd::ImportXmax => self.import_xmax(),
             Cmd::Preferences => self.dialogs.prefs = true,
+            Cmd::TrackChanges => {
+                let author = self.settings.author();
+                if let Some(ds) = self.doc() {
+                    ds.editor.tracking = match ds.editor.tracking {
+                        Some(_) => None,
+                        None => Some(xylem_edit::revision::Tracking {
+                            author,
+                            clock: crate::review::now,
+                        }),
+                    };
+                    let on = ds.editor.is_tracking();
+                    ds.editor.break_undo_group = true;
+                    self.toast(
+                        if on {
+                            "Tracking changes."
+                        } else {
+                            "Stopped tracking changes."
+                        },
+                        false,
+                    );
+                }
+            }
+            Cmd::ReviewPanel => self.review.open = !self.review.open,
+            Cmd::NewComment => {
+                if self
+                    .docs
+                    .get(self.active)
+                    .is_some_and(|d| d.view != View::Source)
+                {
+                    self.dialogs.comment = Some(CommentDialog {
+                        node: None,
+                        text: String::new(),
+                        focus: true,
+                    });
+                }
+            }
+            Cmd::ResolveAtCaret(accept) => {
+                let change = self
+                    .docs
+                    .get(self.active)
+                    .and_then(|d| d.editor.change_at(d.editor.caret()));
+                match change {
+                    Some(c) if c.kind != xylem_edit::revision::ChangeKind::Comment => {
+                        self.run(ctx, Cmd::Resolve(c.node, accept));
+                    }
+                    _ => self.toast("There is no tracked change at the caret.", false),
+                }
+            }
+            Cmd::Resolve(node, accept) => {
+                self.with_editor(|ed, r| {
+                    if accept {
+                        ed.accept_change(r, node)
+                    } else {
+                        ed.reject_change(r, node)
+                    }
+                });
+            }
+            Cmd::ResolveAll(accept) => {
+                if self
+                    .with_editor_result(|ed, r| ed.resolve_all(r, accept))
+                    .is_some_and(|r| r == Err(EditError::Nothing))
+                {
+                    self.toast("There are no tracked changes.", false);
+                }
+            }
             Cmd::About => self.dialogs.about = true,
             Cmd::CheckUpdates => {
                 self.dialogs.update = true;
@@ -1407,6 +1494,18 @@ impl XylemApp {
             if i.consume_shortcut(&shs(Key::V)) {
                 cmds.push(Cmd::PasteText);
             }
+            if i.consume_shortcut(&shs(Key::T)) {
+                cmds.push(Cmd::TrackChanges);
+            }
+            if i.consume_shortcut(&shs(Key::M)) {
+                cmds.push(Cmd::NewComment);
+            }
+            if i.consume_shortcut(&shs(Key::A)) {
+                cmds.push(Cmd::ResolveAll(true));
+            }
+            if i.consume_shortcut(&shs(Key::R)) {
+                cmds.push(Cmd::ResolveAll(false));
+            }
         });
         cmds
     }
@@ -1644,6 +1743,7 @@ impl XylemApp {
                     cmds.push(Cmd::RenameToCsdb);
                 }
             });
+            ui.menu_button("Review", |ui| self.review_menu(ui, has_doc, cmds));
             ui.menu_button("Help", |ui| {
                 if ui.button("Keyboard shortcuts\tF1").clicked() {
                     cmds.push(Cmd::Shortcuts);
@@ -1656,6 +1756,45 @@ impl XylemApp {
                 }
             });
         });
+    }
+
+    fn review_menu(&mut self, ui: &mut egui::Ui, has_doc: bool, cmds: &mut Vec<Cmd>) {
+        let tracking = self
+            .docs
+            .get(self.active)
+            .is_some_and(|d| d.editor.is_tracking());
+        let mut on = tracking;
+        if ui
+            .add_enabled(
+                has_doc,
+                egui::Checkbox::new(&mut on, "Track changes\tCtrl+Shift+T"),
+            )
+            .clicked()
+        {
+            cmds.push(Cmd::TrackChanges);
+        }
+        let mut panel = self.review.open;
+        if ui.checkbox(&mut panel, "Review panel").clicked() {
+            cmds.push(Cmd::ReviewPanel);
+        }
+        ui.separator();
+        let items = [
+            ("New comment…\tCtrl+Shift+M", Cmd::NewComment),
+            ("Accept change at caret", Cmd::ResolveAtCaret(true)),
+            ("Reject change at caret", Cmd::ResolveAtCaret(false)),
+            ("Accept all changes\tCtrl+Shift+A", Cmd::ResolveAll(true)),
+            ("Reject all changes\tCtrl+Shift+R", Cmd::ResolveAll(false)),
+        ];
+        for (i, (label, cmd)) in items.into_iter().enumerate() {
+            if i == 1 {
+                ui.separator();
+            }
+            if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
+                cmds.push(cmd);
+            }
+        }
+        ui.separator();
+        ui.label(RichText::new(format!("Author: {}", self.settings.author())).weak());
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
@@ -1950,6 +2089,26 @@ impl XylemApp {
                 }
                 CanvasAction::EditAttributes(_) => self.settings.show_attributes = true,
                 CanvasAction::EditNode(n) => {
+                    use xylem_edit::revision::{MarkKind, mark_attrs, mark_kind};
+                    match mark_kind(&ds.editor.doc, n) {
+                        Some(MarkKind::Comment | MarkKind::CommentStart) => {
+                            let text = mark_attrs(&ds.editor.doc, n)
+                                .get("data")
+                                .unwrap_or_default()
+                                .to_string();
+                            self.dialogs.comment = Some(CommentDialog {
+                                node: Some(n),
+                                text,
+                                focus: true,
+                            });
+                            continue;
+                        }
+                        Some(_) => {
+                            self.review.open = true;
+                            continue;
+                        }
+                        None => {}
+                    }
                     if rules.is_protected(&ds.editor.doc, n) {
                         self.toasts.push((
                             "This marker is protected and can't be edited.".into(),
@@ -2099,6 +2258,21 @@ impl XylemApp {
         if self.docs.is_empty() {
             return;
         }
+        if self.review.open {
+            let mut review_acts = Vec::new();
+            egui::SidePanel::right("review")
+                .resizable(true)
+                .default_width(280.0)
+                .show(ctx, |ui| {
+                    ui.heading("Review");
+                    if let Some(ds) = self.docs.get(self.active) {
+                        crate::review::panel(ui, ds, &mut self.review, &mut review_acts);
+                    }
+                });
+            for a in review_acts {
+                self.review_action(a, cmds);
+            }
+        }
         if self.settings.show_structure {
             egui::SidePanel::left("structure")
                 .resizable(true)
@@ -2163,6 +2337,41 @@ impl XylemApp {
         }
         for a in acts {
             self.panel_action(a, cmds);
+        }
+    }
+
+    fn review_action(&mut self, a: crate::review::ReviewAction, cmds: &mut Vec<Cmd>) {
+        use crate::review::ReviewAction;
+        match a {
+            ReviewAction::Goto(n) => {
+                let Some(ds) = self.doc() else { return };
+                if !ds.editor.doc.contains(n) || ds.view == View::Source {
+                    return;
+                }
+                let Some(parent) = ds.editor.doc.parent(n) else {
+                    return;
+                };
+                let idx = ds.editor.doc.index_in_parent(n).unwrap_or(0);
+                // Just past a start mark is inside the change it begins.
+                let p = xylem_edit::pos::canonical(
+                    &ds.editor.doc,
+                    &xylem_edit::NoRules,
+                    xylem_edit::Pos::new(parent, idx + 1),
+                );
+                ds.editor.set_caret(p);
+                ds.canvas.reveal(parent);
+                ds.canvas.scroll_to_caret = true;
+                ds.canvas.request_focus = true;
+            }
+            ReviewAction::Accept(n) => cmds.push(Cmd::Resolve(n, true)),
+            ReviewAction::Reject(n) => cmds.push(Cmd::Resolve(n, false)),
+            ReviewAction::ResolveAll(accept) => cmds.push(Cmd::ResolveAll(accept)),
+            ReviewAction::SaveComment(n, text) => {
+                self.with_editor(|ed, r| ed.set_comment_text(r, n, &text));
+            }
+            ReviewAction::DeleteComment(n) => {
+                self.with_editor(|ed, r| ed.delete_comment(r, n));
+            }
         }
     }
 
@@ -2238,6 +2447,16 @@ impl XylemApp {
                 panels::breadcrumb(ui, ds, &mut acts);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(format!("{:.0}%", self.settings.zoom * 100.0));
+                    if ds.editor.is_tracking() {
+                        ui.separator();
+                        ui.colored_label(
+                            crate::review::author_color(
+                                &self.settings.author(),
+                                ui.visuals().dark_mode,
+                            ),
+                            "Tracking changes",
+                        );
+                    }
                     if let Some(w) = words {
                         ui.separator();
                         ui.label(format!("{w} words"));
@@ -2442,6 +2661,54 @@ impl XylemApp {
                 }
             } else if !open {
                 self.dialogs.table = None;
+            }
+        }
+        if let Some(cd) = &mut self.dialogs.comment {
+            let mut open = true;
+            let mut apply = false;
+            let title = if cd.node.is_some() {
+                "Edit comment"
+            } else {
+                "New comment"
+            };
+            egui::Window::new(title)
+                .collapsible(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    let r = ui.add(
+                        egui::TextEdit::multiline(&mut cd.text)
+                            .desired_rows(4)
+                            .desired_width(360.0)
+                            .hint_text("Comment"),
+                    );
+                    if std::mem::take(&mut cd.focus) {
+                        r.request_focus();
+                    }
+                    let ctrl_enter = r.has_focus()
+                        && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
+                    ui.horizontal(|ui| {
+                        apply = ui.button("OK").clicked() || ctrl_enter;
+                        ui.weak("Ctrl+Enter");
+                    });
+                });
+            if apply {
+                let (node, text) = (cd.node, cd.text.trim().to_string());
+                self.dialogs.comment = None;
+                let author = self.settings.author();
+                match node {
+                    Some(n) => {
+                        self.with_editor(|ed, r| ed.set_comment_text(r, n, &text));
+                    }
+                    None if !text.is_empty() => {
+                        self.with_editor(|ed, r| {
+                            ed.add_comment(r, &author, &crate::review::now(), &text)
+                                .map(|_| ())
+                        });
+                    }
+                    None => {}
+                }
+            } else if !open {
+                self.dialogs.comment = None;
             }
         }
         if let Some(ne) = &mut self.dialogs.node_edit {
@@ -2701,6 +2968,15 @@ impl XylemApp {
                         );
                     });
                     ui.checkbox(&mut self.settings.auto_validate, "Validate as you type");
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label("Review author");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.settings.review_author)
+                                .hint_text(crate::review::os_user_name()),
+                        );
+                    });
+                    ui.weak("Name recorded on tracked changes and comments. Empty means your login name.");
                 });
             self.dialogs.prefs = open;
             if reload {
@@ -3151,6 +3427,9 @@ impl XylemApp {
             ),
             ("F5 / F6 / F8", "Tags On / Normal / Source view"),
             ("F7", "Validate"),
+            ("Ctrl+Shift+T", "Track changes on / off"),
+            ("Ctrl+Shift+M", "New comment"),
+            ("Ctrl+Shift+A / R", "Accept / reject all changes"),
             ("Ctrl+S, Ctrl+Shift+S", "Save, save as"),
             ("Ctrl+O, Ctrl+N, Ctrl+W", "Open, new, close"),
             ("Ctrl++ / Ctrl+- / Ctrl+0", "Zoom in / out / reset"),
@@ -3568,6 +3847,14 @@ impl eframe::App for XylemApp {
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.dialogs.confirm_exit = true;
+        }
+        let author = self.settings.author();
+        for d in &mut self.docs {
+            if let Some(t) = &mut d.editor.tracking
+                && t.author != author
+            {
+                t.author = author.clone();
+            }
         }
         let mut cmds = self.shortcuts(ctx);
         let title = self

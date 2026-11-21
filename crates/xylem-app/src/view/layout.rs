@@ -14,6 +14,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use xylem_dom::{Document, NodeId, NodeKind};
 use xylem_edit::pos::{canonical, is_ignorable};
+use xylem_edit::revision::{self, MarkKind};
 use xylem_edit::{Pos, Rules};
 
 use super::style::{
@@ -414,6 +415,15 @@ pub struct LayoutStats {
     pub blocks_laid_out: u32,
 }
 
+/// How the text being laid out is marked up for review: inside a tracked
+/// insertion (drawn underlined in its author's colour) and/or a commented
+/// range (highlighted). Carried through the walk in document order.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+struct RevState {
+    insertion: Option<Color32>,
+    commented: bool,
+}
+
 /// The laid-out output of one block element. It stays valid while the
 /// element's subtree, its styles and its box (x, width) are unchanged; the
 /// vertical position and the element's index among its siblings may move.
@@ -432,6 +442,10 @@ struct CachedBlock {
     /// `element_paras` entries for the block and its descendants, with
     /// paragraph indices relative to the block's first paragraph.
     elements: Vec<(NodeId, (usize, usize))>,
+    /// Review state on entry and on exit: a tracked insertion or comment can
+    /// start before the block and end inside it, or the other way round.
+    rev_in: RevState,
+    rev_out: RevState,
 }
 
 impl LayoutCache {
@@ -541,6 +555,7 @@ pub struct Layouter<'a> {
     x: f32,
     width: f32,
     y: f32,
+    rev: RevState,
 }
 
 impl<'a> Layouter<'a> {
@@ -585,6 +600,7 @@ impl<'a> Layouter<'a> {
             x: 8.0,
             width: width - 16.0,
             y: 8.0,
+            rev: RevState::default(),
         };
         let root = doc.root();
         // Document-level nodes: comments/PIs before the root are shown in tags-on view.
@@ -785,7 +801,9 @@ impl<'a> Layouter<'a> {
             && cb.style == style
             && cb.x == self.x
             && cb.width == self.width
+            && cb.rev_in == self.rev
         {
+            self.rev = cb.rev_out;
             self.reuse_block(el, index);
             return;
         }
@@ -797,6 +815,7 @@ impl<'a> Layouter<'a> {
             self.y,
         );
         let (x, width) = (self.x, self.width);
+        let rev_in = self.rev;
         self.block_inner(el);
         if cacheable && self.cur.is_none() {
             let elements = self
@@ -822,6 +841,8 @@ impl<'a> Layouter<'a> {
                 decor: self.out.decor[d0..].to_vec(),
                 images: self.out.images[i0..].to_vec(),
                 elements,
+                rev_in,
+                rev_out: self.rev,
             };
             self.cache.blocks.insert(el, cb);
         }
@@ -980,7 +1001,82 @@ impl<'a> Layouter<'a> {
         }
     }
 
+    /// A tracked-change or comment marker. Range marks only switch the
+    /// review state and leave caret stops; deletions show the deleted text
+    /// struck through and comments a small flag, in both views.
+    fn revision_mark(&mut self, n: NodeId, kind: MarkKind) {
+        let dark = self.params.dark;
+        let before = self.before_of(n);
+        let after = self.after_of(n);
+        let author = revision::mark_author(self.doc, n).unwrap_or_default();
+        let color = crate::review::author_color(&author, dark);
+        let label = match kind {
+            MarkKind::InsertionStart | MarkKind::InsertionEnd | MarkKind::CommentEnd => {
+                match kind {
+                    MarkKind::InsertionStart => self.rev.insertion = Some(color),
+                    MarkKind::InsertionEnd => self.rev.insertion = None,
+                    _ => self.rev.commented = false,
+                }
+                let pb = self.para();
+                pb.stop(before);
+                pb.stop(after);
+                return;
+            }
+            MarkKind::Deletion => {
+                let data = revision::mark_attrs(self.doc, n);
+                let text = revision::deleted_text(data.get("data").unwrap_or_default());
+                let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                let lead = if text.starts_with(char::is_whitespace) {
+                    " "
+                } else {
+                    ""
+                };
+                let tail = if text.ends_with(char::is_whitespace) && !flat.is_empty() {
+                    " "
+                } else {
+                    ""
+                };
+                if flat.is_empty() {
+                    // Deleted markup with no text (an empty element, a line break).
+                    "\u{2205}".to_string()
+                } else {
+                    format!("{lead}{flat}{tail}")
+                }
+            }
+            MarkKind::Comment | MarkKind::CommentStart => {
+                if kind == MarkKind::CommentStart {
+                    self.rev.commented = true;
+                }
+                // The author's initials, as word processors mark comments;
+                // plain letters render in every font.
+                format!("\u{2009}{}\u{2009}", crate::review::initials(&author))
+            }
+        };
+        let parent = self.doc.parent(n).unwrap();
+        let mut fmt = self.fmt(&self.styles.get(parent));
+        fmt.underline = Stroke::NONE;
+        if kind == MarkKind::Deletion {
+            fmt.color = color;
+            fmt.strikethrough = Stroke::new(1.5_f32, color);
+            if let Some(c) = self.rev.insertion {
+                fmt.underline = Stroke::new(1.0_f32, c);
+            }
+        } else {
+            fmt.color = color;
+            fmt.background = crate::review::comment_fill(dark);
+        }
+        let pb = self.para();
+        pb.stop(before);
+        pb.push(&label, fmt, SegKind::Atom(n));
+        pb.stop(after);
+        pb.has_content = true;
+        pb.last_space = label.ends_with(' ');
+    }
+
     fn atom(&mut self, n: NodeId) {
+        if let Some(kind) = revision::mark_kind(self.doc, n) {
+            return self.revision_mark(n, kind);
+        }
         let (label, sty) = match self.doc.kind(n) {
             NodeKind::Comment(t) => {
                 if !self.tags() && self.styles.get(n).display == Display::None {
@@ -1043,7 +1139,14 @@ impl<'a> Layouter<'a> {
 
     fn text(&mut self, t: NodeId, s: &Sty) {
         let raw = self.doc.text(t).unwrap_or("");
-        let fmt = self.fmt(s);
+        let mut fmt = self.fmt(s);
+        if let Some(c) = self.rev.insertion {
+            fmt.color = c;
+            fmt.underline = Stroke::new(1.0_f32, c);
+        }
+        if self.rev.commented {
+            fmt.background = crate::review::comment_fill(self.params.dark);
+        }
         let pre = matches!(s.white_space, WhiteSpace::Pre | WhiteSpace::PreWrap);
         let mut out = String::with_capacity(raw.len());
         let mut bytes = Vec::with_capacity(raw.len() + 1);

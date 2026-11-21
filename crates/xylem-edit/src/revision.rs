@@ -397,53 +397,39 @@ const EXCERPT_CHARS: usize = 200;
 /// All changes and comments in the document, in document order. Unmatched
 /// start markers are listed with no end so they can still be found and fixed.
 pub fn changes(doc: &Document) -> Vec<Change> {
-    let mut out = Vec::new();
-    for n in doc.descendants(doc.root()) {
-        let Some(kind) = mark_kind(doc, n) else {
-            continue;
-        };
-        let attrs = mark_attrs(doc, n);
-        let author = attrs.get("author").unwrap_or_default().to_string();
-        let time = attrs.get("time").unwrap_or_default().to_string();
-        let (kind, end, excerpt, comment) = match kind {
-            MarkKind::InsertionStart => {
-                let end = partner(doc, n);
-                (ChangeKind::Insertion, end, text_between(doc, n, end), "")
-            }
-            MarkKind::Deletion => (
-                ChangeKind::Deletion,
-                None,
-                deleted_text(attrs.get("data").unwrap_or_default()),
-                "",
-            ),
-            MarkKind::Comment => (
-                ChangeKind::Comment,
-                None,
-                String::new(),
-                attrs.get("data").unwrap_or_default(),
-            ),
-            MarkKind::CommentStart => {
-                let end = partner(doc, n);
-                (
-                    ChangeKind::Comment,
-                    end,
-                    text_between(doc, n, end),
-                    attrs.get("data").unwrap_or_default(),
-                )
-            }
-            MarkKind::InsertionEnd | MarkKind::CommentEnd => continue,
-        };
-        out.push(Change {
-            kind,
-            node: n,
-            end,
-            author,
-            time,
-            excerpt,
-            comment: comment.to_string(),
-        });
-    }
-    out
+    doc.descendants(doc.root())
+        .filter_map(|n| change_of(doc, n))
+        .collect()
+}
+
+/// The change or comment that marker `n` starts (None for end markers and
+/// other nodes).
+pub fn change_of(doc: &Document, n: NodeId) -> Option<Change> {
+    let kind = mark_kind(doc, n)?;
+    let attrs = mark_attrs(doc, n);
+    let data = attrs.get("data").unwrap_or_default();
+    let (kind, end, excerpt, comment) = match kind {
+        MarkKind::InsertionStart => {
+            let end = partner(doc, n);
+            (ChangeKind::Insertion, end, text_between(doc, n, end), "")
+        }
+        MarkKind::Deletion => (ChangeKind::Deletion, None, deleted_text(data), ""),
+        MarkKind::Comment => (ChangeKind::Comment, None, String::new(), data),
+        MarkKind::CommentStart => {
+            let end = partner(doc, n);
+            (ChangeKind::Comment, end, text_between(doc, n, end), data)
+        }
+        MarkKind::InsertionEnd | MarkKind::CommentEnd => return None,
+    };
+    Some(Change {
+        kind,
+        node: n,
+        end,
+        author: attrs.get("author").unwrap_or_default().to_string(),
+        time: attrs.get("time").unwrap_or_default().to_string(),
+        excerpt,
+        comment: comment.to_string(),
+    })
 }
 
 /// The text between two markers, cut short for display.
@@ -562,6 +548,21 @@ impl Editor {
             && self.is_own(start, &author)
         {
             return self.insert_text_at(rules, p, text);
+        }
+        // Text typed just before deleted text goes after it, so a change
+        // reads as old then new (Backspace leaves the caret in front).
+        let mut p = p;
+        let b = boundary(&self.doc, p);
+        if !self.doc.is_text(b.node) {
+            let mut idx = b.offset;
+            while let Some(n) = sibling_after(&self.doc, b.node, idx)
+                && mark_kind(&self.doc, n) == Some(MarkKind::Deletion)
+            {
+                idx = self.doc.index_in_parent(n).unwrap() + 1;
+            }
+            if idx != b.offset {
+                p = canonical(&self.doc, rules, Pos::new(b.node, idx));
+            }
         }
         // Right at the outer edge of an insertion of ours: extend it.
         let b = boundary(&self.doc, p);

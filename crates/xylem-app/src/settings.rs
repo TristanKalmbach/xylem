@@ -34,6 +34,9 @@ pub struct Settings {
     pub last_session: Vec<PathBuf>,
     /// Seconds between autosaves of unsaved work (0 turns it off).
     pub autosave_seconds: u32,
+    /// Name recorded on tracked changes and comments; empty means the
+    /// login name.
+    pub review_author: String,
 }
 
 impl Default for Settings {
@@ -59,6 +62,7 @@ impl Default for Settings {
             restore_session: true,
             last_session: Vec::new(),
             autosave_seconds: 60,
+            review_author: String::new(),
         }
     }
 }
@@ -95,6 +99,14 @@ pub fn config_dir() -> Option<PathBuf> {
 }
 
 impl Settings {
+    /// The author for tracked changes and comments.
+    pub fn author(&self) -> String {
+        match self.review_author.trim() {
+            "" => crate::review::os_user_name(),
+            name => name.to_string(),
+        }
+    }
+
     pub fn add_recent(&mut self, p: PathBuf) {
         self.recent_files.retain(|r| r != &p);
         self.recent_files.insert(0, p);

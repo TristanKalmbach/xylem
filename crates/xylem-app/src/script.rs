@@ -2,7 +2,7 @@
 //!
 //! Steps are separated by `;;`:
 //! `wait N` · `type TEXT` · `paste TEXT` · `key NAME [ctrl] [shift] [alt]` · `click X Y` ·
-//! `dblclick X Y` · `rclick X Y` · `shot PATH` · `drop FILE` · `save PATH` (writes the active
+//! `dblclick X Y` · `rclick X Y` · `hover X Y` · `shot PATH` · `drop FILE` · `save PATH` (writes the active
 //! document's XML) · `pick PATH` (the answer the next file dialog gives; `pick -` cancels it) ·
 //! `quit`.
 
@@ -29,6 +29,8 @@ pub enum Step {
     Key(Key, Modifiers),
     Click(Pos2, PointerButton, u8),
     CtrlClick(Pos2),
+    /// Moves the pointer without clicking (shows tooltips).
+    Hover(Pos2),
     Shot(PathBuf),
     Save(PathBuf),
     Drop(PathBuf),
@@ -77,6 +79,13 @@ impl Script {
                         }
                     }
                     Step::Key(k, m)
+                }
+                "hover" => {
+                    let n = nums();
+                    if n.len() < 2 {
+                        continue;
+                    }
+                    Step::Hover(Pos2::new(n[0], n[1]))
                 }
                 "click" | "dblclick" | "rclick" | "ctrlclick" => {
                     let n = nums();
@@ -203,6 +212,7 @@ impl Script {
                 self.release = Some((p, PointerButton::Primary));
                 self.hold_ctrl = true;
             }
+            Step::Hover(p) => raw.events.push(Event::PointerMoved(p)),
             Step::Shot(p) => self.pending_shot = Some(p),
             Step::Save(p) => self.pending_save = Some(p),
             Step::Drop(p) => raw.dropped_files.push(egui::DroppedFile {
