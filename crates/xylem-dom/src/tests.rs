@@ -151,3 +151,93 @@ fn revisions_are_unique_across_documents() {
         "...but different stamps"
     );
 }
+
+/// The text node of `<p>` in a document whose root holds one `<p>`.
+fn para_text(doc: &Document) -> NodeId {
+    let root = doc.document_element().unwrap();
+    let p = doc.element_children(root).next().unwrap();
+    doc.children(p)[0]
+}
+
+#[test]
+fn replace_text_keeps_references_and_line_endings_around_the_change() {
+    let src =
+        "<r>\r\n<p>a &#176; b &gt; c > old\r\nnext &amp; x</p>\r\n<q x=\"&#65;\"/>\r\n</r>\r\n";
+    let mut doc = Document::from_str(src).unwrap();
+    let t = para_text(&doc);
+    let at = doc.text(t).unwrap().find("old").unwrap();
+    doc.replace_text(t, at..at + 3, "new<1>");
+    assert_eq!(
+        doc.to_xml(),
+        src.replace("old", "new&lt;1&gt;"),
+        "only the replaced span changes"
+    );
+    assert!(doc.text(t).unwrap().contains("new<1>"));
+}
+
+#[test]
+fn replace_text_in_legacy_encodings_round_trips() {
+    // Latin-1: "café" with é as one byte; the replacement changes only "old".
+    let mut bytes = b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><r><p>caf".to_vec();
+    bytes.push(0xE9);
+    bytes.extend_from_slice(b" old &#8212; end</p></r>");
+    let mut doc = Document::from_bytes(&bytes).unwrap();
+    assert_eq!(doc.encoding, Encoding::Latin1);
+    let t = para_text(&doc);
+    let at = doc.text(t).unwrap().find("old").unwrap();
+    doc.replace_text(t, at..at + 3, "neu");
+    let mut expected = b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><r><p>caf".to_vec();
+    expected.push(0xE9);
+    expected.extend_from_slice(b" neu &#8212; end</p></r>");
+    assert_eq!(doc.to_bytes(), expected);
+
+    // UTF-16 with a byte order mark.
+    let encode = |s: &str| {
+        let mut b = vec![0xFF, 0xFE];
+        for u in s.encode_utf16() {
+            b.extend_from_slice(&u.to_le_bytes());
+        }
+        b
+    };
+    let mut doc = Document::from_bytes(&encode("<r><p>one two</p></r>")).unwrap();
+    let t = para_text(&doc);
+    doc.replace_text(t, 4..7, "2");
+    assert_eq!(doc.to_bytes(), encode("<r><p>one 2</p></r>"));
+}
+
+#[test]
+fn replace_text_in_cdata_keeps_the_section() {
+    let src = "<r><p><![CDATA[a < old ]]></p></r>";
+    let mut doc = Document::from_str(src).unwrap();
+    let t = para_text(&doc);
+    let at = doc.text(t).unwrap().find("old").unwrap();
+    doc.replace_text(t, at..at + 3, "new");
+    assert_eq!(doc.to_xml(), "<r><p><![CDATA[a < new ]]></p></r>");
+}
+
+#[test]
+fn replace_text_is_undone_through_the_journal() {
+    let src = "<r><p>x &#169; old</p></r>";
+    let mut doc = Document::from_str(src).unwrap();
+    let t = para_text(&doc);
+    let at = doc.text(t).unwrap().find("old").unwrap();
+    doc.begin_journal();
+    doc.replace_text(t, at..at + 3, "new");
+    assert_eq!(doc.to_xml(), "<r><p>x &#169; new</p></r>");
+    let ops = doc.take_journal();
+    doc.revert(&ops);
+    assert_eq!(doc.to_xml(), src);
+}
+
+#[test]
+fn offsets_point_at_each_node() {
+    let src = "<r>\n  <a x=\"1\">text</a>\n  <!--c-->\n</r>";
+    let doc = Document::from_str(src).unwrap();
+    let (xml, offs) = doc.to_xml_with_offsets();
+    assert_eq!(xml, src);
+    let root = doc.document_element().unwrap();
+    let a = doc.element_children(root).next().unwrap();
+    assert!(xml[offs[a.index()]..].starts_with("<a x="));
+    let text = doc.children(a)[0];
+    assert!(xml[offs[text.index()]..].starts_with("text</a>"));
+}
