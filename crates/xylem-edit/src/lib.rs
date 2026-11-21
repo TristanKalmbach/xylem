@@ -6,6 +6,7 @@
 //! elements, clipboard fragments, CALS/HTML table operations, and undo.
 //! Schema and customisation knowledge comes in through the [`Rules`] trait.
 
+pub mod format;
 pub mod pos;
 pub mod table;
 

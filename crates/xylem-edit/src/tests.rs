@@ -367,3 +367,30 @@ fn protected_markers_survive_deletes_but_not_parent_removal() {
     e.delete_element(&Prot, p).unwrap();
     assert_eq!(xml(&e), "<doc><p>next</p></doc>");
 }
+
+#[test]
+fn reformat_only_touches_formatting_whitespace() {
+    let src = "<doc><section><p>a <b>b</b> c</p><p>d</p></section><pre>  keep
+  this</pre></doc>";
+    let mut e = ed(src);
+    let opts = format::FormatOptions { indent: 2, flat: &|_| false };
+    e.reformat(&TestRules, &opts).unwrap();
+    assert_eq!(
+        xml(&e),
+        "<doc>
+  <section>
+    <p>a <b>b</b> c</p>
+    <p>d</p>
+  </section>
+  <pre>  keep
+  this</pre>
+</doc>"
+    );
+    // Formatting twice is stable, and one undo restores the original.
+    let once = xml(&e);
+    e.reformat(&TestRules, &opts).unwrap();
+    assert_eq!(xml(&e), once);
+    e.undo();
+    e.undo();
+    assert_eq!(xml(&e), src);
+}

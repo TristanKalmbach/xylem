@@ -725,16 +725,15 @@ impl XylemApp {
                 self.with_editor(|ed, r| ed.table_move_row(r, false));
             }
             Cmd::PrettyPrint => {
-                let Some(ds) = self.doc() else { return };
-                if !matches!(ds.view, View::Source) {
-                    ds.view = View::Source;
+                let Some(ds) = self.docs.get(self.active) else { return };
+                let pp = ds.package.pretty_print.clone();
+                let indent = pp.indent_amount.unwrap_or(2) as usize;
+                // Elements that the customization lists without "indent content".
+                let flat = move |name: &str| pp.elements.get(name).is_some_and(|e| !e.indent_content && (e.newline_before_start_tag || e.newline_before_end_tag));
+                let opts = xylem_edit::format::FormatOptions { indent, flat: &flat };
+                if self.with_editor(|ed, r| ed.reformat(r, &opts)).is_some() {
+                    self.toast("Formatted the document (one undo step).", false);
                 }
-                let text = ds.editor.doc.pretty_xml(ds.editor.doc.root());
-                ds.source = Some(SourceState {
-                    text,
-                    error: None,
-                    revision: u64::MAX,
-                });
             }
             Cmd::ImportXmax => self.import_xmax(),
             Cmd::Preferences => self.dialogs.prefs = true,
@@ -1401,7 +1400,7 @@ impl XylemApp {
                     cmds.push(Cmd::SpellCheck);
                 }
                 if ui
-                    .add_enabled(has_doc, egui::Button::new("Pretty-print source"))
+                    .add_enabled(has_doc, egui::Button::new("Format document (pretty-print)"))
                     .clicked()
                 {
                     cmds.push(Cmd::PrettyPrint);
