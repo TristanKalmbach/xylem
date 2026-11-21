@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dmodule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_4-1/xml_schema_flat/descript.xsd">
+  <identAndStatusSection>
+    <dmAddress>
+      <dmIdent>
+        <dmCode modelIdentCode="XYLEM" systemDiffCode="A" systemCode="29" subSystemCode="2" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="040" infoCodeVariant="A" itemLocationCode="A"/>
+        <language languageIsoCode="en" countryIsoCode="US"/>
+        <issueInfo issueNumber="001" inWork="00"/>
+      </dmIdent>
+      <dmAddressItems>
+        <issueDate year="2026" month="11" day="21"/>
+        <dmTitle><techName>Lift cylinder</techName><infoName>Description</infoName></dmTitle>
+      </dmAddressItems>
+    </dmAddress>
+    <dmStatus>
+      <security securityClassification="01"/>
+      <responsiblePartnerCompany enterpriseCode="00000"><enterpriseName>Placeholder</enterpriseName></responsiblePartnerCompany>
+      <originator enterpriseCode="00000"><enterpriseName>Placeholder</enterpriseName></originator>
+      <applic>
+        <displayText><simplePara>Lift models L100 and L200</simplePara></displayText>
+        <assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="L100|L200"/>
+      </applic>
+      <brexDmRef><dmRef><dmRefIdent><dmCode modelIdentCode="S1000D" systemDiffCode="E" systemCode="04" subSystemCode="1" subSubSystemCode="0" assyCode="0301" disassyCode="00" disassyCodeVariant="A" infoCode="022" infoCodeVariant="A" itemLocationCode="D"/></dmRefIdent></dmRef></brexDmRef>
+      <qualityAssurance><unverified/></qualityAssurance>
+    </dmStatus>
+  </identAndStatusSection>
+  <content>
+    <referencedApplicGroup>
+      <applic id="app-L100">
+        <displayText><simplePara>L100</simplePara></displayText>
+        <assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="L100"/>
+      </applic>
+      <applic id="app-L200">
+        <displayText><simplePara>L200</simplePara></displayText>
+        <assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="L200"/>
+      </applic>
+      <applic id="app-L200-late">
+        <displayText><simplePara>L200 from serial 500, with the cold-weather kit</simplePara></displayText>
+        <evaluate andOr="and">
+          <assert applicPropertyIdent="model" applicPropertyType="prodattr" applicPropertyValues="L200"/>
+          <assert applicPropertyIdent="serialno" applicPropertyType="prodattr" applicPropertyValues="500~999"/>
+          <assert applicPropertyIdent="coldkit" applicPropertyType="condition" applicPropertyValues="installed"/>
+        </evaluate>
+      </applic>
+    </referencedApplicGroup>
+    <description>
+      <levelledPara>
+        <title>Lift cylinder</title>
+        <para>The lift cylinder raises the platform when the pump supplies fluid.</para>
+        <para applicRefId="app-L100">The L100 has a single-stage cylinder with a stroke of 1.2 m.</para>
+        <para applicRefId="app-L200">The L200 has a two-stage telescopic cylinder with a stroke of 2.4 m.</para>
+        <para applicRefId="app-L200-late">Late L200 lifts with the cold-weather kit have a heated return line.</para>
+      </levelledPara>
+      <levelledPara applicRefId="app-L200">
+        <title>Telescopic stages</title>
+        <para>The second stage extends only after the first stage is fully out.</para>
+      </levelledPara>
+    </description>
+  </content>
+</dmodule>

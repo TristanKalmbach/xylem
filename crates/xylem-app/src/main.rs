@@ -9,6 +9,7 @@ mod find;
 mod fonts;
 mod install;
 mod panels;
+mod project_ui;
 mod s1000d_ui;
 mod script;
 mod settings;

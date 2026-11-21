@@ -3,8 +3,11 @@
 
 use crate::view::canvas::Canvas;
 use crate::view::layout::ViewMode;
-use crate::view::style::{CssStyles, DefaultStyles, StyleLookup, WhiteSpace};
-use std::collections::HashMap;
+use crate::view::style::{
+    ApplicDisplay, ApplicStyles, CssStyles, DefaultStyles, StyleLookup, WhiteSpace,
+};
+use egui::Color32;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -63,6 +66,8 @@ pub struct DocState {
     pub style_warnings: Vec<String>,
     styles: Option<Rc<dyn StyleLookup>>,
     styles_key: (u64, u64),
+    /// Counts exact styles replacing patched ones for the same key.
+    styles_generation: u64,
     pub style_revision: u64,
     pub canvas: Canvas,
     pub source: Option<SourceState>,
@@ -86,6 +91,27 @@ pub struct DocState {
     /// Autosave copy this document was recovered from. The document counts as
     /// unsaved, and the copy is kept, until the user saves or discards it.
     pub recovered_from: Option<std::path::PathBuf>,
+    /// S1000D applicability filter (View > Applicability).
+    pub applic: ApplicFilter,
+    applic_cache: Option<ApplicCache>,
+}
+
+/// The values chosen in the applicability dialog for one document.
+#[derive(Default)]
+pub struct ApplicFilter {
+    pub enabled: bool,
+    pub choice: xylem_s1000d::ApplicChoice,
+    pub display: ApplicDisplay,
+    /// Bumped on every change so the cached result is recomputed.
+    pub revision: u64,
+}
+
+struct ApplicCache {
+    /// (structure revision, filter revision) the result belongs to.
+    key: (u64, u64),
+    result: Rc<xylem_s1000d::ApplicFilterResult>,
+    excluded: Rc<HashSet<NodeId>>,
+    salt: u64,
 }
 
 impl DocState {
@@ -108,6 +134,7 @@ impl DocState {
             style_warnings: Vec::new(),
             styles: None,
             styles_key: (u64::MAX, 0),
+            styles_generation: 0,
             style_revision: 1,
             canvas: Canvas::default(),
             source: None,
@@ -126,6 +153,8 @@ impl DocState {
             style_job: None,
             repaint: None,
             recovered_from: None,
+            applic: ApplicFilter::default(),
+            applic_cache: None,
         }
     }
 
@@ -272,8 +301,58 @@ impl DocState {
         self.validated_revision = None;
     }
 
-    /// Current styles (recomputed when the document or stylesheet changed).
+    /// Current styles, with the applicability filter applied when it is on.
     pub fn styles(&mut self) -> Rc<dyn StyleLookup> {
+        let base = self.base_styles();
+        match self.applic_excluded() {
+            Some((excluded, salt)) => Rc::new(ApplicStyles::new(
+                base,
+                excluded,
+                self.applic.display,
+                Color32::from_rgba_unmultiplied(128, 128, 128, 150),
+                salt,
+            )),
+            None => base,
+        }
+    }
+
+    /// The applicability filter's result for the current structure, computed
+    /// once per structure and filter revision.
+    pub fn applic_result(&mut self) -> Option<Rc<xylem_s1000d::ApplicFilterResult>> {
+        if !self.applic.enabled {
+            return None;
+        }
+        let key = (self.editor.doc.structure_revision(), self.applic.revision);
+        if self.applic_cache.as_ref().is_none_or(|c| c.key != key) {
+            let doc = &self.editor.doc;
+            let result = xylem_s1000d::filter_document(doc, &self.applic.choice);
+            let excluded = result.excluded_subtrees(doc);
+            let salt = {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                let mut ids: Vec<usize> = result.excluded.iter().map(|n| n.index()).collect();
+                ids.sort_unstable();
+                (ids, self.applic.display).hash(&mut h);
+                h.finish()
+            };
+            self.applic_cache = Some(ApplicCache {
+                key,
+                result: Rc::new(result),
+                excluded: Rc::new(excluded),
+                salt,
+            });
+        }
+        self.applic_cache.as_ref().map(|c| c.result.clone())
+    }
+
+    fn applic_excluded(&mut self) -> Option<(Rc<HashSet<NodeId>>, u64)> {
+        self.applic_result()?;
+        let c = self.applic_cache.as_ref()?;
+        Some((c.excluded.clone(), c.salt))
+    }
+
+    /// Styles from the stylesheet (recomputed when the document or stylesheet changed).
+    fn base_styles(&mut self) -> Rc<dyn StyleLookup> {
         // CSS styles depend only on structure and attributes, so plain typing
         // reuses them; the default styling looks at text (mixed content).
         let doc_key = if self.style_engine.is_some() {
@@ -293,6 +372,9 @@ impl DocState {
                         self.exact_css = Some(css.clone());
                         self.styles = Some(css);
                         self.styles_key = key;
+                        // Same key as the patched styles it replaces, so the
+                        // view needs a separate signal to lay out again.
+                        self.styles_generation += 1;
                     }
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => self.style_job = None,
@@ -378,7 +460,14 @@ impl DocState {
 
     /// Style revision that changes whenever styles are recomputed.
     pub fn styles_revision_key(&self) -> u64 {
-        self.style_revision.wrapping_mul(1_000_003) ^ self.styles_key.0
+        let applic = match (&self.applic_cache, self.applic.enabled) {
+            (Some(c), true) => c.salt,
+            _ => 0,
+        };
+        self.style_revision.wrapping_mul(1_000_003)
+            ^ self.styles_key.0
+            ^ self.styles_generation.wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            ^ applic
     }
 
     pub fn validate(&mut self) {

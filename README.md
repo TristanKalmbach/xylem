@@ -17,8 +17,10 @@ What it does:
   byte, including entities, quoting, whitespace and encoding.
 - Has CALS and HTML tables, find and replace, spell checking with Hunspell
   dictionaries, a structure tree, an attribute inspector and an issues list.
-- For S1000D: a new data module wizard, DMC and CSDB file naming, BREX
-  checking, dmRef navigation and a built-in stylesheet.
+- For S1000D: a wizard for new data modules and publication modules, DMC and
+  CSDB file naming, BREX checking, dmRef navigation, a built-in stylesheet, a
+  project view that lists a CSDB folder and checks the references between its
+  modules, and applicability filtering; see [docs/s1000d.md](docs/s1000d.md).
 - Converts XMAX customizations (`.ctm` folders and `.xac` archives) into Xylem
   doctype packages with `xylem-import`; see
   [docs/doctype-packages.md](docs/doctype-packages.md).

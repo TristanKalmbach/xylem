@@ -342,27 +342,28 @@ pub fn scan_dir(dir: &Path, progress: &ScanProgress) -> Project {
     let workers = std::thread::available_parallelism()
         .map_or(2, |n| n.get())
         .clamp(1, 8);
-    let results: Vec<Vec<(usize, Result<Option<ProjectModule>, String>)>> =
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..workers)
-                .map(|_| {
-                    s.spawn(|| {
-                        let mut out = Vec::new();
-                        while !progress.cancel.load(AtomicOrdering::Relaxed) {
-                            let i = next.fetch_add(1, AtomicOrdering::Relaxed);
-                            let Some(file) = files.get(i) else { break };
-                            out.push((i, scan_file(file)));
-                            progress.done.fetch_add(1, AtomicOrdering::Relaxed);
-                        }
-                        out
-                    })
+    // Each worker returns (file index, outcome) pairs.
+    type Scanned = (usize, Result<Option<ProjectModule>, String>);
+    let results: Vec<Vec<Scanned>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut out = Vec::new();
+                    while !progress.cancel.load(AtomicOrdering::Relaxed) {
+                        let i = next.fetch_add(1, AtomicOrdering::Relaxed);
+                        let Some(file) = files.get(i) else { break };
+                        out.push((i, scan_file(file)));
+                        progress.done.fetch_add(1, AtomicOrdering::Relaxed);
+                    }
+                    out
                 })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap_or_default())
-                .collect()
-        });
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
     let mut project = Project {
         dir: dir.to_path_buf(),
         ..Default::default()

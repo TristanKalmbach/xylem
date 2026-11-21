@@ -34,6 +34,8 @@ pub struct Settings {
     pub last_session: Vec<PathBuf>,
     /// Seconds between autosaves of unsaved work (0 turns it off).
     pub autosave_seconds: u32,
+    /// The folder last shown in the Project tab.
+    pub project_dir: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -59,6 +61,7 @@ impl Default for Settings {
             restore_session: true,
             last_session: Vec::new(),
             autosave_seconds: 60,
+            project_dir: None,
         }
     }
 }

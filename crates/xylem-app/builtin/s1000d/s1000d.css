@@ -55,6 +55,20 @@ dmRefIdent, dmRefAddressItems { display: inline; }
 dmRef dmCode, pmRef pmCode { display: inline; font-weight: normal; }
 dmRefAddressItems { display: none; }
 externalPubRef { color: #0b5fa5; }
+pmRef { color: #0b5fa5; }
+pmRef:before { content: "→ "; }
+pmRefIdent, pmRefAddressItems { display: inline; }
+pmRefAddressItems { display: none; }
+
+/* Publication modules: the entries read as a nested table of contents, each
+   reference on its own line followed by the title it carries. */
+pmEntry { display: block; margin: 4px 0 4px 14px; padding-left: 8px; border-left: 2px solid #c5ccd8; }
+pmEntryTitle { display: block; font-weight: bold; font-size: 12pt; color: #1b3a6b; margin-bottom: 2px; }
+pmEntry > dmRef, pmEntry > pmRef, pmEntry > externalPubRef { display: block; margin: 2px 0; }
+pmEntry > dmRef issueInfo, pmEntry > dmRef language, pmEntry > pmRef issueInfo, pmEntry > pmRef language { display: inline; font-size: 9pt; color: #667; }
+pmEntry > dmRef > dmRefAddressItems, pmEntry > pmRef > pmRefAddressItems { display: inline; }
+pmEntry dmRefAddressItems dmTitle, pmEntry pmRefAddressItems pmTitle { display: inline; font-size: 11pt; font-weight: normal; color: #222; margin: 0 0 0 8px; }
+pmEntry dmRefAddressItems issueDate, pmEntry pmRefAddressItems issueDate { display: none; }
 
 /* Lists */
 randomList, sequentialList, definitionList { display: block; margin-left: 22px; margin-top: 4px; }
