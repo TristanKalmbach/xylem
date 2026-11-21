@@ -61,6 +61,10 @@ be read is skipped instead of stopping the editor.
 xylem --install --team //fileserver/xylem/xylem-team.toml
 ```
 
+On Windows, `xylem.exe` is a GUI program, so PowerShell does not wait for
+it and its messages can appear after the next prompt. Add `| Out-Host` (or
+run it from `cmd`) to wait for it and see the result in order.
+
 This copies the running executable to a per-user folder and needs no
 administrator rights:
 
