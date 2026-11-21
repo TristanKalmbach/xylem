@@ -475,23 +475,81 @@ impl LayoutCache {
     }
 }
 
-pub fn tag_color(name: &str, overrides: &HashMap<String, Color32>, dark: bool) -> Color32 {
-    if let Some(c) = overrides.get(name) {
-        return *c;
-    }
+/// Hues tag chips are drawn in, picked so that every one reads well as a
+/// pale tint (light theme) and a deep one (dark theme). Elements hash onto
+/// this list, so the same element always has the same colour.
+const TAG_HUES: [f32; 9] = [168.0, 205.0, 232.0, 262.0, 300.0, 340.0, 22.0, 45.0, 95.0];
+
+fn tag_hue(name: &str) -> f32 {
     let mut h: u32 = 2166136261;
     for b in name.bytes() {
         h = (h ^ b as u32).wrapping_mul(16777619);
     }
-    let hue = (h % 360) as f32 / 360.0;
-    let (s, l) = if dark { (0.35, 0.32) } else { (0.45, 0.86) };
-    let c = egui::ecolor::Hsva::from(egui::ecolor::HsvaGamma {
-        h: hue,
+    TAG_HUES[(h % TAG_HUES.len() as u32) as usize] / 360.0
+}
+
+/// HSV in gamma (perceptual) space, as colour pickers show it.
+fn hsv(h: f32, s: f32, v: f32) -> Color32 {
+    Color32::from(egui::ecolor::Hsva::from(egui::ecolor::HsvaGamma {
+        h,
         s,
-        v: l,
+        v,
         a: 1.0,
-    });
-    Color32::from(c)
+    }))
+}
+
+/// Fill colour of an element's tag chips (a package may set its own).
+pub fn tag_color(name: &str, overrides: &HashMap<String, Color32>, dark: bool) -> Color32 {
+    if let Some(c) = overrides.get(name) {
+        return *c;
+    }
+    let h = tag_hue(name);
+    if dark {
+        hsv(h, 0.38, 0.27)
+    } else {
+        hsv(h, 0.13, 0.97)
+    }
+}
+
+/// Outline of an element's tag chips.
+pub fn tag_edge(name: &str, overrides: &HashMap<String, Color32>, dark: bool) -> Color32 {
+    if overrides.contains_key(name) {
+        return if dark {
+            Color32::from_gray(120)
+        } else {
+            Color32::from_gray(150)
+        };
+    }
+    let h = tag_hue(name);
+    if dark {
+        hsv(h, 0.40, 0.45)
+    } else {
+        hsv(h, 0.32, 0.80)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn tag_chip_text_is_readable() {
+    let none = HashMap::new();
+    for name in [
+        "para", "title", "chapter", "entry", "list", "item", "b", "xref", "warning", "dmCode",
+    ] {
+        for dark in [false, true] {
+            let c = crate::ui::theme::contrast(tag_ink(name, dark), tag_color(name, &none, dark));
+            assert!(c >= 4.5, "<{name}> chip text contrast {c:.2} (dark={dark})");
+        }
+    }
+}
+
+/// Text colour of an element's tag chips.
+pub fn tag_ink(name: &str, dark: bool) -> Color32 {
+    let h = tag_hue(name);
+    if dark {
+        hsv(h, 0.22, 0.93)
+    } else {
+        hsv(h, 0.80, 0.36)
+    }
 }
 
 struct ParaBuilder {
@@ -688,14 +746,9 @@ impl<'a> Layouter<'a> {
     }
 
     fn tag_fmt(&self, name: &str) -> TextFormat {
-        let _ = name;
         TextFormat {
             font_id: FontId::new(self.z(10.5), FontFamily::Name("sans".into())),
-            color: if self.params.dark {
-                Color32::from_gray(235)
-            } else {
-                Color32::from_gray(30)
-            },
+            color: tag_ink(name, self.params.dark),
             valign: Align::Center,
             ..Default::default()
         }
@@ -1102,10 +1155,11 @@ impl<'a> Layouter<'a> {
             )
         {
             if sty.as_ref().is_none_or(|s| s.color.is_none()) {
+                let pal = crate::ui::Palette::for_dark_mode(self.params.dark);
                 fmt.color = if is_placeholder {
-                    Color32::from_rgb(0x30, 0x60, 0xc0)
+                    pal.accent
                 } else {
-                    Color32::from_rgb(0x70, 0x70, 0x70)
+                    pal.text_muted
                 };
             }
             if is_placeholder {

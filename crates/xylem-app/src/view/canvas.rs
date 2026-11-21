@@ -3,6 +3,7 @@
 
 use super::layout::{
     Decor, DocLayout, LayoutCache, LayoutParams, Layouter, Loc, SegKind, ViewMode, tag_color,
+    tag_edge,
 };
 use super::style::StyleLookup;
 use egui::{
@@ -801,11 +802,8 @@ impl Canvas {
             }
         }
         // Selection.
-        let sel_color = if dark {
-            Color32::from_rgba_unmultiplied(60, 110, 200, 110)
-        } else {
-            Color32::from_rgba_unmultiplied(120, 170, 255, 110)
-        };
+        let pal = crate::ui::palette(ui.ctx());
+        let sel_color = pal.accent.gamma_multiply(if dark { 0.38 } else { 0.24 });
         if !ed.sel.is_caret() {
             let (a, b) = ed.sel.ordered(&ed.doc);
             if let (Some(la), Some(lb)) = (
@@ -827,7 +825,7 @@ impl Canvas {
             }
         }
         // Find / spelling highlights.
-        let hl = Color32::from_rgba_unmultiplied(255, 210, 0, 120);
+        let hl = pal.warning.gamma_multiply(if dark { 0.45 } else { 0.30 });
         for (node, range) in &self.highlights {
             self.paint_text_range(&painter, off, ed, cx, *node, range.clone(), |r, p| {
                 p.rect_filled(r, 1.0, hl);
@@ -835,7 +833,7 @@ impl Canvas {
         }
         for (node, range) in &self.misspelled {
             self.paint_text_range(&painter, off, ed, cx, *node, range.clone(), |r, p| {
-                squiggle(p, r, Color32::from_rgb(220, 40, 40));
+                squiggle(p, r, pal.danger);
             });
         }
         // Tag chips, then text.
@@ -852,10 +850,15 @@ impl Canvas {
                 };
                 let name = ed.doc.name(el).unwrap_or("");
                 let fill = tag_color(name, cx.tag_colors, dark);
-                let flagged = self.flagged.contains(&el);
+                let edge = if self.flagged.contains(&el) {
+                    Some(pal.danger)
+                } else {
+                    None
+                };
+                let edge = edge.unwrap_or_else(|| tag_edge(name, cx.tag_colors, dark));
                 for r in self.layout.range_rects(pi, seg.chars.start, seg.chars.end) {
                     let r = r.translate(off).shrink2(vec2(0.5, 1.5));
-                    chip(&painter, r, kind, fill, flagged, dark);
+                    chip(&painter, r, kind, fill, edge, self.flagged.contains(&el));
                 }
             }
             painter.galley(p.anchor + off, p.galley.clone(), Color32::GRAY);
@@ -932,8 +935,10 @@ impl Canvas {
             let t = ui.input(|i| i.time);
             let visible = (t * 1.6).fract() < 0.6 || ui.input(|i| i.time_since_last_scroll() < 0.5);
             if visible {
-                let c = if dark { Color32::WHITE } else { Color32::BLACK };
-                painter.line_segment([r.center_top(), r.center_bottom()], Stroke::new(1.6_f32, c));
+                painter.line_segment(
+                    [r.center_top(), r.center_bottom()],
+                    Stroke::new(2.0_f32, pal.accent),
+                );
             }
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(300));
@@ -987,17 +992,8 @@ fn normalize_nl(s: &str) -> String {
 }
 
 /// Draws a tag chip: start tags point right, end tags point left.
-fn chip(p: &egui::Painter, r: Rect, kind: u8, fill: Color32, flagged: bool, dark: bool) {
-    let stroke = Stroke::new(
-        if flagged { 1.5 } else { 0.8_f32 },
-        if flagged {
-            Color32::from_rgb(220, 50, 50)
-        } else if dark {
-            Color32::from_gray(140)
-        } else {
-            Color32::from_gray(120)
-        },
-    );
+fn chip(p: &egui::Painter, r: Rect, kind: u8, fill: Color32, edge: Color32, flagged: bool) {
+    let stroke = Stroke::new(if flagged { 1.5 } else { 1.0_f32 }, edge);
     let tip = (r.height() * 0.4).min(7.0);
     let pts = match kind {
         0 => vec![
