@@ -160,14 +160,29 @@ pub fn applic_window(ctx: &egui::Context, dlg: &mut ApplicDialog, ds: Option<&mu
                         ui.label(format!("{} ({})", p.key.ident, p.key.kind));
                         let current = ds.applic.choice.get(&p.key).cloned();
                         let mut chosen = current.clone();
-                        egui::ComboBox::from_id_salt(("applic", &p.key.ident, &p.key.kind))
-                            .selected_text(current.as_deref().unwrap_or("any"))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut chosen, None, "any");
-                                for v in &p.values {
-                                    ui.selectable_value(&mut chosen, Some(v.clone()), v);
-                                }
-                            });
+                        ui.horizontal(|ui| {
+                            egui::ComboBox::from_id_salt(("applic", &p.key.ident, &p.key.kind))
+                                .selected_text(current.as_deref().unwrap_or("any"))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut chosen, None, "any");
+                                    for v in &p.values {
+                                        ui.selectable_value(&mut chosen, Some(v.clone()), v);
+                                    }
+                                });
+                            // The asserts only mention range ends; a serial
+                            // number or other value can be typed instead.
+                            let mut typed = current.clone().unwrap_or_default();
+                            let edit = ui.add(
+                                egui::TextEdit::singleline(&mut typed)
+                                    .hint_text("value")
+                                    .desired_width(80.0),
+                            );
+                            if edit.changed() {
+                                // Kept as typed so spaces can be entered; the
+                                // evaluator trims the value it compares.
+                                chosen = (!typed.trim().is_empty()).then_some(typed);
+                            }
+                        });
                         if chosen != current {
                             match chosen {
                                 Some(v) => {

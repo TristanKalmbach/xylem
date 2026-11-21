@@ -114,11 +114,10 @@ the host's installer and its shared customization folder.
 | dmRef navigation | verified | |
 | Validation against the real S1000D schemas | verified | Official schemas for all issues; schema-guided insertion checked in the app on a 4.1 module. |
 | New publication module (wizard) | verified | Issues 4.0 to 6.0 validate against the official `pm.xsd` (`tests/real_schemas.rs`); created and validated in the app as 4.1. 2.x/3.0 publication modules are not offered. |
-| Project view: module list of a folder, text filter, double-click to open | verified | Scans sub-folders on a worker thread (4,000 files in well under a second); the folder is remembered. |
+| Project view: module list of a folder, text filter, double-click to open | verified | Scans sub-folders on a worker thread (4,000 small modules in about 0.1 s in a release build); the folder is remembered. |
 | Check references: unresolved dmRef/pmRef, references to an older issue, superseded modules | verified | Clicking a result opens the module with the reference selected. References to the BREX are counted apart. |
-| Insert reference (dmRef) from the project view | verified | Complete `dmRef` with issue, language and title, placed where the schema allows it; the publication module stays valid. 4.0+ markup only. |
-| Insert reference (pmRef) from the project view | tested | Same code path as dmRef; unit-tested, not yet exercised in the app. |
-| Applicability filter, issues 4.0 to 6.0 (dim or hide) | verified | `assert`/`evaluate`, value lists and ranges, `applicRefId`, module-level applicability. |
+| Insert reference (dmRef, pmRef) from the project view | verified | Complete reference with issue, language and title, placed where the schema allows it; the publication module stays valid. 4.0+ markup only. |
+| Applicability filter, issues 4.0 to 6.0 (dim or hide) | verified | `assert`/`evaluate`, value lists and ranges, `applicRefId`, module-level applicability. Values are picked from those the asserts mention or typed. |
 | Applicability filter, issue 3.0 | tested | Same model with the 3.0 names (`actidref`, `refapplic`, `inlineapplics`). |
 | Applicability filter, issues 2.0 to 2.3 | not done | These issues state applicability as text (`type`, `model`, `version`), which has no defined evaluation. |
 

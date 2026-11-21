@@ -36,6 +36,8 @@ pub struct ProjectView {
     pub selected: Option<usize>,
     /// Row and time of the last click, to recognise a double click.
     last_click: Option<(usize, f64)>,
+    /// Indices of the modules matching `filter`, for the project they index.
+    rows: Option<(String, Arc<Project>, Arc<Vec<usize>>)>,
 }
 
 const DOUBLE_CLICK_SECONDS: f64 = 0.4;
@@ -56,7 +58,14 @@ impl ProjectView {
         let worker_progress = progress.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
+            let started = std::time::Instant::now();
             let project = xylem_s1000d::scan_dir(&dir, &worker_progress);
+            log::info!(
+                "project scan: {} module(s) from {} file(s) in {:?}",
+                project.modules.len(),
+                worker_progress.total.load(Ordering::Relaxed),
+                started.elapsed()
+            );
             if tx.send(project).is_ok() {
                 ctx.request_repaint();
             }
@@ -144,13 +153,24 @@ impl ProjectView {
                 .hint_text("Filter: code, title, issue, language, file")
                 .desired_width(f32::INFINITY),
         );
-        let rows: Vec<usize> = project
-            .modules
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.matches(&self.filter))
-            .map(|(i, _)| i)
-            .collect();
+        // Filtering thousands of modules every frame shows up in frame
+        // times, so the matching rows are kept until the filter or the
+        // project changes.
+        let fresh = self
+            .rows
+            .as_ref()
+            .is_some_and(|(filter, of, _)| *filter == self.filter && Arc::ptr_eq(of, &project));
+        if !fresh {
+            let matching = project
+                .modules
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.matches(&self.filter))
+                .map(|(i, _)| i)
+                .collect();
+            self.rows = Some((self.filter.clone(), project.clone(), Arc::new(matching)));
+        }
+        let rows = self.rows.as_ref().map(|r| r.2.clone()).unwrap_or_default();
         let selected = self.selected.filter(|s| rows.contains(s));
         let insert_ok = selected.is_some_and(|s| match project.modules[s].kind {
             ModuleType::Data => can_insert.0,

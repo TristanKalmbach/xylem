@@ -1384,17 +1384,20 @@ impl XylemApp {
             ProjectAction::OpenAt(p, reference) => {
                 let target = std::path::absolute(&p).unwrap_or(p.clone());
                 self.open_path(p);
-                let Some(ds) = self.docs.get_mut(self.active) else {
+                if self.docs.get(self.active).map(|d| d.path.as_deref()) != Some(Some(&target)) {
                     return;
-                };
-                if ds.path.as_deref() != Some(target.as_path()) {
+                }
+                // Leaving the source view applies its pending edits first;
+                // when the text does not parse, the view stays as it is.
+                if self.docs[self.active].view == View::Source {
+                    self.set_view(View::TagsOn);
+                }
+                let ds = &mut self.docs[self.active];
+                if ds.view == View::Source {
                     return;
                 }
                 match reference.locate(&ds.editor.doc) {
                     Some(n) => {
-                        if ds.view == View::Source {
-                            ds.view = View::TagsOn;
-                        }
                         ds.editor.select_element(n);
                         ds.canvas.reveal(n);
                         ds.canvas.request_focus = true;
@@ -2238,11 +2241,17 @@ impl XylemApp {
                 Some(ds) if project_tab => crate::s1000d_ui::reference_insertable(ds),
                 _ => (false, false),
             };
-            egui::SidePanel::left("structure")
+            // Each tab keeps its own panel width: the module list needs room
+            // for a full data module code, the structure tree does not.
+            let (id, width, min_width) = if project_tab {
+                ("project", 340.0, 300.0)
+            } else {
+                ("structure", 230.0, 96.0)
+            };
+            egui::SidePanel::left(id)
                 .resizable(true)
-                .default_width(230.0)
-                // The module list needs room for a full data module code.
-                .min_width(if project_tab { 340.0 } else { 120.0 })
+                .default_width(width)
+                .min_width(min_width)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         let heading = |t: &str| RichText::new(t).heading();
