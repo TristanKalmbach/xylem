@@ -233,11 +233,13 @@ fn snippet(text: &str, range: Range<usize>) -> (String, Range<usize>) {
     if cut_after {
         out.push('…');
     }
-    // A match that starts the text needs no leading space.
-    let trimmed = out.trim_start().len();
-    let shift = out.len() - trimmed;
-    let out = out.trim_start().trim_end().to_string();
-    (out, start.saturating_sub(shift)..end.saturating_sub(shift))
+    // Trim the ends, keeping the highlight inside the result: a match made
+    // only of whitespace at the end of the text trims away entirely.
+    let shift = out.len() - out.trim_start().len();
+    let out = out.trim().to_string();
+    let clamp = |i: usize| i.saturating_sub(shift).min(out.len());
+    let highlight = clamp(start)..clamp(end);
+    (out, highlight)
 }
 
 /// Replaces every match in a document and returns how many were replaced.
@@ -514,13 +516,32 @@ pub fn replace_in_files(
             report.skipped_unsaved.push(path.clone());
             continue;
         }
-        let mut doc = match read_document(path) {
-            Ok(d) => d,
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
             Err(e) => {
-                report.failed.push((path.clone(), e));
+                report.failed.push((path.clone(), e.to_string()));
                 continue;
             }
         };
+        let mut doc = match Document::from_bytes(&bytes) {
+            Ok(d) => d,
+            Err(e) => {
+                report
+                    .failed
+                    .push((path.clone(), format!("not well-formed: {e}")));
+                continue;
+            }
+        };
+        // Only rewrite files the DOM reproduces exactly (an invalid byte in
+        // a UTF-8 file, say, would otherwise be replaced as a side effect).
+        if doc.to_bytes() != bytes {
+            report.failed.push((
+                path.clone(),
+                "left unchanged: the file would not be written back exactly as read (check its encoding)"
+                    .into(),
+            ));
+            continue;
+        }
         let n = replace_in_document(&mut doc, opts, &re, replacement);
         if n == 0 {
             continue;
@@ -810,5 +831,47 @@ mod tests {
         o.regex = true;
         assert!(o.build().is_err());
         assert!(opts("(unclosed").build().is_ok());
+    }
+
+    #[test]
+    fn highlights_stay_inside_the_context() {
+        let doc = Document::from_str("<r><p>abc.\n    </p><p>  x  </p></r>").unwrap();
+        let mut o = opts(r"\s+");
+        o.regex = true;
+        for h in search_document(&doc, &o.build().unwrap(), false) {
+            assert!(h.highlight.start <= h.highlight.end);
+            assert!(h.highlight.end <= h.context.len(), "{h:?}");
+            assert!(h.context.is_char_boundary(h.highlight.start));
+        }
+        let (ctx, hl) = snippet("abc.\n    ", 4..9);
+        assert_eq!((ctx.as_str(), hl), ("abc.", 4..4));
+    }
+
+    #[test]
+    fn files_that_would_not_round_trip_are_left_alone() {
+        let dir = TempDir::new("lossy");
+        let path = dir.0.join("a.xml");
+        // UTF-16 with an unpaired surrogate, which the parser has to replace:
+        // writing the document back would change it too.
+        let mut bytes = vec![0xFF, 0xFE];
+        let units: Vec<u16> = "<r><p>old "
+            .encode_utf16()
+            .chain([0xD800])
+            .chain("</p></r>".encode_utf16())
+            .collect();
+        for u in units {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        let report = replace_in_files(
+            std::slice::from_ref(&path),
+            &opts("old"),
+            "new",
+            &HashSet::new(),
+        )
+        .unwrap();
+        assert!(report.changed.is_empty());
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
 }

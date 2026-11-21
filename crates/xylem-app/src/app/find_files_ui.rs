@@ -600,6 +600,7 @@ impl XylemApp {
         // Anything holding node ids of the old document is now meaningless.
         self.context_menu = None;
         self.palette = None;
+        self.dialogs.node_edit = None;
         true
     }
 
