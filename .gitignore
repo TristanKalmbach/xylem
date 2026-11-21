@@ -1,1 +1,4 @@
 /target
+
+# Local agent worktrees and settings
+.claude/
