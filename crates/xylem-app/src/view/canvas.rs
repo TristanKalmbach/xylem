@@ -58,6 +58,8 @@ pub struct Canvas {
     /// blocks shows up twice (end of one line, start of the next); this keeps
     /// the caret on the line the user put it on.
     caret_hint: Option<(Pos, Loc)>,
+    /// The caret's rectangle on screen in the last frame (for popups).
+    pub caret_screen: Option<Rect>,
     /// Textures for CSS generated-content images, by file.
     icons: std::collections::HashMap<std::path::PathBuf, Option<egui::TextureHandle>>,
     /// Elements collapsed to a single line in this document.
@@ -819,6 +821,7 @@ impl Canvas {
             }
         }
         // Caret.
+        self.caret_screen = self.caret_loc(ed, cx.rules).map(|loc| self.layout.caret_rect(loc).translate(off));
         if self.has_focus
             && let Some(loc) = self.caret_loc(ed, cx.rules)
         {

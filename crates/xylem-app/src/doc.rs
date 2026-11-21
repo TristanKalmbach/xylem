@@ -76,6 +76,7 @@ pub struct DocState {
     rules_memo: (u64, Rc<std::cell::RefCell<HashMap<NodeId, bool>>>),
     pub spell_cache: crate::spell::SpellCache,
     images: (u64, Rc<HashMap<NodeId, String>>),
+    words: (u64, usize),
 }
 
 impl DocState {
@@ -111,7 +112,34 @@ impl DocState {
             rules_memo: (u64::MAX, Default::default()),
             spell_cache: Default::default(),
             images: (u64::MAX, Default::default()),
+            words: (u64::MAX, 0),
         }
+    }
+
+    /// Number of words in the document's text (cached per revision).
+    pub fn word_count(&mut self) -> usize {
+        let rev = self.editor.doc.revision();
+        if self.words.0 != rev {
+            let doc = &self.editor.doc;
+            let n = doc
+                .descendants(doc.root())
+                .filter_map(|n| doc.text(n))
+                .map(|t| t.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count())
+                .sum();
+            self.words = (rev, n);
+        }
+        self.words.1
+    }
+
+    /// Stable name for this document's autosave file.
+    pub fn id_key(&self) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        match &self.path {
+            Some(p) => p.hash(&mut h),
+            None => (std::process::id(), self.id).hash(&mut h),
+        }
+        format!("{:016x}", h.finish())
     }
 
     /// Unsaved changes, including pending edits in the source view.

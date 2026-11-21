@@ -75,6 +75,10 @@ pub enum Cmd {
     RenameToCsdb,
     FollowLink(NodeId),
     SpellCheck,
+    /// Open the quick insert/surround palette at the caret.
+    Palette,
+    FindNext(bool),
+    Shortcuts,
     /// Collapse (true) or expand (false) the current element in the view.
     Collapse(bool),
     /// Collapse every block child of the current element.
@@ -144,6 +148,11 @@ pub struct XylemApp {
     allow_close: bool,
     /// Debug hook: `XYLEM_SCREENSHOT=<png>` captures the window and exits.
     screenshot: Option<(PathBuf, u32)>,
+    palette: Option<Palette>,
+    shortcuts_open: bool,
+    last_autosave: f64,
+    /// Autosaved documents found at startup, offered for recovery.
+    recovery: Vec<crate::autosave::Recovered>,
     script: Option<crate::script::Script>,
     shot_path: Option<PathBuf>,
 }
@@ -192,10 +201,21 @@ impl XylemApp {
             pending_open: files,
             allow_close: false,
             screenshot: std::env::var_os("XYLEM_SCREENSHOT").map(|p| (PathBuf::from(p), 0)),
+            palette: None,
+            shortcuts_open: false,
+            last_autosave: 0.0,
+            recovery: Vec::new(),
             script: crate::script::Script::from_env(),
             shot_path: None,
         };
         app.load_speller();
+        let scripted = app.script.is_some() || app.screenshot.is_some();
+        if !scripted {
+            app.recovery = crate::autosave::find();
+            if app.pending_open.is_empty() && app.settings.restore_session {
+                app.pending_open = app.settings.last_session.iter().filter(|p| p.is_file()).cloned().collect();
+            }
+        }
         app
     }
 
@@ -399,6 +419,7 @@ impl XylemApp {
         match result {
             Ok(()) => {
                 ds.editor.mark_saved();
+                crate::autosave::discard(ds.id_key());
                 ds.path = Some(path.clone());
                 self.settings.add_recent(path.clone());
                 self.toast(format!("Saved {}", path.display()), false);
@@ -792,6 +813,27 @@ impl XylemApp {
                     ds.canvas.expand_all();
                 }
             }
+            Cmd::Palette => {
+                if let Some(ds) = self.docs.get(self.active)
+                    && ds.view != View::Source
+                {
+                    self.palette = Some(Palette { query: String::new(), selected: 0, surround: !ds.editor.sel.is_caret() });
+                }
+            }
+            Cmd::FindNext(forward) => {
+                if !self.find.has_query() {
+                    self.find.open = true;
+                    return;
+                }
+                let Some(ds) = self.docs.get(self.active) else { return };
+                if let Some(crate::find::FindAction::Goto(node, range)) = self.find.step(ds, forward) {
+                    let ds = self.docs.get_mut(self.active).unwrap();
+                    ds.editor.sel = Selection { anchor: Pos::new(node, range.start), focus: Pos::new(node, range.end) };
+                    ds.canvas.scroll_to_caret = true;
+                    ds.canvas.request_focus = true;
+                }
+            }
+            Cmd::Shortcuts => self.shortcuts_open = true,
             Cmd::SpellCheck => {
                 self.settings.spell_check = !self.settings.spell_check;
                 self.load_speller();
@@ -1163,6 +1205,18 @@ impl XylemApp {
             if i.consume_shortcut(&sh(Key::W)) {
                 cmds.push(Cmd::Close(self.active));
             }
+            if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::SHIFT, Key::F3)) {
+                cmds.push(Cmd::FindNext(false));
+            }
+            if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F3)) {
+                cmds.push(Cmd::FindNext(true));
+            }
+            if i.consume_shortcut(&sh(Key::Space)) {
+                cmds.push(Cmd::Palette);
+            }
+            if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F1)) {
+                cmds.push(Cmd::Shortcuts);
+            }
             if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F7)) {
                 cmds.push(Cmd::Validate);
             }
@@ -1279,6 +1333,9 @@ impl XylemApp {
                     ("Select all\tCtrl+A", Cmd::SelectAll),
                     ("Select element\tCtrl+E", Cmd::SelectElement),
                     ("Find / Replace…\tCtrl+F", Cmd::Find),
+                    ("Find next\tF3", Cmd::FindNext(true)),
+                    ("Find previous\tShift+F3", Cmd::FindNext(false)),
+                    ("Insert or surround…\tCtrl+Space", Cmd::Palette),
                 ] {
                     if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
                         cmds.push(c);
@@ -1430,6 +1487,9 @@ impl XylemApp {
                 }
             });
             ui.menu_button("Help", |ui| {
+                if ui.button("Keyboard shortcuts\tF1").clicked() {
+                    cmds.push(Cmd::Shortcuts);
+                }
                 if ui.button("About Xylem").clicked() {
                     cmds.push(Cmd::About);
                 }
@@ -1998,6 +2058,7 @@ impl XylemApp {
 
     fn status_bar(&mut self, ctx: &egui::Context) {
         let mut acts = Vec::new();
+        let words = self.docs.get_mut(self.active).map(|d| d.word_count());
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let Some(ds) = self.docs.get(self.active) else {
@@ -2007,6 +2068,10 @@ impl XylemApp {
                 panels::breadcrumb(ui, ds, &mut acts);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(format!("{:.0}%", self.settings.zoom * 100.0));
+                    if let Some(w) = words {
+                        ui.separator();
+                        ui.label(format!("{w} words"));
+                    }
                     ui.separator();
                     ui.label(&ds.package.doctype.name);
                     if let Some(info) = &ds.s1000d {
@@ -2360,12 +2425,14 @@ impl XylemApp {
                     self.active = i;
                     self.save(false);
                     if !self.docs[i].is_dirty() {
+                        crate::autosave::discard(self.docs[i].id_key());
                         self.docs.remove(i);
                         self.active = self.active.min(self.docs.len().saturating_sub(1));
                     }
                     self.dialogs.confirm_close = None;
                 }
                 Some(1) => {
+                    crate::autosave::discard(self.docs[i].id_key());
                     self.docs.remove(i);
                     self.active = self.active.min(self.docs.len().saturating_sub(1));
                     self.dialogs.confirm_close = None;
@@ -2580,6 +2647,214 @@ fn install_builtin_packages() {
         let path = dir.join(file);
         if std::fs::read_to_string(&path).ok().as_deref() != Some(*text) {
             let _ = std::fs::write(path, text);
+        }
+    }
+}
+
+/// The quick insert/surround popup (Ctrl+Space).
+struct Palette {
+    query: String,
+    selected: usize,
+    /// Wrap the selection instead of inserting at the caret.
+    surround: bool,
+}
+
+impl XylemApp {
+    /// Element names offered at the caret: valid ones first.
+    fn palette_items(&self, surround: bool) -> Vec<(String, bool)> {
+        let Some(ds) = self.docs.get(self.active) else { return Vec::new() };
+        let doc = &ds.editor.doc;
+        let Some(g) = ds.grammar.as_deref() else {
+            // No schema: offer the element names the document already uses.
+            let mut names: Vec<String> = doc.descendants(doc.root()).filter_map(|n| doc.name(n).map(str::to_string)).collect();
+            names.sort();
+            names.dedup();
+            return names.into_iter().map(|n| (n, true)).collect();
+        };
+        let mut items: Vec<(String, bool)> = if surround {
+            let (a, _) = ds.editor.sel.ordered(doc);
+            let parent = container(doc, a);
+            g.all_element_names().into_iter().map(|n| {
+                let ok = g.can_insert(doc, parent, 0, &n);
+                (n, ok)
+            }).collect()
+        } else {
+            let (mut parent, mut index) = ds.editor.insertion_point();
+            let mut v: Vec<(String, bool)> = Vec::new();
+            // Valid at the caret first, then after each enclosing element.
+            loop {
+                for i in g.insertable_at(doc, parent, index) {
+                    if !v.iter().any(|(n, _)| *n == i.name) {
+                        v.push((i.name, i.keeps_valid));
+                    }
+                }
+                let Some(up) = doc.parent(parent).filter(|&p| doc.is_element(p)) else { break };
+                index = doc.index_in_parent(parent).unwrap_or(0) + 1;
+                parent = up;
+            }
+            v
+        };
+        items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+        items
+    }
+
+    fn show_palette(&mut self, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
+        let Some(pal) = &self.palette else { return };
+        let surround = pal.surround;
+        let q = pal.query.to_lowercase();
+        let items: Vec<(String, bool)> = self
+            .palette_items(surround)
+            .into_iter()
+            .filter(|(n, _)| q.is_empty() || n.to_lowercase().contains(&q))
+            .collect();
+        let anchor = self
+            .docs
+            .get(self.active)
+            .and_then(|d| d.canvas.caret_screen)
+            .map(|r| r.left_bottom() + egui::vec2(0.0, 4.0))
+            .unwrap_or(egui::pos2(300.0, 200.0));
+        let mut close = false;
+        let mut chosen: Option<String> = None;
+        let pal = self.palette.as_mut().unwrap();
+        pal.selected = pal.selected.min(items.len().saturating_sub(1));
+        egui::Area::new(egui::Id::new("xylem-palette")).fixed_pos(anchor).order(egui::Order::Foreground).show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_width(260.0);
+                ui.label(RichText::new(if surround { "Surround selection with…" } else { "Insert element…" }).weak());
+                let edit = ui.add(egui::TextEdit::singleline(&mut pal.query).hint_text("type to filter").desired_width(f32::INFINITY));
+                edit.request_focus();
+                if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
+                    pal.selected = (pal.selected + 1).min(items.len().saturating_sub(1));
+                }
+                if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
+                    pal.selected = pal.selected.saturating_sub(1);
+                }
+                if ui.input(|i| i.key_pressed(Key::Escape)) {
+                    close = true;
+                }
+                if ui.input(|i| i.key_pressed(Key::Enter)) {
+                    chosen = items.get(pal.selected).map(|i| i.0.clone());
+                }
+                egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                    if items.is_empty() {
+                        ui.label(RichText::new("Nothing matches here.").weak());
+                    }
+                    for (k, (name, valid)) in items.iter().enumerate() {
+                        let mut text = RichText::new(name);
+                        if !valid {
+                            text = text.weak();
+                        }
+                        let r = ui.selectable_label(k == pal.selected, text);
+                        if k == pal.selected {
+                            r.scroll_to_me(None);
+                        }
+                        if r.clicked() {
+                            chosen = Some(name.clone());
+                        }
+                    }
+                });
+            });
+        });
+        if let Some(name) = chosen {
+            cmds.push(if surround { Cmd::Surround(name) } else { Cmd::InsertElement(name) });
+            close = true;
+        }
+        if close {
+            self.palette = None;
+            if let Some(ds) = self.docs.get_mut(self.active) {
+                ds.canvas.request_focus = true;
+            }
+        }
+    }
+
+    fn show_shortcuts(&mut self, ctx: &egui::Context) {
+        if !self.shortcuts_open {
+            return;
+        }
+        const KEYS: &[(&str, &str)] = &[
+            ("Ctrl+Space", "Insert an element (or surround the selection)"),
+            ("Enter", "Split the element, or start the element that follows it"),
+            ("Shift+Enter", "Line break inside the text"),
+            ("Ctrl+B / I / U", "Bold / italic / underline (per document type)"),
+            ("Ctrl+E", "Select the current element"),
+            ("Ctrl+Shift+- / =", "Collapse / expand the current element"),
+            ("Tab / Shift+Tab", "Next / previous table cell"),
+            ("Ctrl+click", "Follow a link or reference"),
+            ("Double-click a tag", "Edit the element's attributes"),
+            ("Ctrl+Z / Ctrl+Y", "Undo / redo"),
+            ("Ctrl+Shift+V", "Paste as plain text"),
+            ("Ctrl+F, F3, Shift+F3", "Find and replace, find next, find previous"),
+            ("F5 / F6 / F8", "Tags On / Normal / Source view"),
+            ("F7", "Validate"),
+            ("Ctrl+S, Ctrl+Shift+S", "Save, save as"),
+            ("Ctrl+O, Ctrl+N, Ctrl+W", "Open, new, close"),
+            ("Ctrl++ / Ctrl+- / Ctrl+0", "Zoom in / out / reset"),
+        ];
+        egui::Window::new("Keyboard shortcuts").open(&mut self.shortcuts_open).resizable(false).show(ctx, |ui| {
+            egui::Grid::new("keys").num_columns(2).striped(true).spacing([16.0, 4.0]).show(ui, |ui| {
+                for (k, what) in KEYS {
+                    ui.label(RichText::new(*k).monospace());
+                    ui.label(*what);
+                    ui.end_row();
+                }
+            });
+        });
+    }
+
+    fn show_recovery(&mut self, ctx: &egui::Context) {
+        if self.recovery.is_empty() {
+            return;
+        }
+        let mut open_items = Vec::new();
+        let mut discard_all = false;
+        egui::Window::new("Recover unsaved work").collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label("Xylem closed without saving these documents. Open the recovered copies?");
+            ui.add_space(4.0);
+            for (k, r) in self.recovery.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(r.describe());
+                    if ui.button("Open").clicked() {
+                        open_items.push(k);
+                    }
+                });
+            }
+            ui.add_space(4.0);
+            if ui.button("Discard all").clicked() {
+                discard_all = true;
+            }
+        });
+        for k in open_items.into_iter().rev() {
+            let r = self.recovery.remove(k);
+            match r.load() {
+                Ok(doc) => {
+                    self.add_doc(doc, r.original.clone());
+                    self.toast("Recovered document opened. Save it to keep it.", false);
+                }
+                Err(e) => self.toast(format!("Could not recover: {e}"), true),
+            }
+            r.remove();
+        }
+        if discard_all {
+            for r in self.recovery.drain(..) {
+                r.remove();
+            }
+        }
+    }
+
+    /// Writes unsaved documents to the autosave folder every few seconds.
+    fn autosave_tick(&mut self, ctx: &egui::Context) {
+        if self.settings.autosave_seconds == 0 || self.script.is_some() || self.screenshot.is_some() {
+            return;
+        }
+        let now = ctx.input(|i| i.time);
+        if now - self.last_autosave < self.settings.autosave_seconds as f64 {
+            return;
+        }
+        self.last_autosave = now;
+        for ds in &self.docs {
+            if ds.editor.is_dirty() {
+                crate::autosave::write(ds.id_key(), ds.path.as_deref(), &ds.editor.doc);
+            }
         }
     }
 }
@@ -2799,6 +3074,7 @@ impl eframe::App for XylemApp {
         if self.script.is_some() || self.screenshot.is_some() {
             return; // test runs must not change the user's settings
         }
+        self.settings.last_session = self.docs.iter().filter_map(|d| d.path.clone()).collect();
         eframe::set_value(storage, "settings", &self.settings);
     }
 
@@ -2854,6 +3130,10 @@ impl eframe::App for XylemApp {
             self.document_area(ui, &mut cmds);
         });
         self.show_context_menu(ctx, &mut cmds);
+        self.show_palette(ctx, &mut cmds);
+        self.show_shortcuts(ctx);
+        self.show_recovery(ctx);
+        self.autosave_tick(ctx);
         self.dialogs(ctx, &mut cmds);
         self.show_toasts(ctx);
         for c in cmds {

@@ -29,6 +29,11 @@ pub struct Settings {
     pub show_issues: bool,
     pub auto_validate: bool,
     pub tab_size: usize,
+    /// Reopen the documents that were open when Xylem last closed.
+    pub restore_session: bool,
+    pub last_session: Vec<PathBuf>,
+    /// Seconds between autosaves of unsaved work (0 turns it off).
+    pub autosave_seconds: u32,
 }
 
 impl Default for Settings {
@@ -51,6 +56,9 @@ impl Default for Settings {
             show_issues: true,
             auto_validate: true,
             tab_size: 2,
+            restore_session: true,
+            last_session: Vec::new(),
+            autosave_seconds: 60,
         }
     }
 }

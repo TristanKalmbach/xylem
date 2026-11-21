@@ -124,6 +124,27 @@ impl FindState {
     }
 
     /// Index of the first match after the caret (wrapping).
+    /// Find next/previous with the current settings (F3 / Shift+F3), even
+    /// while the dialog is closed.
+    pub fn step(&mut self, ds: &DocState, forward: bool) -> Option<FindAction> {
+        if self.query.is_empty() {
+            return None;
+        }
+        self.refresh(ds);
+        let n = self.matches.len();
+        let mut i = self.next_from_caret(ds, forward)?;
+        if Some(i) == self.current && n > 0 {
+            i = if forward { (i + 1) % n } else { (i + n - 1) % n };
+        }
+        self.current = Some(i);
+        let m = self.matches[i].clone();
+        Some(FindAction::Goto(m.0, m.1))
+    }
+
+    pub fn has_query(&self) -> bool {
+        !self.query.is_empty()
+    }
+
     fn next_from_caret(&self, ds: &DocState, forward: bool) -> Option<usize> {
         if self.matches.is_empty() {
             return None;
