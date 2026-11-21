@@ -2,6 +2,7 @@
 name = "xylem-s1000d"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 description = "S1000D support (issues 2.0 to 6.0) for the Xylem XML editor"
 
 [dependencies]

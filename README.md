@@ -104,3 +104,9 @@ XYLEM_SCRIPT="click 500 280;;type Hello;;key Enter;;shot out.png;;save out.xml;;
 The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `shot PATH`, `save PATH` and `quit`.
 
 See [PARITY.md](PARITY.md) for the XMAX feature checklist.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+S1000D schemas are not part of this repository. Point Xylem at your own copy (see "S1000D schemas" above).

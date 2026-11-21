@@ -2,6 +2,7 @@
 name = "xylem-xpath"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 description = "Pure-Rust XPath 1.0 engine over the Xylem DOM"
 
 [dependencies]

@@ -2,6 +2,7 @@
 name = "xylem-schema"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 description = "Grammar engine (W3C XML Schema subset and DTD) for the Xylem XML editor"
 
 [dependencies]
