@@ -1,101 +1,116 @@
 # XMAX parity checklist
 
-This checklist is built from a survey of how our existing authoring host uses XMetaL XMAX 20. The survey covered the host application and the per-customer XMAX customizations (`.ctm`, `.css`, `.xsd`, `.tbr`, `.js`).
+This checklist is built from a survey of how our existing authoring host uses
+XMetaL XMAX 20: the host application plus its per-customer XMAX
+customizations (`.ctm`, `.css`, `.xsd`, `.tbr`, `.js`).
 
-**Scope.** Parity means *authoring* features. Xylem is a standalone editor, not an ActiveX/COM control. That puts the XMAX COM object model out of scope: events such as `OnUpdateUI`, `OnContextMenu` and `OnMessage`, and properties such as `ChangedNodes` and `FormattingUpdating`. Where the host used one of those APIs to build a feature users see, the feature is listed instead.
+**Scope.** Parity means *authoring* features. Xylem is a standalone editor,
+not an ActiveX/COM control, so the XMAX COM object model (events such as
+`OnUpdateUI`, `OnContextMenu`, `OnMessage`, properties such as
+`ChangedNodes`, `FormattingUpdating`) is out of scope. Where the host used
+those APIs to build something users see, that feature is listed instead.
 
-**Legend**
-- ✅ Verified in the running app, through the scripted end-to-end harness and screenshots.
-- ☑️ Implemented and unit-tested, but not yet exercised in the running app.
-- 🟡 Partial.
-- ⬜ Not done.
-- ➖ Not applicable.
+**Legend.**
+✅ verified in the running app (scripted end-to-end harness plus screenshots) ·
+☑️ implemented and unit-tested, not exercised in the app ·
+🟡 partial · ⬜ not done · ➖ not applicable
 
-**Platform.** Built and tested on Windows 11 only. Every dependency is pure Rust and cross-platform: eframe/egui, and rfd with the XDG portal on Linux. macOS and Linux builds still need to be tried.
+**Platforms.** Built and tested on Windows 11. CI is set up for Windows,
+macOS and Linux (`.github/workflows/ci.yml`) but has not run yet.
 
 ## Document views
 
 | Feature | Status | Notes |
 |---|---|---|
-| Tags-on view driven by CSS | ✅ | Checked with the sample doctype, the built-in S1000D package, and a real 33k-element customer manual opened with its imported XMAX customization. |
+| Tags-on view driven by CSS | ✅ | Sample doctype, built-in S1000D package, and a real 33k-element customer manual with its imported XMAX customization. |
 | Normal view (no tags) | ✅ | |
-| Source (plain-text) view | ✅ | Switching to source and back round-trips byte for byte. Well-formedness errors show line and column. |
-| Structure tree | ✅ | Click selects an element. It follows the caret. Its context menu (remove, delete, move) is ☑️. |
-| Graphical tables | ✅ | CALS and HTML, with `colwidth` proportions and horizontal spans. Vertical spans (`morerows`) are kept in the data but not drawn merged. |
-| Inline images | ✅ | Missing files show as labelled boxes. Drawing real PNG and JPEG files is ☑️, since no sample images exist. CGM and SVG show a placeholder. |
+| Source view | ✅ | Byte-exact round trip; well-formedness errors with position. |
+| Structure tree, with context menu (remove tags, delete, move, collapse) | ✅ | |
+| Collapse and expand elements in the document view | ✅ | Ctrl+Shift+−/=, the context menu or the structure tree; click the marker to expand. |
+| Graphical tables, including spans across columns and rows | ✅ | CALS (`namest`/`nameend`, `morerows`) and HTML (`colspan`, `rowspan`). |
+| Inline images | ✅ | PNG, JPEG, GIF, BMP, TIFF. CGM and SVG show a labelled box. |
+| Images in CSS generated content (`url(...)`) | ✅ | Drawn before the text in `::before`, after it in `::after`. |
 | Comments shown | ✅ | |
-| Collapsed container tags | ⬜ | Collapsing works in the structure tree, not in the canvas. |
-| Zoom; light and dark themes | ☑️ | |
+| Zoom, light and dark themes | ☑️ | |
 
-## CSS (the full set used by the 90 customer stylesheets)
+## CSS
 
 | Feature | Status |
 |---|---|
-| All 90 customer stylesheets parse with 0 warnings or unsupported constructs | ✅ (corpus test) |
-| Selectors, `:before`/`:after`, `attr()`, counters, XMetaL `$COMMENT` and `$PROCINS` selectors, `@import` | ✅ |
+| All 90 customer stylesheets parse with no warnings | ✅ (corpus test) |
+| Selectors, generated content, counters, XMetaL `$PROCINS`/`$COMMENT`, `@import` | ✅ |
 | Display types, fonts, colours, boxes, alignment, `white-space`, sup/sub, list markers | ✅ |
-| `wrap-option: emergency` | 🟡 (parsed; egui breaks long words anyway) |
-| `url()` images in generated content | 🟡 (parsed, not drawn) |
-| Runtime inline style overrides (`ContainerStyle`) | 🟡 (supported by the engine; no UI) |
+| `wrap-option: emergency` | 🟡 (parsed; egui already breaks long words) |
+| Runtime inline style overrides (`ContainerStyle`) | 🟡 (supported by the engine, no UI) |
 
 ## Editing
 
 | Feature | Status | Notes |
 |---|---|---|
-| Typing; mouse and keyboard caret and selection | ✅ | Done on the sample and on a scratch copy of the real customer manual. |
-| Enter splits the element, following CTM `FollowedBy` | ✅ | |
-| Backspace/Delete that respect markup; deleting a selection | ✅ | |
-| Bold, italic and other toggles, using the package's mapping | ✅ | The real customer package mapped Ctrl+B to `<emphasis>`. |
-| Schema-aware insert from the Elements panel and context menu | ✅ | Templates come from the CTM; otherwise a required skeleton is generated. |
-| `xm-replace_text` placeholder prompts replaced by typing | ✅ (unit test) / shown ✅ | |
-| Surround, remove tags, split, join, change element | ☑️ | |
-| Paste plain text, and XML fragments with schema checking | ✅ | A fragment that isn't allowed falls back to text, as XMAX's `PasteStringWithInterpret` did. |
+| Typing, caret and selection; Home/End stop at text, not tag chips | ✅ | |
+| Enter splits; CTM `FollowedBy` | ✅ | |
+| Markup-aware Backspace/Delete, selection delete | ✅ | |
+| Typing between blocks goes into the neighbouring element | ✅ | |
+| Bold/italic/… toggles using the package mapping | ✅ | |
+| Insert from the Elements panel, context menu, or Ctrl+Space palette | ✅ | Templates from the CTM, otherwise a valid skeleton from the schema. |
+| Surround (palette with a selection), split, join, change element | ✅ | |
+| `xm-replace_text` placeholder prompts | ✅ | |
+| Paste plain text and XML fragments with schema checking | ✅ | |
 | Copy and cut XML fragments | ☑️ | |
-| Undo and redo (journaled, no document copies) | ✅ | Typing is grouped into one step. The dirty marker is exact across undo, redo and save. |
-| Insert comment, PI or CDATA; double-click to edit | ☑️ | |
-| Read-only and non-removable elements (per package) | ☑️ | |
-| Read-only `Ref_Label`, `Entity_Ref_Placeholder` and `cms-replace_content` PIs | ⬜ | The legacy host protected these. Here they can be deleted like any other PI. |
-| CALS tables: insert dialog, add or remove rows and columns, merge, split, Tab | ✅ | Insert, add column right, merge down and Tab were done in the app. The rest are unit-tested. |
-| Auto IDs on insert (package `id_generation`) | ☑️ | |
-| Follow link with Ctrl+click (IDREF, local href, S1000D dmRef) | ✅ (IDREF) / ☑️ (href, dmRef) | |
-| Dropping image files to insert a graphic | ⬜ | Dropping files opens them as documents. |
+| Undo/redo (journaled; exact dirty state) | ✅ | |
+| Insert comment, PI, CDATA; double-click to edit | ✅ | |
+| Read-only and non-removable elements | ☑️ | |
+| Protected marker PIs (`Ref_Label`, `Entity_Ref_Placeholder`, …) and entity references | ✅ (unit) / imported packages set them up automatically | |
+| CALS tables: insert dialog, rows, columns, merge, split, Tab | ✅ | |
+| Automatic IDs on insert | ✅ | |
+| Move elements up/down (keeps whitespace layout) | ✅ | |
+| Follow links with Ctrl+click: IDREF, S1000D `dmRef` (opens the other module) | ✅ | Local `href` is ☑️. |
+| Drop an image file to insert the package's image element | ✅ | Wrapped in an allowed container (e.g. a figure) when needed. |
 
 ## Validation and tools
 
 | Feature | Status | Notes |
 |---|---|---|
-| Schema validation as you type; issues list; invalid tags flagged | ✅ | The real customer manual validates with 0 errors. The corpus run found 35 real data errors across 52 instances. |
-| Find and replace (case, whole word, regex, limit to an element, replace all) | ✅ | Replace-all through the dialog is one undo step. |
-| Spell check (Hunspell via `spellbook`) | ☑️ | No dictionary is bundled or installed here. Set a dictionary folder in Preferences. |
-| Pretty print | 🟡 | A generic pretty-printer runs in Source view. The CTM's per-element options are imported but not applied. |
-| Save | ✅ | Untouched markup is written byte for byte, and the save is atomic (write to a temp file, then rename). |
+| Validation as you type; issues list; invalid tags flagged | ✅ | |
+| Find and replace; F3 / Shift+F3 | ✅ | |
+| Spell check with suggestions and a user dictionary | ✅ | Tested with a small local dictionary. No dictionary ships with Xylem; point Preferences at Hunspell `.aff`/`.dic` files. |
+| Format document (pretty-print) | ✅ | Indent amount and per-element "indent content" from the package; mixed content is never touched. |
+| Save (lossless, atomic) | ✅ | |
+| Autosave and crash recovery | ☑️ | Writes unsaved work every 60 s; offers recovery at the next start. |
+| Reopen the previous session | ☑️ | |
 
-## Customisation (XMAX → Xylem doctype packages)
+## Customisation
 
 | Feature | Status |
 |---|---|
-| `xylem-import` command line: `.ctm` folders and `.xac` archives | ✅ (all 137 real sets import and load back) |
-| Import from the UI (File › Import XMAX customization) | ☑️ (needs a folder-picker dialog that the test harness can't drive) |
-| Package matching (schema location, root, public ID, file name, priority) | ✅ |
-| CTM templates, FollowedBy, toggles, lists, images, descriptions | ✅ |
-| `.tbr`, `.js`, `.xdp` | ➖ (the legacy host used none of them) |
+| `xylem-import` command line (`.ctm` folders and `.xac` archives) | ✅ (all 137 real sets import and load back) |
+| Import from the UI | ☑️ (uses a folder picker that the test harness can't drive) |
+| Package matching | ✅ |
+| CTM templates, FollowedBy, toggles, lists, images, descriptions, pretty-print, protected PIs | ✅ |
+| `.tbr`, `.js`, `.xdp` | ➖ (unused by the legacy host) |
+
+See [docs/doctype-packages.md](docs/doctype-packages.md) for the package format.
 
 ## S1000D (issues 2.0–6.0)
 
 | Feature | Status | Notes |
 |---|---|---|
-| Built-in styled rendering | ✅ | 4.1 descriptive and procedural. Legacy 3.0 markup is ☑️. |
-| New data module wizard | ✅ | 4.1 descriptive. Other issues and schema types are unit-tested; some skeletons were written from memory and need checking against the real schemas. |
-| BREX check | ✅ | Run against a sample project BREX. SNS and notation rules are not enforced. |
-| Data module info; renaming the file to its CSDB name | ☑️ | |
-| Validation against real S1000D schemas | ☑️ | No S1000D schemas are available locally. The DTD and XSD engines are tested with synthetic S1000D-like grammars. Point Preferences at a schema folder or catalog. |
+| Built-in styled rendering | ✅ | 4.1 descriptive and procedural; legacy markup ☑️. |
+| New data module wizard | ✅ | 4.1 descriptive. Other issues/kinds are unit-tested; some skeletons still need checking against the real schemas. |
+| BREX check | ✅ | |
+| Data module info; rename to the CSDB file name | ✅ | |
+| dmRef navigation | ✅ | |
+| Validation against the real S1000D schemas | ☑️ | No S1000D schemas are available locally yet. |
 
-## Performance (release build, Windows, measured)
+## Performance (release build, Windows)
 
-| Document | Typing (per key) | Structural edit (Enter, insert) |
+| Document | Typing | Enter / insert |
 |---|---|---|
 | Sample manual (≈100 elements) | < 2 ms | < 5 ms |
-| Synthetic manual (20k elements, 1 MB) | ≈ 30 ms | ≈ 40 ms |
-| Real customer manual (33k elements, 2.4 MB) | ≈ 70 ms | ≈ 230 ms |
+| Synthetic manual (20k elements, 1 MB) | ≈ 3 ms | < 25 ms |
+| Real customer manual (33k elements, 2.4 MB) | ≈ 14 ms | ≈ 70 ms |
 
-Undo memory grows with the size of each edit, not the size of the document. The next step for speed is incremental layout, which caches the laid-out paragraphs of unchanged subtrees.
+Layout is incremental: a block is laid out again only when its content, its
+styles (including counters and generated text) or its box changed. Undo stores
+the operations an edit performed, so memory grows with the edits, not with the
+document size.

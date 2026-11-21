@@ -15,7 +15,8 @@ Xylem is a fast, standalone structured XML editor written entirely in Rust. It r
   - BREX checking.
   - dmRef navigation.
   - A built-in stylesheet.
-- **XMAX migration:** `xylem-import` converts `.ctm` customization folders and `.xac` archives into Xylem doctype packages.
+- **XMAX migration:** `xylem-import` converts `.ctm` customization folders and `.xac` archives into Xylem doctype packages (see [docs/doctype-packages.md](docs/doctype-packages.md)).
+- **Comfortable for long documents:** incremental layout, collapsible elements, a Ctrl+Space insert palette, autosave with crash recovery, and drag-and-drop images.
 
 ## Build and run
 
@@ -62,6 +63,10 @@ Xylem never downloads schemas. To use them, either:
 | Ctrl+F | find and replace |
 | Ctrl+click | follow a link (IDREF, href, dmRef) |
 | Ctrl+Shift+V | paste as plain text |
+| Ctrl+Space | insert an element (or surround the selection) |
+| Ctrl+Shift+- / = | collapse / expand the current element |
+| F3 / Shift+F3 | find next / previous |
+| F1 | all keyboard shortcuts |
 
 ## Workspace layout
 
@@ -89,6 +94,6 @@ The app has a scripted end-to-end harness for UI testing:
 XYLEM_SCRIPT="click 500 280;;type Hello;;key Enter;;shot out.png;;save out.xml;;quit" xylem file.xml
 ```
 
-The available steps are `wait N`, `type T`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `shot PATH`, `save PATH` and `quit`.
+The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `shot PATH`, `save PATH` and `quit`.
 
 See [PARITY.md](PARITY.md) for the XMAX feature checklist.
