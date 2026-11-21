@@ -2520,6 +2520,7 @@ impl XylemApp {
         ui.vertical_centered(|ui| {
             ui.set_max_width(width);
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = space::M;
                 let actions: [(&str, &str, Cmd); 3] = [
                     (icon::FOLDER_OPEN, "Open…", Cmd::Open),
                     (icon::FILE_PLUS, "New document…", Cmd::New),
@@ -2527,12 +2528,36 @@ impl XylemApp {
                 ];
                 let each = (width - 2.0 * space::M) / 3.0;
                 for (glyph, label, cmd) in actions {
-                    let r = ui.add_sized(
-                        [each, 64.0],
-                        egui::Button::new(RichText::new(format!("{glyph}\n{label}")).color(p.text))
-                            .fill(p.surface)
-                            .stroke(egui::Stroke::new(1.0_f32, p.border)),
+                    let (rect, r) =
+                        ui.allocate_exact_size(egui::vec2(each, 76.0), egui::Sense::click());
+                    let hovered = r.hovered();
+                    ui.painter().rect(
+                        rect,
+                        egui::CornerRadius::same(crate::ui::theme::radius::CARD),
+                        if hovered { p.hover } else { p.surface },
+                        egui::Stroke::new(
+                            1.0_f32,
+                            if hovered { p.border_strong } else { p.border },
+                        ),
+                        egui::StrokeKind::Inside,
                     );
+                    ui.painter().text(
+                        rect.center() - egui::vec2(0.0, 12.0),
+                        egui::Align2::CENTER_CENTER,
+                        glyph,
+                        egui::FontId::proportional(22.0),
+                        p.accent,
+                    );
+                    ui.painter().text(
+                        rect.center() + egui::vec2(0.0, 16.0),
+                        egui::Align2::CENTER_CENTER,
+                        label,
+                        egui::FontId::proportional(size::BODY),
+                        p.text,
+                    );
+                    if hovered {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
                     crate::script::track(label, &r);
                     if r.clicked() {
                         cmds.push(cmd);
@@ -2961,7 +2986,13 @@ impl XylemApp {
         self.project.poll(ctx);
         // The Project tab is useful before any document is open.
         let project_tab = self.left_tab == LeftTab::Project;
-        if self.settings.show_structure && (project_tab || !self.docs.is_empty()) {
+        // In a narrow window the document keeps its room: the inspector goes
+        // first, then the left panel. The toolbar toggles still work once the
+        // window is wide enough again.
+        let width = ctx.content_rect().width();
+        let room_for_left = width >= 760.0;
+        let room_for_right = width >= 1000.0 || (!self.settings.show_structure && width >= 760.0);
+        if self.settings.show_structure && room_for_left && (project_tab || !self.docs.is_empty()) {
             let mut project_acts = Vec::new();
             let can_insert = match self.docs.get(self.active) {
                 Some(ds) if project_tab => crate::s1000d_ui::reference_insertable(ds),
@@ -3007,7 +3038,7 @@ impl XylemApp {
         if self.docs.is_empty() {
             return;
         }
-        if self.settings.show_elements || self.settings.show_attributes {
+        if (self.settings.show_elements || self.settings.show_attributes) && room_for_right {
             egui::SidePanel::right("inspector")
                 .resizable(true)
                 .default_width(280.0)
@@ -4172,11 +4203,6 @@ impl XylemApp {
                 .get(self.active)
                 .and_then(|d| d.canvas.caret_screen);
         }
-        // A script repaints every frame; cap it near 30 fps so test runs
-        // don't keep a CPU core and the GPU busy.
-        if self.script.is_some() {
-            std::thread::sleep(std::time::Duration::from_millis(30));
-        }
         let script_cmds = self
             .script
             .as_mut()
@@ -5103,6 +5129,12 @@ impl eframe::App for XylemApp {
         let ms = frame_start.elapsed().as_secs_f64() * 1000.0;
         if ms > 25.0 {
             log::debug!("slow frame: {ms:.1} ms");
+        }
+        // A script repaints every frame; cap it near 30 fps so test runs
+        // don't keep a CPU core and the GPU busy. (After the timing above,
+        // so slow-frame logs measure real work.)
+        if self.script.is_some() {
+            std::thread::sleep(std::time::Duration::from_millis(30));
         }
         // Background validation (cheap: only when the document changed).
         if self.settings.auto_validate

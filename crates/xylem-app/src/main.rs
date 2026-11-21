@@ -52,6 +52,13 @@ fn main() -> eframe::Result<()> {
     if let Some(pos) = window_pos {
         viewport = viewport.with_position(pos);
     }
+    // XYLEM_WINDOW_SIZE="w,h" (points) tests small and large layouts.
+    if let Some(size) = std::env::var("XYLEM_WINDOW_SIZE").ok().and_then(|v| {
+        let (w, h) = v.split_once(',')?;
+        Some([w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?])
+    }) {
+        viewport = viewport.with_inner_size(size);
+    }
     if scripted {
         // Test windows stay out of the way: no focus, no taskbar button, and
         // low CPU priority so they don't slow down whatever else is running.
@@ -60,7 +67,9 @@ fn main() -> eframe::Result<()> {
     }
     let options = eframe::NativeOptions {
         viewport,
-        persist_window: !scripted && window_pos.is_none(),
+        persist_window: !scripted
+            && window_pos.is_none()
+            && std::env::var_os("XYLEM_WINDOW_SIZE").is_none(),
         // With XYLEM_CONFIG_DIR set, everything (eframe's store included)
         // stays inside that folder; otherwise eframe's default location.
         persistence_path: std::env::var_os("XYLEM_CONFIG_DIR")
