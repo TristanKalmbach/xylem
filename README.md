@@ -17,6 +17,9 @@ What it does:
   byte, including entities, quoting, whitespace and encoding.
 - Has CALS and HTML tables, find and replace, spell checking with Hunspell
   dictionaries, a structure tree, an attribute inspector and an issues list.
+- Tracks changes and keeps review comments in XMetaL's markup, so reviewed
+  files round-trip with XMetaL users; see
+  [docs/track-changes.md](docs/track-changes.md).
 - Finds and replaces across a folder of files (Edit › Find in files). It
   searches text, and attribute values on request, but never tags or
   comments, and rewrites only the matched text in each file.
@@ -91,6 +94,9 @@ own, or:
 | Ctrl+Shift+V | paste as plain text |
 | Ctrl+Space | insert an element (or surround the selection) |
 | Ctrl+Shift+- / = | collapse / expand the current element |
+| Ctrl+Shift+T | track changes on / off |
+| Ctrl+Shift+M | new comment |
+| Ctrl+Shift+A / R | accept / reject all changes |
 | F3 / Shift+F3 | find next / previous |
 | F1 | all keyboard shortcuts |
 
@@ -120,7 +126,7 @@ The app has a scripted end-to-end harness for UI testing:
 XYLEM_SCRIPT="click 500 280;;type Hello;;key Enter;;shot out.png;;save out.xml;;quit" xylem file.xml
 ```
 
-The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `pick PATH` (the answer to the next file dialog), `shot PATH`, `save PATH` and `quit`. `scripts/e2e-smoke.sh` runs the end-to-end cases; see [CONTRIBUTING.md](CONTRIBUTING.md).
+The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `hover X Y`, `pick PATH` (the answer to the next file dialog), `shot PATH`, `save PATH` and `quit`. `scripts/e2e-smoke.sh` runs the end-to-end cases; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Scripted runs never open a web browser: Print preview writes its page to `xylem-print` in the temporary folder and reports the path. Set `XYLEM_NO_BROWSER=1` to get the same behaviour outside the harness.
 

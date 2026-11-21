@@ -113,7 +113,17 @@ pub fn boundary(doc: &Document, p: Pos) -> Pos {
     p
 }
 
+/// Marks that bound a tracked insertion or a commented range have no width
+/// on screen, so the token stream passes over them: a caret step or a
+/// Backspace next to one acts on the character beyond it.
+fn is_transparent(doc: &Document, n: NodeId) -> bool {
+    crate::revision::is_hidden_mark(doc, n)
+}
+
 fn first_token(doc: &Document, rules: &dyn Rules, n: NodeId) -> Option<Token> {
+    if is_transparent(doc, n) {
+        return token_after_node(doc, rules, n);
+    }
     match doc.kind(n) {
         NodeKind::Element(_) => Some(Token::Start(n)),
         NodeKind::Text(t) => {
@@ -129,6 +139,9 @@ fn first_token(doc: &Document, rules: &dyn Rules, n: NodeId) -> Option<Token> {
 }
 
 fn last_token(doc: &Document, rules: &dyn Rules, n: NodeId) -> Option<Token> {
+    if is_transparent(doc, n) {
+        return token_before_node(doc, rules, n);
+    }
     match doc.kind(n) {
         NodeKind::Element(_) => Some(Token::End(n)),
         NodeKind::Text(t) => {
@@ -366,7 +379,7 @@ pub fn first_editable(doc: &Document, rules: &dyn Rules, n: NodeId) -> Pos {
 /// elements that cannot hold text (e.g. CALS `colspec`).
 fn first_editable_in(doc: &Document, rules: &dyn Rules, n: NodeId) -> Option<Pos> {
     for &c in doc.children(n) {
-        if is_ignorable(doc, rules, c) {
+        if is_ignorable(doc, rules, c) || is_transparent(doc, c) {
             continue;
         }
         match doc.kind(c) {

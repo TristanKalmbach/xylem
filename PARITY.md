@@ -68,6 +68,38 @@ are unverified.
 | Follow links with Ctrl+click: IDREF, `href` to another file (with `#id`), S1000D `dmRef` | verified | |
 | Drop an image file to insert the package's image element | verified | Wrapped in an allowed container (e.g. a figure) when needed. |
 
+## Review (tracked changes and comments)
+
+Stored as XMetaL's `xm-insertion_mark`, `xm-deletion_mark` and
+`xm-annotation` processing instructions; see
+[docs/track-changes.md](docs/track-changes.md). The names and attributes
+come from a description of XMetaL's markup and were not checked against
+XMetaL itself.
+
+| Feature | Status | Notes |
+|---|---|---|
+| Insertions underlined, deletions struck through, per-author colour | verified | Tags-on and normal views. |
+| Comment markers and highlighted commented text | verified | |
+| Author, time and text on hover | verified | In the tags-on view; normal view uses the same code. |
+| Review panel: list in order, click to go there | verified | |
+| Track changes toggle (Review menu, Ctrl+Shift+T) | verified | Per document, not remembered. |
+| Typing extends one insertion; Backspace records a deletion | verified | |
+| Selection replace records deletion then insertion | verified | |
+| Find and replace (including Replace all) tracked | verified | |
+| Delete key, paste and spelling fixes tracked | tested | |
+| Enter inside an insertion ends it and restarts it in the new paragraph | verified | Splits stay untracked; each paragraph keeps a complete pair. |
+| Select all and Backspace with tracking on | verified | Rows, list items and colspecs stay; Reject all restores the file byte for byte. |
+| Deleting your own inserted text just removes it | tested | |
+| Deleted inline markup restored on reject | tested | |
+| Accept / reject the change at the caret | verified | |
+| Accept all / reject all, each one undo step | verified | |
+| New comment at the caret or on a selection | verified | |
+| Edit and delete comments in the Review panel | verified | |
+| Review author in Preferences (login name by default) | verified | Set in Preferences and seen in the saved marks. |
+| Untouched marks saved byte for byte | verified | |
+| Structural edits tracked (split, join, insert or remove elements) | not done | They stay ordinary edits with tracking on. |
+| Time stamps in local time | partial | Written in UTC (`+0000`). |
+
 ## Validation and tools
 
 | Feature | Status | Notes |

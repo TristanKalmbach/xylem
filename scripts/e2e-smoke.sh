@@ -96,4 +96,24 @@ XYLEM_CONFIG_DIR="$native/cfg2" XYLEM_PACKAGES=samples/doctypes XYLEM_SCRIPT="ke
 XYLEM_CONFIG_DIR="$native/cfg2" XYLEM_PACKAGES=samples/doctypes XYLEM_SCRIPT="save $native/restored.xml;;quit"     timeout 90 "$bin" > /dev/null 2>&1
 check session-restore "$out/restored.xml" "Hydraulic Lift Operator Manual"
 check zoom-persists "$out/cfg2/app.ron" "zoom:1.1"
+
+# Track changes (Ctrl+Shift+T): typing becomes one insertion, Backspace a
+# deletion, and Accept all (Ctrl+Shift+A) turns them into plain edits. The
+# author is the login name, so only the parts after it are checked.
+rm -rf "$out/cfg3"
+XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes \
+    XYLEM_SCRIPT="key T ctrl shift;;click 513 280;;type  Then bleed them.;;key Enter;;type More;;save $native/tracked-typing.xml;;quit" \
+    timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
+check tracked-typing-start "$out/tracked-typing.xml" 'lines<?xm-insertion_mark_start author="'
+check tracked-typing-end "$out/tracked-typing.xml" ' Then bleed them.<?xm-insertion_mark_end?></para>'
+check tracked-after-enter "$out/tracked-typing.xml" 'More<?xm-insertion_mark_end?>.</para>'
+starts=$(grep -o 'xm-insertion_mark_start' "$out/tracked-typing.xml" | wc -l)
+ends=$(grep -o 'xm-insertion_mark_end' "$out/tracked-typing.xml" | wc -l)
+if [ "$starts" -eq 2 ] && [ "$ends" -eq 2 ]; then echo "ok    tracked-marks-paired"; else echo "FAIL  tracked-marks-paired"; fail=1; fi
+XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes \
+    XYLEM_SCRIPT="key T ctrl shift;;click 513 280;;key Backspace;;key Backspace;;key Backspace;;key Backspace;;key Backspace;;type hoses;;save $native/tracked-mid.xml;;key A ctrl shift;;wait 3;;save $native/accept-all.xml;;quit" \
+    timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
+check tracked-deletion "$out/tracked-mid.xml" 'data="lines"?><?xm-insertion_mark_start author="'
+check tracked-replacement "$out/tracked-mid.xml" 'hoses<?xm-insertion_mark_end?>.</para>'
+check accept-all "$out/accept-all.xml" '<para>Inspect the hydraulic hoses.</para>'
 exit $fail

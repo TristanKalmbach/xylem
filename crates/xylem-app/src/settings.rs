@@ -39,6 +39,9 @@ pub struct Settings {
     pub find_files_pattern: String,
     /// The folder last shown in the Project tab.
     pub project_dir: Option<PathBuf>,
+    /// Name recorded on tracked changes and comments; empty means the
+    /// login name.
+    pub review_author: String,
 }
 
 impl Default for Settings {
@@ -67,6 +70,7 @@ impl Default for Settings {
             find_files_folder: None,
             find_files_pattern: crate::find_files::DEFAULT_PATTERN.into(),
             project_dir: None,
+            review_author: String::new(),
         }
     }
 }
@@ -103,6 +107,14 @@ pub fn config_dir() -> Option<PathBuf> {
 }
 
 impl Settings {
+    /// The author for tracked changes and comments.
+    pub fn author(&self) -> String {
+        match self.review_author.trim() {
+            "" => crate::review::os_user_name(),
+            name => name.to_string(),
+        }
+    }
+
     pub fn add_recent(&mut self, p: PathBuf) {
         self.recent_files.retain(|r| r != &p);
         self.recent_files.insert(0, p);

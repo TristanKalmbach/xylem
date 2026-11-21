@@ -267,6 +267,11 @@ impl Canvas {
                 }
             }
             self.paint(ui, origin, ed, cx);
+            if let Some(hp) = resp.hover_pos()
+                && let Some(tip) = self.review_tip(ed, hp - origin.to_vec2())
+            {
+                resp.clone().on_hover_text_at_pointer(tip);
+            }
 
             if self.scroll_to_caret {
                 self.scroll_to_caret = false;
@@ -409,6 +414,37 @@ impl Canvas {
                 }
             }
         }
+    }
+
+    /// Who made the tracked change or comment under the pointer, when, and
+    /// what it says.
+    fn review_tip(&self, ed: &Editor, local: Pos2) -> Option<String> {
+        use xylem_edit::revision::{ChangeKind, change_of, enclosing_insertion, is_mark};
+        let loc = self.layout.hit(local)?;
+        let para = self.layout.paras.get(loc.para)?;
+        // The segment actually under the pointer, not merely nearest to it.
+        let seg = para.segs.iter().find(|s| {
+            self.layout
+                .range_rects(loc.para, s.chars.start, s.chars.end)
+                .iter()
+                .any(|r| r.contains(local))
+        })?;
+        let doc = &ed.doc;
+        let mark = match &seg.kind {
+            SegKind::Atom(n) if is_mark(doc, *n) => *n,
+            SegKind::Text { node, bytes } => {
+                let i = loc.ch.saturating_sub(seg.chars.start).min(bytes.len() - 1);
+                enclosing_insertion(doc, Pos::new(*node, bytes[i]))?
+            }
+            _ => return None,
+        };
+        let c = change_of(doc, mark)?;
+        let body = match c.kind {
+            ChangeKind::Comment => c.comment.clone(),
+            ChangeKind::Deletion => format!("\u{201c}{}\u{201d}", c.excerpt.trim()),
+            ChangeKind::Insertion => return Some(crate::review::describe(&c)),
+        };
+        Some(format!("{}\n{body}", crate::review::describe(&c)))
     }
 
     fn select_word(&mut self, ed: &mut Editor, rules: &dyn Rules, p: Pos) {
