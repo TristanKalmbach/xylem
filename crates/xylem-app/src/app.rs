@@ -169,6 +169,9 @@ impl XylemApp {
             settings.dictionary_dir = Some(PathBuf::from(dict));
             settings.spell_check = true;
         }
+        if let Some(secs) = std::env::var("XYLEM_AUTOSAVE_SECONDS").ok().and_then(|v| v.parse().ok()) {
+            settings.autosave_seconds = secs;
+        }
         if let Some(brex) = std::env::var_os("XYLEM_BREX") {
             settings.brex = Some(PathBuf::from(brex));
         }
@@ -217,8 +220,11 @@ impl XylemApp {
         };
         app.load_speller();
         let scripted = app.script.is_some() || app.screenshot.is_some();
-        if !scripted {
+        let isolated = std::env::var_os("XYLEM_CONFIG_DIR").is_some();
+        if !scripted || isolated {
             app.recovery = crate::autosave::find();
+        }
+        if !scripted {
             if app.pending_open.is_empty() && app.settings.restore_session {
                 app.pending_open = app
                     .settings
@@ -435,6 +441,7 @@ impl XylemApp {
             Ok(()) => {
                 ds.editor.mark_saved();
                 crate::autosave::discard(ds.id_key());
+                ds.forget_recovery();
                 ds.path = Some(path.clone());
                 self.settings.add_recent(path.clone());
                 self.toast(format!("Saved {}", path.display()), false);
@@ -2500,6 +2507,7 @@ impl XylemApp {
                     self.save(false);
                     if !self.docs[i].is_dirty() {
                         crate::autosave::discard(self.docs[i].id_key());
+                        self.docs[i].forget_recovery();
                         self.docs.remove(i);
                         self.active = self.active.min(self.docs.len().saturating_sub(1));
                     }
@@ -2507,6 +2515,7 @@ impl XylemApp {
                 }
                 Some(1) => {
                     crate::autosave::discard(self.docs[i].id_key());
+                    self.docs[i].forget_recovery();
                     self.docs.remove(i);
                     self.active = self.active.min(self.docs.len().saturating_sub(1));
                     self.dialogs.confirm_close = None;
@@ -2964,14 +2973,33 @@ impl XylemApp {
             });
         for k in open_items.into_iter().rev() {
             let r = self.recovery.remove(k);
-            match r.load() {
-                Ok(doc) => {
-                    self.add_doc(doc, r.original.clone());
-                    self.toast("Recovered document opened. Save it to keep it.", false);
+            let doc = match r.load() {
+                Ok(doc) => doc,
+                Err(e) => {
+                    // Keep the copy: it may still be readable by hand.
+                    self.toast(format!("Could not open the recovered copy ({e}). It is kept at {}.", r.file.display()), true);
+                    continue;
                 }
-                Err(e) => self.toast(format!("Could not recover: {e}"), true),
+            };
+            // If the original is already open (session restore), put the
+            // recovered content into that tab, so undo goes back to the saved file.
+            let open_tab = r.original.as_ref().and_then(|p| self.docs.iter().position(|d| d.path.as_deref() == Some(p.as_path())));
+            match open_tab {
+                Some(i) => {
+                    let ds = &mut self.docs[i];
+                    ds.editor.replace_document(doc);
+                    ds.canvas.invalidate();
+                    ds.recovered_from = Some(r.file.clone());
+                    self.active = i;
+                }
+                None => {
+                    self.add_doc(doc, r.original.clone());
+                    if let Some(ds) = self.docs.last_mut() {
+                        ds.recovered_from = Some(r.file.clone());
+                    }
+                }
             }
-            r.remove();
+            self.toast("Recovered unsaved work. Save the document to keep it.", false);
         }
         if discard_all {
             for r in self.recovery.drain(..) {
@@ -2982,8 +3010,8 @@ impl XylemApp {
 
     /// Writes unsaved documents to the autosave folder every few seconds.
     fn autosave_tick(&mut self, ctx: &egui::Context) {
-        if self.settings.autosave_seconds == 0 || self.script.is_some() || self.screenshot.is_some()
-        {
+        let isolated = std::env::var_os("XYLEM_CONFIG_DIR").is_some();
+        if self.settings.autosave_seconds == 0 || ((self.script.is_some() || self.screenshot.is_some()) && !isolated) {
             return;
         }
         let now = ctx.input(|i| i.time);

@@ -19,9 +19,13 @@ pub fn write(key: String, original: Option<&Path>, doc: &Document) {
         log::warn!("autosave: {e}");
         return;
     }
+    // Write to a temporary file and rename it, so a crash mid-write never
+    // leaves a truncated copy in place of a good one.
     let xml = dir.join(format!("{key}.xml"));
-    if let Err(e) = std::fs::write(&xml, doc.to_bytes()) {
+    let tmp = dir.join(format!("{key}.xml.tmp"));
+    if let Err(e) = std::fs::write(&tmp, doc.to_bytes()).and_then(|_| std::fs::rename(&tmp, &xml)) {
         log::warn!("autosave: {e}");
+        let _ = std::fs::remove_file(&tmp);
         return;
     }
     let meta = original

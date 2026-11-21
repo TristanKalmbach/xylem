@@ -78,6 +78,10 @@ pub fn default_package_dirs() -> Vec<PathBuf> {
 }
 
 pub fn config_dir() -> Option<PathBuf> {
+    // XYLEM_CONFIG_DIR replaces the whole folder (portable installs, tests).
+    if let Some(dir) = std::env::var_os("XYLEM_CONFIG_DIR") {
+        return Some(PathBuf::from(dir));
+    }
     let base = if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
     } else if cfg!(target_os = "macos") {

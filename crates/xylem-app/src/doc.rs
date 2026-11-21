@@ -77,6 +77,9 @@ pub struct DocState {
     pub spell_cache: crate::spell::SpellCache,
     images: (u64, Rc<HashMap<NodeId, String>>),
     words: (u64, usize),
+    /// Autosave copy this document was recovered from. The document counts as
+    /// unsaved, and the copy is kept, until the user saves or discards it.
+    pub recovered_from: Option<std::path::PathBuf>,
 }
 
 impl DocState {
@@ -113,6 +116,7 @@ impl DocState {
             spell_cache: Default::default(),
             images: (u64::MAX, Default::default()),
             words: (u64::MAX, 0),
+            recovered_from: None,
         }
     }
 
@@ -135,6 +139,14 @@ impl DocState {
         self.words.1
     }
 
+    /// Removes the autosave copy this document was recovered from.
+    pub fn forget_recovery(&mut self) {
+        if let Some(f) = self.recovered_from.take() {
+            let _ = std::fs::remove_file(&f);
+            let _ = std::fs::remove_file(f.with_extension("path"));
+        }
+    }
+
     /// Stable name for this document's autosave file.
     pub fn id_key(&self) -> String {
         use std::hash::{Hash, Hasher};
@@ -152,6 +164,7 @@ impl DocState {
             || self.source.as_ref().is_some_and(|s| s.revision == u64::MAX)
             // A new, never-saved document is unsaved work.
             || self.path.is_none()
+            || self.recovered_from.is_some()
     }
 
     /// Elements that display images, with their source (cached per structure).
