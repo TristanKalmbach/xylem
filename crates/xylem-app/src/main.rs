@@ -38,6 +38,10 @@ fn main() -> eframe::Result<()> {
             .with_min_inner_size([640.0, 400.0])
             .with_drag_and_drop(true),
         persist_window: true,
+        // With XYLEM_CONFIG_DIR set, everything (eframe's store included)
+        // stays inside that folder; otherwise eframe's default location.
+        persistence_path: std::env::var_os("XYLEM_CONFIG_DIR")
+            .map(|d| PathBuf::from(d).join("app.ron")),
         ..Default::default()
     };
     eframe::run_native(

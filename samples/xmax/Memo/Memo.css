@@ -1,0 +1,7 @@
+memo { display: block; font-family: sans-serif; }
+to, subject { display: block; margin-bottom: 4pt; }
+to:before { content: "To: "; font-weight: bold; }
+subject:before { content: "Subject: "; font-weight: bold; }
+subject { font-size: 14pt; }
+para { display: block; margin-top: 6pt; }
+em { font-style: italic; }

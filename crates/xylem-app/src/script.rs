@@ -3,11 +3,24 @@
 //! Steps are separated by `;;`:
 //! `wait N` · `type TEXT` · `paste TEXT` · `key NAME [ctrl] [shift] [alt]` · `click X Y` ·
 //! `dblclick X Y` · `rclick X Y` · `shot PATH` · `drop FILE` · `save PATH` (writes the active
-//! document's XML) · `quit`.
+//! document's XML) · `pick PATH` (the answer the next file dialog gives; `pick -` cancels it) ·
+//! `quit`.
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput};
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+/// Answers for file dialogs, queued by `pick` steps.
+static PICKS: Mutex<VecDeque<Option<PathBuf>>> = Mutex::new(VecDeque::new());
+
+/// Shows a file dialog, unless a script has queued the answer.
+pub fn file_dialog(show: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(answer) = PICKS.lock().ok().and_then(|mut q| q.pop_front()) {
+        return answer;
+    }
+    show()
+}
 
 pub enum Step {
     Wait(u32),
@@ -86,6 +99,14 @@ impl Script {
                 "save" => Step::Save(PathBuf::from(rest.trim())),
                 "drop" => Step::Drop(PathBuf::from(rest.trim())),
                 "quit" => Step::Quit,
+                "pick" => {
+                    // Queued now and consumed in order by whatever dialogs open.
+                    let answer = (rest.trim() != "-").then(|| PathBuf::from(rest.trim()));
+                    if let Ok(mut q) = PICKS.lock() {
+                        q.push_back(answer);
+                    }
+                    continue;
+                }
                 _ => {
                     log::warn!("script: unknown step `{part}`");
                     continue;

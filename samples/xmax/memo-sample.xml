@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<memo xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="Memo.xsd">
+  <to>Maintenance team</to>
+  <subject>Lift inspection schedule</subject>
+  <para>Inspections move to <em>Tuesdays</em> from next month.</para>
+</memo>

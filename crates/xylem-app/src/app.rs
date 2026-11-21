@@ -240,7 +240,7 @@ impl XylemApp {
         if !scripted || isolated {
             app.recovery = crate::autosave::find();
         }
-        if !scripted && app.pending_open.is_empty() && app.settings.restore_session {
+        if (!scripted || isolated) && app.pending_open.is_empty() && app.settings.restore_session {
             app.pending_open = app
                 .settings
                 .last_session
@@ -416,7 +416,8 @@ impl XylemApp {
         if let Some(dir) = self.doc().and_then(|d| d.dir().map(Path::to_path_buf)) {
             dlg = dlg.set_directory(dir);
         }
-        if let Some(paths) = dlg.pick_files() {
+        let scripted = crate::script::file_dialog(|| None);
+        if let Some(paths) = scripted.map(|p| vec![p]).or_else(|| dlg.pick_files()) {
             for p in paths {
                 self.open_path(p);
             }
@@ -1126,19 +1127,34 @@ impl XylemApp {
     }
 
     fn import_xmax(&mut self) {
-        let Some(src) = rfd::FileDialog::new()
-            .set_title("Choose an XMAX customization folder (with a .ctm)")
-            .pick_folder()
-            .or_else(|| {
-                rfd::FileDialog::new()
-                    .set_title("…or choose a .xac file")
-                    .add_filter("XMAX customization", &["xac"])
-                    .pick_file()
-            })
-        else {
+        // One dialog for both forms: the .ctm inside a customization folder
+        // stands for the folder, a .xac archive for itself.
+        let Some(picked) = crate::script::file_dialog(|| {
+            rfd::FileDialog::new()
+                .set_title("Choose an XMAX customization (.ctm in its folder, or a .xac)")
+                .add_filter("XMAX customization", &["ctm", "CTM", "xac", "XAC"])
+                .pick_file()
+        }) else {
             return;
         };
-        let Some(dest_root) = self.settings.package_dirs.first().cloned() else {
+        let is_ctm = picked
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("ctm"));
+        let src = match picked.parent() {
+            Some(dir) if is_ctm => dir.to_path_buf(),
+            _ => picked,
+        };
+        let Some(dest_root) = self
+            .settings
+            .package_dirs
+            .first()
+            .cloned()
+            .or_else(|| crate::settings::config_dir().map(|d| d.join("doctypes")))
+        else {
+            self.toast(
+                "No doctype package folder is set; add one in File › Preferences.",
+                true,
+            );
             return;
         };
         let name = src
@@ -1257,15 +1273,57 @@ impl XylemApp {
                 return;
             }
         }
-        if let Some(href) = doc.attr(el, "href").or_else(|| doc.attr(el, "xlink:href")) {
-            let file = href.split('#').next().unwrap_or("");
-            if let Some(dir) = ds.dir() {
-                let p = dir.join(file);
-                if p.is_file() {
-                    self.open_path(p)
-                }
-            }
+        let Some(href) = doc.attr(el, "href").or_else(|| doc.attr(el, "xlink:href")) else {
+            return;
+        };
+        let (file, fragment) = match href.split_once('#') {
+            Some((f, frag)) => (f.to_string(), Some(frag.to_string())),
+            None => (href.to_string(), None),
+        };
+        if file.contains("://") {
+            self.toast(format!("{href} is not a local file."), false);
+            return;
         }
+        let Some(dir) = ds.dir().map(Path::to_path_buf) else {
+            self.toast(
+                "Save the document first so relative links can be resolved.",
+                false,
+            );
+            return;
+        };
+        if file.is_empty() {
+            // "#id" alone points inside this document.
+            if let Some(id) = fragment {
+                self.reveal_id(&id);
+            }
+            return;
+        }
+        let p = dir.join(&file);
+        if !p.is_file() {
+            self.toast(format!("Link target not found: {}", p.display()), true);
+            return;
+        }
+        self.open_path(p);
+        if let Some(id) = fragment {
+            self.reveal_id(&id);
+        }
+    }
+
+    /// Puts the caret in the element with this `id` in the active document.
+    fn reveal_id(&mut self, id: &str) {
+        let Some(ds) = self.docs.get_mut(self.active) else {
+            return;
+        };
+        let doc = &ds.editor.doc;
+        let Some(t) = doc
+            .descendants(doc.root())
+            .find(|&x| doc.attr(x, "id") == Some(id))
+        else {
+            return;
+        };
+        let p = first_editable(doc, &xylem_edit::NoRules, t);
+        ds.editor.set_caret(p);
+        ds.canvas.reveal(t);
     }
 
     // ------------------------------------------------------------ UI
@@ -3470,8 +3528,12 @@ impl eframe::App for XylemApp {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        if self.script.is_some() || self.screenshot.is_some() {
-            return; // test runs must not change the user's settings
+        // Test runs must not change the user's settings, but may change an
+        // isolated config folder (XYLEM_CONFIG_DIR), which is how session
+        // restore and preference persistence are tested.
+        let isolated = std::env::var_os("XYLEM_CONFIG_DIR").is_some();
+        if (self.script.is_some() || self.screenshot.is_some()) && !isolated {
+            return;
         }
         self.settings.last_session = self.docs.iter().filter_map(|d| d.path.clone()).collect();
         eframe::set_value(storage, "settings", &self.settings);

@@ -32,7 +32,7 @@ are unverified.
 | Inline images | verified | PNG, JPEG, GIF, BMP, TIFF. CGM and SVG show a labelled box. |
 | Images in CSS generated content (`url(...)`) | verified | Drawn before the text in `::before`, after it in `::after`. |
 | Comments shown | verified | |
-| Zoom, light and dark themes | tested | |
+| Zoom, light and dark themes | verified | Both kept across a restart. |
 
 ## CSS
 
@@ -57,15 +57,15 @@ are unverified.
 | Surround (palette with a selection), split, join, change element | verified | |
 | `xm-replace_text` placeholder prompts | verified | |
 | Paste plain text and XML fragments with schema checking | verified | |
-| Copy and cut XML fragments | tested | |
+| Copy and cut XML fragments | verified | Copying a paragraph with `<b>` and `<xref>` and pasting it elsewhere keeps the markup. |
 | Undo/redo (journaled; exact dirty state) | verified | |
 | Insert comment, PI, CDATA; double-click to edit | verified | |
-| Read-only and non-removable elements | tested | |
+| Read-only and non-removable elements | verified | Typing and Backspace inside a read-only `<warning>` leave it unchanged. Non-removable is tested only. |
 | Protected marker PIs and entity references | tested | The importer protects PIs its stylesheets style (`Ref_Label`, `Entity_Ref_Placeholder`); pass `--protect-pi` for others such as `cms-replace_content`. |
 | CALS tables: insert dialog, rows, columns, merge, split, Tab | verified | Insert dialog, Tab, add column, merge down in the app; the rest by unit tests. |
 | Automatic IDs on insert | verified | Assigned inside the insert, so one undo removes both. |
 | Move elements up/down (keeps whitespace layout) | verified | |
-| Follow links with Ctrl+click: IDREF, S1000D `dmRef` (opens the other module) | verified | Local `href` is tested only. |
+| Follow links with Ctrl+click: IDREF, `href` to another file (with `#id`), S1000D `dmRef` | verified | |
 | Drop an image file to insert the package's image element | verified | Wrapped in an allowed container (e.g. a figure) when needed. |
 
 ## Validation and tools
@@ -78,25 +78,36 @@ are unverified.
 | Format document (pretty-print) | verified | Indent amount and per-element "indent content" from the package; mixed content is never touched. |
 | Save (lossless, atomic) | verified | |
 | Autosave and crash recovery | verified | Killed mid-edit and relaunched: the work was offered back, stayed unsaved until saved, and the copy was removed after saving. |
-| Reopen the previous session | tested | |
+| Reopen the previous session | verified | |
 
 ## Customisation
 
 | Feature | Status |
 |---|---|
 | `xylem-import` command line (`.ctm` folders and `.xac` archives) | verified (all 137 real sets import and load back) |
-| Import from the UI | tested (the folder picker can't be driven by the harness) |
+| Import from the UI | verified (File menu, choosing the `.ctm` or `.xac`; the imported package is used straight away) |
 | Package matching | verified |
 | CTM templates, FollowedBy, toggles, lists, images, descriptions, pretty-print, protected PIs | verified |
 | `.tbr`, `.js`, `.xdp` | n/a (unused by the legacy host) |
 
 See [docs/doctype-packages.md](docs/doctype-packages.md) for the package format.
 
+## Deployment
+
+XMAX shipped as an ActiveX control inside a host application; these replace
+the host's installer and its shared customization folder.
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Shared team configuration (`xylem-team.toml`) | verified | The 137 converted sets load from a shared folder through the team file. |
+| Per-user install and uninstall (Start Menu, Installed apps) | verified | Windows. Linux `.desktop` entry is untested. |
+| Updates from a team folder | verified | Newer version installed, older never; a half-copied file is refused. |
+
 ## S1000D (issues 2.0–6.0)
 
 | Feature | Status | Notes |
 |---|---|---|
-| Built-in styled rendering | verified | 4.1 descriptive and procedural; legacy markup is tested only. |
+| Built-in styled rendering | verified | 4.1 descriptive and procedural, and an issue 3.0 descriptive module. |
 | New data module wizard | verified | Every issue and kind it offers (52 combinations, 2.0 to 6.0) produces a module that validates against the official schemas (`tests/real_schemas.rs`). |
 | BREX check | verified | |
 | Data module info; rename to the CSDB file name | verified | |

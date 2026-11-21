@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!DOCTYPE DTDExtensions SYSTEM "ctm.dtd">
+<DTDExtensions Version="2.0">
+  <ElementPropertiesList>
+    <ElementProperties><Name ns="">para</Name><LongDescription>A paragraph of the memo.</LongDescription></ElementProperties>
+  </ElementPropertiesList>
+  <Templates>
+    <Template><Name ns="">para</Name><MiniTemplate><![CDATA[<para><?xm-replace_text Type the text?></para>]]></MiniTemplate></Template>
+  </Templates>
+  <FollowedByList><FollowedByListItem><Name ns="">subject</Name><FollowedBy ns="">para</FollowedBy></FollowedByListItem></FollowedByList>
+  <Paragraphs><Paragraph><Name ns="">para</Name></Paragraph></Paragraphs>
+  <TogglingInlines><Italic><Name ns="">em</Name></Italic></TogglingInlines>
+</DTDExtensions>
