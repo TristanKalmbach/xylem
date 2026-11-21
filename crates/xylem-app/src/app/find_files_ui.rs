@@ -107,13 +107,11 @@ impl XylemApp {
             return;
         }
         let mut actions = Vec::new();
-        let mut open = true;
-        egui::Window::new("Find in files")
-            .open(&mut open)
-            .default_pos([420.0, 110.0])
-            .default_width(620.0)
+        let (close, _) = crate::ui::Dialog::new("Find in files")
+            .width(660.0)
+            .modeless()
             .show(ctx, |ui| self.find_files_ui(ui, &mut actions));
-        if !open {
+        if close {
             self.find_files.open = false;
         }
         if self.find_files.confirm {
@@ -150,12 +148,16 @@ impl XylemApp {
     fn find_files_ui(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         let st = &mut self.find_files;
         let busy = st.search.is_some() || st.replacing.is_some();
-        egui::Grid::new("find-files-grid")
-            .num_columns(2)
-            .show(ui, |ui| {
-                ui.label("Find");
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut st.options.text).desired_width(f32::INFINITY),
+        let p = crate::ui::palette(ui.ctx());
+        let field_w = 500.0;
+        crate::ui::form(ui, "find-files-form", |f| {
+            f.row("Find", |ui| {
+                let r = crate::ui::text_field(
+                    ui,
+                    "Find in files text",
+                    &mut st.options.text,
+                    "Text to find",
+                    field_w,
                 );
                 if std::mem::take(&mut st.focus) {
                     r.request_focus();
@@ -163,61 +165,69 @@ impl XylemApp {
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !busy {
                     actions.push(Action::Search);
                 }
-                ui.end_row();
-                ui.label("Replace with");
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut st.replacement).desired_width(f32::INFINITY),
-                );
-                crate::script::track("Replace with", &r);
-                ui.end_row();
-                ui.label("Folder");
+            });
+            f.row("Replace with", |ui| {
+                crate::ui::text_field(ui, "Replace with", &mut st.replacement, "", field_w);
+            });
+            f.row("Folder", |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Browse…").clicked() {
+                    crate::ui::text_field(
+                        ui,
+                        "Folder",
+                        &mut st.folder,
+                        "Folder to search",
+                        field_w - 90.0,
+                    );
+                    if crate::ui::button(ui, "Browse…").clicked() {
                         actions.push(Action::Browse);
                     }
-                    ui.add(egui::TextEdit::singleline(&mut st.folder).desired_width(f32::INFINITY));
                 });
-                ui.end_row();
-                ui.label("Files");
-                ui.add(egui::TextEdit::singleline(&mut st.pattern).desired_width(f32::INFINITY));
-                ui.end_row();
             });
-        ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut st.options.match_case, "Match case");
-            ui.checkbox(&mut st.options.whole_word, "Whole word");
-            ui.checkbox(&mut st.options.regex, "Regex");
-            ui.checkbox(&mut st.options.attributes, "Attribute values")
-                .on_hover_text("Also search and replace in attribute values, not only text");
-            let mut subfolders = !st.top_level_only;
-            ui.checkbox(&mut subfolders, "Subfolders");
-            st.top_level_only = !subfolders;
+            f.row("Files", |ui| {
+                crate::ui::text_field(ui, "File pattern", &mut st.pattern, "*.xml", field_w);
+            });
+            f.row("", |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut st.options.match_case, "Match case");
+                    ui.checkbox(&mut st.options.whole_word, "Whole word");
+                    ui.checkbox(&mut st.options.regex, "Regex");
+                    ui.checkbox(&mut st.options.attributes, "Attribute values")
+                        .on_hover_text(
+                            "Also search and replace in attribute values, not only text",
+                        );
+                    let mut subfolders = !st.top_level_only;
+                    ui.checkbox(&mut subfolders, "Subfolders");
+                    st.top_level_only = !subfolders;
+                });
+            });
         });
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
             if st.search.is_some() {
-                if ui.button("Stop").clicked() {
+                if crate::ui::button(ui, "Stop").clicked() {
                     actions.push(Action::Stop);
                 }
                 ui.spinner();
             } else if ui
-                .add_enabled(
-                    !busy && !st.options.text.is_empty(),
-                    egui::Button::new("Find all"),
-                )
+                .add_enabled_ui(!busy && !st.options.text.is_empty(), |ui| {
+                    crate::ui::primary_button(ui, "Find all")
+                })
+                .inner
                 .clicked()
             {
                 actions.push(Action::Search);
             }
             let can_replace = !busy && st.results_current() && !st.results.is_empty();
             let r = ui
-                .add_enabled(can_replace, egui::Button::new("Replace all…"))
+                .add_enabled_ui(can_replace, |ui| crate::ui::button(ui, "Replace all…"))
+                .inner
                 .on_disabled_hover_text("Run Find all with the current settings first");
-            crate::script::track("Replace all…", &r);
             if r.clicked() {
                 actions.push(Action::AskReplace);
             }
             if st.replacing.is_some() {
                 ui.spinner();
-                ui.label("Replacing…");
+                crate::ui::muted(ui, "Replacing…");
             }
             let status = match (st.finished, st.search.is_some()) {
                 (_, true) => format!(
@@ -235,27 +245,29 @@ impl XylemApp {
                 ),
                 (None, false) => String::new(),
             };
-            ui.label(RichText::new(status).weak());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                crate::ui::muted(ui, status);
+            });
         });
+        let _ = p;
         if let Some(e) = &st.error {
-            ui.colored_label(Color32::from_rgb(220, 70, 70), e);
+            crate::ui::notice(ui, crate::ui::Tone::Danger, e.clone());
         }
         if st.finished.is_some() && !st.results_current() && st.search.is_none() {
-            ui.label(
-                RichText::new(
-                    "The settings changed since this search; run Find all again to replace.",
-                )
-                .weak(),
+            crate::ui::notice(
+                ui,
+                crate::ui::Tone::Warning,
+                "The settings changed since this search. Run Find all again to replace.",
             );
         }
         if let Some(report) = &st.report {
-            ui.separator();
+            crate::ui::divider(ui);
             egui::ScrollArea::vertical()
                 .id_salt("find-files-report")
                 .max_height(120.0)
                 .show(ui, |ui| ui.label(report.as_str()));
         }
-        ui.separator();
+        crate::ui::divider(ui);
         // One row per file heading and per match, so long result lists only
         // lay out what is visible.
         let rows: Vec<(usize, Option<usize>)> = st
@@ -268,11 +280,8 @@ impl XylemApp {
             .collect();
         let root = PathBuf::from(st.folder.trim());
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
-        let highlight = if ui.visuals().dark_mode {
-            Color32::from_rgb(110, 90, 20)
-        } else {
-            Color32::from_rgb(255, 230, 120)
-        };
+        let pal = crate::ui::palette(ui.ctx());
+        let highlight = pal.warning_soft;
         let weak = ui.visuals().weak_text_color();
         let text = ui.visuals().text_color();
         let font = egui::TextStyle::Body.resolve(ui.style());
@@ -286,10 +295,17 @@ impl XylemApp {
                     match h {
                         None => {
                             let shown = fh.path.strip_prefix(&root).unwrap_or(&fh.path);
-                            ui.label(
-                                RichText::new(format!("{}  ({})", shown.display(), fh.hits.len()))
-                                    .strong(),
-                            );
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(crate::ui::icon::FILE_TEXT).color(pal.text_muted),
+                                );
+                                ui.label(RichText::new(shown.display().to_string()).strong());
+                                crate::ui::badge(
+                                    ui,
+                                    fh.hits.len().to_string(),
+                                    crate::ui::Tone::Neutral,
+                                );
+                            });
                         }
                         Some(h) => {
                             let hit = &fh.hits[h];
@@ -352,11 +368,8 @@ impl XylemApp {
         let st = &mut self.find_files;
         let (matches, files) = (st.match_count(), st.results.len());
         let mut keep = true;
-        egui::Window::new("Replace in files")
-            .collapsible(false)
-            .resizable(false)
-            .default_width(420.0)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        let (x, res) = crate::ui::Dialog::new("Replace in files")
+            .width(440.0)
             .show(ctx, |ui| {
                 ui.label(format!(
                     "Replace {matches} {} in {files} {} with \u{201c}{}\u{201d}?",
@@ -365,28 +378,32 @@ impl XylemApp {
                     st.replacement
                 ));
                 if !unsaved.is_empty() {
-                    ui.label(format!(
-                        "{} of these {} open with unsaved changes and will be skipped.",
-                        unsaved.len(),
-                        if unsaved.len() == 1 { "is" } else { "are" }
-                    ));
+                    ui.add_space(4.0);
+                    crate::ui::notice(
+                        ui,
+                        crate::ui::Tone::Warning,
+                        format!(
+                            "{} of these {} open with unsaved changes and will be skipped.",
+                            unsaved.len(),
+                            if unsaved.len() == 1 { "is" } else { "are" }
+                        ),
+                    );
                 }
-                ui.label(
-                    RichText::new("Files are changed on disk; this cannot be undone from Xylem.")
-                        .weak(),
+                ui.add_space(4.0);
+                crate::ui::muted(
+                    ui,
+                    "Files are changed on disk. This cannot be undone from Xylem.",
                 );
-                ui.horizontal(|ui| {
-                    let r = ui.button("Replace");
-                    crate::script::track("Confirm replace", &r);
-                    if r.clicked() {
-                        actions.push(Action::Replace);
-                        keep = false;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        keep = false;
-                    }
-                });
+                crate::ui::dialog_footer(ui, Some(("Replace", true)), Some("Cancel"), |_| {})
             });
+        let res = res.unwrap_or_default();
+        if res.confirmed {
+            actions.push(Action::Replace);
+            keep = false;
+        }
+        if x || res.closed {
+            keep = false;
+        }
         st.confirm = keep;
     }
 

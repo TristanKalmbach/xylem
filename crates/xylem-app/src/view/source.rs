@@ -17,23 +17,24 @@ enum Tok {
 }
 
 fn color(t: Tok, dark: bool) -> Color32 {
+    // Tuned to sit with the theme: the accent marks element names, and every
+    // colour keeps at least 4.5:1 contrast on the source background.
+    let rgb = |hex: u32| Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+    let pal = crate::ui::Palette::for_dark_mode(dark);
     match (t, dark) {
-        (Tok::Text, true) => Color32::from_gray(220),
-        (Tok::Text, false) => Color32::from_gray(25),
-        (Tok::Tag, true) => Color32::from_rgb(130, 150, 170),
-        (Tok::Tag, false) => Color32::from_rgb(90, 90, 120),
-        (Tok::Name, true) => Color32::from_rgb(110, 180, 255),
-        (Tok::Name, false) => Color32::from_rgb(20, 60, 170),
-        (Tok::AttrName, true) => Color32::from_rgb(220, 170, 110),
-        (Tok::AttrName, false) => Color32::from_rgb(150, 70, 10),
-        (Tok::AttrValue, true) => Color32::from_rgb(150, 210, 140),
-        (Tok::AttrValue, false) => Color32::from_rgb(20, 120, 40),
-        (Tok::Comment, _) => Color32::from_rgb(120, 130, 120),
-        (Tok::Pi, true) => Color32::from_rgb(200, 140, 220),
-        (Tok::Pi, false) => Color32::from_rgb(120, 40, 140),
-        (Tok::Entity, _) => Color32::from_rgb(200, 60, 120),
-        (Tok::CData, true) => Color32::from_rgb(200, 200, 140),
-        (Tok::CData, false) => Color32::from_rgb(110, 110, 30),
+        (Tok::Text, _) => pal.text,
+        (Tok::Tag, _) => pal.text_faint,
+        (Tok::Name, _) => pal.accent,
+        (Tok::AttrName, true) => rgb(0xE2AC45),
+        (Tok::AttrName, false) => rgb(0x8F5A00),
+        (Tok::AttrValue, true) => rgb(0x86B6F2),
+        (Tok::AttrValue, false) => rgb(0x2A5CA6),
+        (Tok::Comment, _) => pal.text_muted,
+        (Tok::Pi, true) => rgb(0xC99AE6),
+        (Tok::Pi, false) => rgb(0x7A3E9D),
+        (Tok::Entity, _) => pal.danger,
+        (Tok::CData, true) => rgb(0xCFC783),
+        (Tok::CData, false) => rgb(0x6A651C),
     }
 }
 
@@ -136,49 +137,79 @@ pub fn show(
     goto: &mut Option<usize>,
 ) -> bool {
     let dark = ui.visuals().dark_mode;
+    let pal = crate::ui::palette(ui.ctx());
     let font = FontId::new(13.0 * zoom, egui::FontFamily::Name("mono".into()));
     let mut changed = false;
     if let Some((msg, _)) = error {
-        ui.colored_label(
-            Color32::from_rgb(220, 60, 60),
-            format!("⚠ Not well-formed: {msg}"),
+        crate::ui::notice(
+            ui,
+            crate::ui::Tone::Danger,
+            format!("Not well-formed: {msg}. Press F4 to go to the problem."),
         );
+        ui.add_space(4.0);
     }
     egui::ScrollArea::both()
         .auto_shrink([false, false])
         .id_salt("source")
         .show(ui, |ui| {
-            let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
+            // Lines don't wrap, so the gutter's numbers line up with them.
+            let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 let mut job = highlight(buf.as_str(), font.clone(), dark);
-                job.wrap.max_width = wrap;
+                job.wrap.max_width = f32::INFINITY;
                 ui.fonts_mut(|f| f.layout_job(job))
             };
-            let out = TextEdit::multiline(text)
-                .code_editor()
-                .desired_width(f32::INFINITY)
-                .desired_rows(40)
-                .lock_focus(true)
-                .layouter(&mut layouter)
-                .show(ui);
-            if out.response.changed() {
-                changed = true;
-            }
-            if let Some(offset) = goto.take() {
-                let ci = text[..offset.min(text.len())].chars().count();
-                let mut state = out.state.clone();
-                state
-                    .cursor
-                    .set_char_range(Some(egui::text::CCursorRange::one(
-                        egui::text::CCursor::new(ci),
-                    )));
-                state.store(ui.ctx(), out.response.id);
-                out.response.request_focus();
-                let r = out
-                    .galley
-                    .pos_from_cursor(egui::text::CCursor::new(ci))
-                    .translate(out.galley_pos.to_vec2());
-                ui.scroll_to_rect(r.expand(40.0), Some(egui::Align::Center));
-            }
+            let lines = text.lines().count().max(1) + usize::from(text.ends_with('\n'));
+            let digits = lines.to_string().len().max(3);
+            let numbers: String = (1..=lines).map(|n| format!("{n:>digits$}\n")).collect();
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let gutter_font = font.clone();
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(numbers)
+                            .font(gutter_font)
+                            .color(pal.text_faint),
+                    )
+                    .selectable(false)
+                    .extend(),
+                );
+                ui.add_space(4.0);
+                let line_x = ui.cursor().left();
+                ui.painter().vline(
+                    line_x,
+                    ui.clip_rect().y_range(),
+                    egui::Stroke::new(1.0_f32, pal.border),
+                );
+                ui.add_space(8.0);
+                let out = TextEdit::multiline(text)
+                    .code_editor()
+                    .frame(false)
+                    .margin(egui::Margin::ZERO)
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(40)
+                    .lock_focus(true)
+                    .layouter(&mut layouter)
+                    .show(ui);
+                if out.response.changed() {
+                    changed = true;
+                }
+                if let Some(offset) = goto.take() {
+                    let ci = text[..offset.min(text.len())].chars().count();
+                    let mut state = out.state.clone();
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(ci),
+                        )));
+                    state.store(ui.ctx(), out.response.id);
+                    out.response.request_focus();
+                    let r = out
+                        .galley
+                        .pos_from_cursor(egui::text::CCursor::new(ci))
+                        .translate(out.galley_pos.to_vec2());
+                    ui.scroll_to_rect(r.expand(40.0), Some(egui::Align::Center));
+                }
+            });
         });
     changed
 }

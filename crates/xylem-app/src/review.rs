@@ -165,122 +165,157 @@ fn excerpt(s: &str, max: usize) -> String {
 
 /// The Review panel: every change and comment in document order.
 pub fn panel(ui: &mut Ui, ds: &DocState, state: &mut ReviewState, out: &mut Vec<ReviewAction>) {
-    let dark = ui.visuals().dark_mode;
+    use crate::ui::{Tone, badge, icon, link_button};
+    let p = crate::ui::palette(ui.ctx());
+    let dark = p.dark;
     let tracking = ds.editor.is_tracking();
+    let changes = state.changes(ds).to_vec();
     ui.horizontal(|ui| {
-        ui.label(if tracking {
-            RichText::new("Tracking changes").color(author_color("", dark))
+        if tracking {
+            badge(ui, "Tracking changes", Tone::Accent);
         } else {
-            RichText::new("Not tracking changes").weak()
-        });
+            badge(ui, "Not tracking", Tone::Neutral)
+                .on_hover_text("Review > Track changes (Ctrl+Shift+T)");
+        }
+        if !changes.is_empty() {
+            crate::ui::muted(
+                ui,
+                format!(
+                    "{} item{}",
+                    changes.len(),
+                    if changes.len() == 1 { "" } else { "s" }
+                ),
+            );
+        }
     });
+    if changes.is_empty() {
+        crate::ui::empty_state(
+            ui,
+            icon::CHAT_CIRCLE_TEXT,
+            "No changes or comments",
+            "Turn on Track changes (Ctrl+Shift+T) to record edits for review.",
+        );
+        return;
+    }
     ui.horizontal(|ui| {
-        if ui.button("Accept all").clicked() {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if crate::ui::button(ui, "Accept all").clicked() {
             out.push(ReviewAction::ResolveAll(true));
         }
-        if ui.button("Reject all").clicked() {
+        if crate::ui::button(ui, "Reject all").clicked() {
             out.push(ReviewAction::ResolveAll(false));
         }
     });
-    ui.separator();
+    ui.add_space(4.0);
     let caret_change = ds.editor.change_at(ds.editor.caret()).map(|c| c.node);
-    let changes = state.changes(ds).to_vec();
-    if changes.is_empty() {
-        ui.weak("No changes or comments.");
-        return;
-    }
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .id_salt("review")
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
             for c in &changes {
                 let color = author_color(&c.author, dark);
                 let current = caret_change == Some(c.node);
-                egui::Frame::group(ui.style())
-                    .stroke(if current {
-                        egui::Stroke::new(1.5_f32, color)
-                    } else {
-                        ui.visuals().widgets.noninteractive.bg_stroke
-                    })
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        let head = RichText::new(describe(c)).color(color).small();
-                        if ui
-                            .add(egui::Label::new(head).sense(egui::Sense::click()))
-                            .clicked()
-                        {
-                            out.push(ReviewAction::Goto(c.node));
+                crate::ui::card(ui, current, |ui| {
+                    let glyph = match c.kind {
+                        ChangeKind::Insertion => icon::PLUS,
+                        ChangeKind::Deletion => icon::MINUS,
+                        ChangeKind::Comment => icon::CHAT_TEXT,
+                    };
+                    let head = ui
+                        .horizontal(|ui| {
+                            ui.label(RichText::new(glyph).color(color));
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(describe(c))
+                                        .size(crate::ui::theme::size::SMALL)
+                                        .color(p.text_muted),
+                                )
+                                .truncate(),
+                            )
+                        })
+                        .response
+                        .interact(egui::Sense::click());
+                    if head.clicked() {
+                        out.push(ReviewAction::Goto(c.node));
+                    }
+                    let body = match c.kind {
+                        ChangeKind::Insertion => RichText::new(excerpt(&c.excerpt, 120))
+                            .underline()
+                            .color(p.text),
+                        ChangeKind::Deletion => RichText::new(excerpt(&c.excerpt, 120))
+                            .strikethrough()
+                            .color(p.text_muted),
+                        ChangeKind::Comment => {
+                            RichText::new(excerpt(&c.comment, 400)).color(p.text)
                         }
-                        let body = match c.kind {
-                            ChangeKind::Insertion => {
-                                RichText::new(excerpt(&c.excerpt, 120)).underline()
-                            }
-                            ChangeKind::Deletion => {
-                                RichText::new(excerpt(&c.excerpt, 120)).strikethrough()
-                            }
-                            ChangeKind::Comment => RichText::new(excerpt(&c.comment, 400)),
-                        };
-                        let editing = matches!(&state.editing, Some((n, _)) if *n == c.node);
-                        if editing {
-                            let mut done = None;
-                            if let Some((_, text)) = &mut state.editing {
-                                ui.add(
-                                    egui::TextEdit::multiline(text)
-                                        .desired_rows(3)
-                                        .desired_width(f32::INFINITY),
-                                );
-                                ui.horizontal(|ui| {
-                                    if ui.button("Save").clicked() {
-                                        done = Some(Some(text.clone()));
-                                    }
-                                    if ui.button("Cancel").clicked() {
-                                        done = Some(None);
-                                    }
-                                });
-                            }
-                            match done {
-                                Some(Some(text)) => {
-                                    out.push(ReviewAction::SaveComment(c.node, text));
-                                    state.editing = None;
-                                }
-                                Some(None) => state.editing = None,
-                                None => {}
-                            }
-                        } else if ui
-                            .add(egui::Label::new(body).sense(egui::Sense::click()))
-                            .clicked()
-                        {
-                            out.push(ReviewAction::Goto(c.node));
-                        }
-                        if c.kind == ChangeKind::Comment && !c.excerpt.is_empty() {
-                            ui.label(
-                                RichText::new(format!(
-                                    "on \u{201c}{}\u{201d}",
-                                    excerpt(&c.excerpt, 60)
-                                ))
-                                .weak()
-                                .small(),
+                    };
+                    let editing = matches!(&state.editing, Some((n, _)) if *n == c.node);
+                    if editing {
+                        let mut done = None;
+                        if let Some((_, text)) = &mut state.editing {
+                            ui.add(
+                                egui::TextEdit::multiline(text)
+                                    .desired_rows(3)
+                                    .desired_width(f32::INFINITY)
+                                    .margin(egui::Margin::symmetric(6, 4)),
                             );
+                            ui.horizontal(|ui| {
+                                if crate::ui::primary_button(ui, "Save").clicked() {
+                                    done = Some(Some(text.clone()));
+                                }
+                                if crate::ui::button(ui, "Cancel").clicked() {
+                                    done = Some(None);
+                                }
+                            });
                         }
-                        ui.horizontal(|ui| match c.kind {
+                        match done {
+                            Some(Some(text)) => {
+                                out.push(ReviewAction::SaveComment(c.node, text));
+                                state.editing = None;
+                            }
+                            Some(None) => state.editing = None,
+                            None => {}
+                        }
+                    } else if ui
+                        .add(egui::Label::new(body).sense(egui::Sense::click()))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        out.push(ReviewAction::Goto(c.node));
+                    }
+                    if c.kind == ChangeKind::Comment && !c.excerpt.is_empty() {
+                        ui.label(
+                            RichText::new(format!(
+                                "on \u{201c}{}\u{201d}",
+                                excerpt(&c.excerpt, 60)
+                            ))
+                            .size(crate::ui::theme::size::SMALL)
+                            .color(p.text_faint),
+                        );
+                    }
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        match c.kind {
                             ChangeKind::Comment => {
-                                if !editing && ui.small_button("Edit").clicked() {
+                                if !editing && link_button(ui, "Edit").clicked() {
                                     state.editing = Some((c.node, c.comment.clone()));
                                 }
-                                if ui.small_button("Delete").clicked() {
+                                if link_button(ui, "Delete").clicked() {
                                     out.push(ReviewAction::DeleteComment(c.node));
                                 }
                             }
                             _ => {
-                                if ui.small_button("Accept").clicked() {
+                                if link_button(ui, "Accept").clicked() {
                                     out.push(ReviewAction::Accept(c.node));
                                 }
-                                if ui.small_button("Reject").clicked() {
+                                if link_button(ui, "Reject").clicked() {
                                     out.push(ReviewAction::Reject(c.node));
                                 }
                             }
-                        });
+                        }
                     });
+                });
             }
         });
 }

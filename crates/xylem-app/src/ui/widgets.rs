@@ -89,7 +89,7 @@ pub fn primary_button(ui: &mut Ui, label: &str) -> Response {
     let p = palette(ui.ctx());
     let enabled = ui.is_enabled();
     let text = RichText::new(label).color(if enabled { p.on_accent } else { p.text_faint });
-    let mut b = egui::Button::new(text).min_size(vec2(84.0, 28.0));
+    let mut b = egui::Button::new(text).min_size(BUTTON_SIZE);
     if enabled {
         b = b.fill(p.accent);
     }
@@ -115,7 +115,7 @@ pub fn danger_button(ui: &mut Ui, label: &str) -> Response {
     } else {
         p.text_faint
     });
-    let mut b = egui::Button::new(text).min_size(vec2(84.0, 28.0));
+    let mut b = egui::Button::new(text).min_size(BUTTON_SIZE);
     if enabled {
         b = b.fill(if p.dark {
             Color32::from_rgb(0xB8, 0x3A, 0x31)
@@ -416,10 +416,6 @@ impl Form<'_> {
         self.ui.end_row();
         r
     }
-
-    pub fn ui(&mut self) -> &mut Ui {
-        self.ui
-    }
 }
 
 /// A text field that registers itself for scripts under `label`. `width` is
@@ -482,11 +478,6 @@ impl<'a> Dialog<'a> {
         self
     }
 
-    pub fn resizable(mut self) -> Self {
-        self.resizable = true;
-        self
-    }
-
     /// Shows the dialog; `body` fills it. Returns whether it should close
     /// (Escape or the close button) alongside the body's result.
     pub fn show<R>(
@@ -536,7 +527,10 @@ impl<'a> Dialog<'a> {
                 .title_bar(false)
                 .frame(frame)
                 .resizable(self.resizable)
-                .default_pos(ctx.content_rect().center() - vec2(width / 2.0, 180.0))
+                .default_pos(egui::pos2(
+                    ctx.content_rect().center().x - width / 2.0 - space::XL,
+                    ctx.content_rect().top() + 90.0,
+                ))
                 .show(ctx, |ui| contents(ui, &mut close));
             let focused_here = r.as_ref().is_some_and(|r| {
                 ctx.memory(|m| m.focused().is_some()) || r.response.contains_pointer()

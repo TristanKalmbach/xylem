@@ -2,7 +2,7 @@
 
 use crate::doc::{DocState, Issue, Severity};
 use crate::view::style::ApplicDisplay;
-use egui::{Color32, RichText};
+use egui::RichText;
 use std::path::{Path, PathBuf};
 use xylem_dom::{Document, NodeId};
 use xylem_s1000d::{self as s1000d, Dmc, IssueDate, SchemaKind};
@@ -105,13 +105,12 @@ pub struct ApplicDialog {
 }
 
 pub fn applic_window(ctx: &egui::Context, dlg: &mut ApplicDialog, ds: Option<&mut DocState>) {
-    let mut open = dlg.open;
-    egui::Window::new("Applicability")
-        .open(&mut open)
-        .default_width(380.0)
+    let (close, _) = crate::ui::Dialog::new("Applicability")
+        .width(440.0)
+        .modeless()
         .show(ctx, |ui| {
             let Some(ds) = ds else {
-                ui.label("Open a data module or publication module first.");
+                crate::ui::muted(ui, "Open a data module or publication module first.");
                 return;
             };
             let key = (ds.id, ds.editor.doc.structure_revision());
@@ -129,27 +128,34 @@ pub fn applic_window(ctx: &egui::Context, dlg: &mut ApplicDialog, ds: Option<&mu
                 .as_ref()
                 .is_some_and(|i| i.issue < s1000d::Issue::V3_0)
             {
-                ui.label(
-                    RichText::new(
-                        "Issues 2.0 to 2.3 state applicability as text (type, model, version) \
-                         that cannot be evaluated, so nothing is filtered.",
-                    )
-                    .weak(),
+                crate::ui::notice(
+                    ui,
+                    crate::ui::Tone::Warning,
+                    "Issues 2.0 to 2.3 state applicability as text (type, model, version) \
+                     that cannot be evaluated, so nothing is filtered.",
                 );
             }
-            ui.checkbox(&mut ds.applic.enabled, "Filter by applicability");
-            ui.horizontal(|ui| {
-                ui.label("Inapplicable content:");
-                ui.radio_value(&mut ds.applic.display, ApplicDisplay::Dim, "Dimmed");
-                ui.radio_value(&mut ds.applic.display, ApplicDisplay::Hide, "Hidden");
-            });
-            ui.separator();
-            if props.is_empty() {
-                ui.label(
-                    RichText::new(
-                        "The document has no computable applicability (no assert elements).",
+            crate::ui::form(ui, "applic-mode", |f| {
+                f.row("Filter", |ui| {
+                    ui.checkbox(&mut ds.applic.enabled, "Filter by applicability")
+                });
+                f.row("Show the rest", |ui| {
+                    crate::ui::segmented(
+                        ui,
+                        &mut ds.applic.display,
+                        &[
+                            (ApplicDisplay::Dim, "Dimmed"),
+                            (ApplicDisplay::Hide, "Hidden"),
+                        ],
                     )
-                    .weak(),
+                });
+            });
+            crate::ui::divider(ui);
+            crate::ui::section(ui, "Properties");
+            if props.is_empty() {
+                crate::ui::muted(
+                    ui,
+                    "The document has no computable applicability (no assert elements).",
                 );
             }
             egui::Grid::new("applic-props")
@@ -198,7 +204,7 @@ pub fn applic_window(ctx: &egui::Context, dlg: &mut ApplicDialog, ds: Option<&mu
                         ui.end_row();
                     }
                 });
-            if !props.is_empty() && ui.button("Set all to any").clicked() {
+            if !props.is_empty() && crate::ui::link_button(ui, "Set all to any").clicked() {
                 ds.applic.choice.clear();
             }
             if (
@@ -210,24 +216,40 @@ pub fn applic_window(ctx: &egui::Context, dlg: &mut ApplicDialog, ds: Option<&mu
                 ds.applic.revision += 1;
             }
             if let Some(r) = ds.applic_result() {
-                ui.separator();
+                crate::ui::divider(ui);
                 let module = match r.module {
                     Some(s1000d::Truth::False) => "does not apply",
                     Some(s1000d::Truth::True) => "applies",
                     Some(s1000d::Truth::Unknown) => "may apply (some properties are \"any\")",
                     None => "has no applicability statement",
                 };
-                ui.label(format!("The module {module}."));
-                ui.label(format!("{} element(s) do not apply.", r.excluded.len()));
+                let n = r.excluded.len();
+                crate::ui::notice(
+                    ui,
+                    if n > 0 {
+                        crate::ui::Tone::Accent
+                    } else {
+                        crate::ui::Tone::Neutral
+                    },
+                    format!(
+                        "The module {module}. {} element{} {} not apply.",
+                        n,
+                        if n == 1 { "" } else { "s" },
+                        if n == 1 { "does" } else { "do" }
+                    ),
+                );
                 if !r.dangling.is_empty() {
-                    ui.colored_label(
-                        Color32::from_rgb(220, 160, 40),
-                        format!("⚠ applicRefId names no applic: {}", r.dangling.join(", ")),
+                    crate::ui::notice(
+                        ui,
+                        crate::ui::Tone::Warning,
+                        format!("applicRefId names no applic: {}", r.dangling.join(", ")),
                     );
                 }
             }
         });
-    dlg.open = open;
+    if close {
+        dlg.open = false;
+    }
 }
 
 pub fn info_text(doc: &Document) -> String {
@@ -335,18 +357,20 @@ pub enum DialogResult {
 }
 
 pub fn new_dm_window(ctx: &egui::Context, d: &mut NewDmDialog) -> DialogResult {
-    let mut open = true;
+    use crate::ui::{Tone, dialog_footer, form, notice, text_field};
     let mut result = DialogResult::Open;
-    egui::Window::new("New S1000D module")
-        .collapsible(false)
-        .open(&mut open)
-        .default_width(480.0)
+    let (close, _) = crate::ui::Dialog::new("New S1000D module")
+        .width(500.0)
         .show(ctx, |ui| {
-            egui::Grid::new("newdm")
-                .num_columns(2)
-                .spacing([8.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Issue");
+            let mut kinds = s1000d::available_kinds(d.issue);
+            if !d.issue.is_legacy() {
+                kinds.push(SchemaKind::Pm);
+            }
+            if !kinds.contains(&d.kind) {
+                d.kind = kinds[0];
+            }
+            form(ui, "newdm", |f| {
+                f.row("Issue", |ui| {
                     egui::ComboBox::from_id_salt("dm-issue")
                         .selected_text(d.issue.as_str())
                         .show_ui(ui, |ui| {
@@ -354,56 +378,54 @@ pub fn new_dm_window(ctx: &egui::Context, d: &mut NewDmDialog) -> DialogResult {
                                 ui.selectable_value(&mut d.issue, i, i.as_str());
                             }
                         });
-                    ui.end_row();
-                    let mut kinds = s1000d::available_kinds(d.issue);
-                    if !d.issue.is_legacy() {
-                        kinds.push(SchemaKind::Pm);
-                    }
-                    if !kinds.contains(&d.kind) {
-                        d.kind = kinds[0];
-                    }
-                    ui.label("Schema");
+                });
+                f.row("Module type", |ui| {
                     egui::ComboBox::from_id_salt("dm-kind")
+                        .width(220.0)
                         .selected_text(d.kind.display_name())
                         .show_ui(ui, |ui| {
                             for k in kinds {
                                 ui.selectable_value(&mut d.kind, k, k.display_name());
                             }
                         });
-                    ui.end_row();
-                    if d.kind == SchemaKind::Pm {
-                        ui.label("Publication module code");
+                });
+                if d.kind == SchemaKind::Pm {
+                    f.row("Publication module code", |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut d.pm_code)
                                 .desired_width(300.0)
+                                .margin(egui::Margin::symmetric(6, 4))
                                 .font(egui::TextStyle::Monospace),
                         );
-                        ui.end_row();
-                        ui.label("Title");
-                        ui.text_edit_singleline(&mut d.pm_title);
-                        ui.end_row();
-                    } else {
-                        ui.label("Data module code");
+                    });
+                    f.row("Title", |ui| {
+                        text_field(ui, "Title", &mut d.pm_title, "", 312.0);
+                    });
+                } else {
+                    f.row("Data module code", |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut d.code)
                                 .desired_width(300.0)
+                                .margin(egui::Margin::symmetric(6, 4))
                                 .font(egui::TextStyle::Monospace),
                         );
-                        ui.end_row();
-                        ui.label("Technical name");
-                        ui.text_edit_singleline(&mut d.tech_name);
-                        ui.end_row();
-                        ui.label("Information name");
-                        ui.text_edit_singleline(&mut d.info_name);
-                        ui.end_row();
-                    }
-                    ui.label("Language / country");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut d.language).desired_width(40.0));
-                        ui.add(egui::TextEdit::singleline(&mut d.country).desired_width(40.0));
                     });
-                    ui.end_row();
+                    f.row("Technical name", |ui| {
+                        text_field(ui, "Technical name", &mut d.tech_name, "", 312.0);
+                    });
+                    f.row("Information name", |ui| {
+                        text_field(ui, "Information name", &mut d.info_name, "Optional", 312.0);
+                    });
+                }
+                f.row("Language", |ui| {
+                    ui.horizontal(|ui| {
+                        text_field(ui, "Language", &mut d.language, "en", 56.0);
+                        crate::ui::muted(ui, "country");
+                        text_field(ui, "Country", &mut d.country, "US", 56.0);
+                    });
                 });
+            });
+            ui.add_space(6.0);
             if d.kind == SchemaKind::Pm {
                 pm_part(ui, d, &mut result);
                 return;
@@ -411,102 +433,106 @@ pub fn new_dm_window(ctx: &egui::Context, d: &mut NewDmDialog) -> DialogResult {
             let dmc = Dmc::parse(&d.code);
             match &dmc {
                 Ok(c) => {
-                    let problems = c.validate();
-                    for p in &problems {
-                        ui.colored_label(egui::Color32::from_rgb(220, 160, 40), format!("⚠ {p}"));
+                    for p in &c.validate() {
+                        notice(ui, Tone::Warning, p.to_string());
                     }
                     let name = s1000d::csdb_filename(
                         &c.to_string(),
                         &s1000d::IssueInfo::new("001", "00"),
                         &s1000d::Language::new(d.language.clone(), d.country.clone()),
                     );
-                    ui.label(RichText::new(format!("File: {name}")).weak());
+                    file_name_line(ui, &name);
                 }
-                Err(e) => {
-                    ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e.to_string());
-                }
+                Err(e) => notice(ui, Tone::Danger, e.to_string()),
             }
             if let Some(e) = &d.error {
-                ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e);
+                notice(ui, Tone::Danger, e.clone());
             }
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(dmc.is_ok(), egui::Button::new("Create"))
-                    .clicked()
-                {
-                    let c = dmc.as_ref().unwrap();
-                    let info = Some(d.info_name.as_str()).filter(|s| !s.trim().is_empty());
-                    match s1000d::new_data_module(
-                        d.issue,
-                        d.kind,
-                        c,
-                        &d.tech_name,
-                        info,
-                        (&d.language, &d.country),
-                        IssueDate::today(),
-                    ) {
-                        Ok(xml) => {
-                            let name = s1000d::csdb_filename(
-                                &c.to_string(),
-                                &s1000d::IssueInfo::new("001", "00"),
-                                &s1000d::Language::new(d.language.clone(), d.country.clone()),
-                            );
-                            result = DialogResult::Create(xml, name);
-                        }
-                        Err(e) => d.error = Some(e.to_string()),
+            let r = dialog_footer(ui, Some(("Create", dmc.is_ok())), Some("Cancel"), |_| {});
+            if r.confirmed
+                && let Ok(c) = &dmc
+            {
+                let info = Some(d.info_name.as_str()).filter(|s| !s.trim().is_empty());
+                match s1000d::new_data_module(
+                    d.issue,
+                    d.kind,
+                    c,
+                    &d.tech_name,
+                    info,
+                    (&d.language, &d.country),
+                    IssueDate::today(),
+                ) {
+                    Ok(xml) => {
+                        let name = s1000d::csdb_filename(
+                            &c.to_string(),
+                            &s1000d::IssueInfo::new("001", "00"),
+                            &s1000d::Language::new(d.language.clone(), d.country.clone()),
+                        );
+                        result = DialogResult::Create(xml, name);
                     }
+                    Err(e) => d.error = Some(e.to_string()),
                 }
-                if ui.button("Cancel").clicked() {
-                    result = DialogResult::Cancel;
-                }
-            });
+            }
+            if r.closed {
+                result = DialogResult::Cancel;
+            }
         });
-    if !open {
+    if close {
         return DialogResult::Cancel;
     }
     result
 }
 
+/// The file name a new module will be saved under.
+fn file_name_line(ui: &mut egui::Ui, name: &str) {
+    let p = crate::ui::palette(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(crate::ui::icon::FILE_TEXT).color(p.text_faint));
+        ui.label(
+            RichText::new(name)
+                .monospace()
+                .size(12.0)
+                .color(p.text_muted),
+        );
+    });
+}
+
 /// The code check and buttons of the wizard for a publication module.
 fn pm_part(ui: &mut egui::Ui, d: &mut NewDmDialog, result: &mut DialogResult) {
+    use crate::ui::{Tone, dialog_footer, notice};
     let pmc = s1000d::Pmc::parse(&d.pm_code);
     let language = s1000d::Language::new(d.language.clone(), d.country.clone());
     let issue_info = s1000d::IssueInfo::new("001", "00");
     match &pmc {
-        Ok(c) => {
-            let name = s1000d::csdb_filename(&c.to_string(), &issue_info, &language);
-            ui.label(RichText::new(format!("File: {name}")).weak());
-        }
-        Err(e) => {
-            ui.colored_label(Color32::from_rgb(220, 70, 70), e.to_string());
-        }
+        Ok(c) => file_name_line(
+            ui,
+            &s1000d::csdb_filename(&c.to_string(), &issue_info, &language),
+        ),
+        Err(e) => notice(ui, Tone::Danger, e.to_string()),
     }
     if let Some(e) = &d.error {
-        ui.colored_label(Color32::from_rgb(220, 70, 70), e);
+        notice(ui, Tone::Danger, e.clone());
     }
-    ui.horizontal(|ui| {
-        if ui
-            .add_enabled(pmc.is_ok(), egui::Button::new("Create"))
-            .clicked()
-            && let Ok(c) = &pmc
-        {
-            let options = s1000d::NewModuleOptions::new(IssueDate::today());
-            match s1000d::new_publication_module(
-                d.issue,
-                c,
-                &d.pm_title,
-                (&d.language, &d.country),
-                &options,
-            ) {
-                Ok(xml) => {
-                    let name = s1000d::csdb_filename(&c.to_string(), &issue_info, &language);
-                    *result = DialogResult::Create(xml, name);
-                }
-                Err(e) => d.error = Some(e.to_string()),
+    let r = dialog_footer(ui, Some(("Create", pmc.is_ok())), Some("Cancel"), |_| {});
+    if r.confirmed
+        && let Ok(c) = &pmc
+    {
+        let options = s1000d::NewModuleOptions::new(IssueDate::today());
+        match s1000d::new_publication_module(
+            d.issue,
+            c,
+            &d.pm_title,
+            (&d.language, &d.country),
+            &options,
+        ) {
+            Ok(xml) => {
+                let name = s1000d::csdb_filename(&c.to_string(), &issue_info, &language);
+                *result = DialogResult::Create(xml, name);
             }
+            Err(e) => d.error = Some(e.to_string()),
         }
-        if ui.button("Cancel").clicked() {
-            *result = DialogResult::Cancel;
-        }
-    });
+    }
+    if r.closed {
+        *result = DialogResult::Cancel;
+    }
 }

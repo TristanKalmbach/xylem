@@ -110,7 +110,6 @@ impl Palette {
 
 /// Spacing scale (points). Everything lines up on a 4-point grid.
 pub mod space {
-    pub const XS: f32 = 2.0;
     pub const S: f32 = 4.0;
     pub const M: f32 = 8.0;
     pub const L: f32 = 12.0;
@@ -286,7 +285,9 @@ fn configure(style: &mut egui::Style, p: &Palette) {
     w.open.corner_radius = control;
 }
 
-/// WCAG contrast ratio between two opaque colours.
+/// WCAG contrast ratio between two opaque colours (used by the tests that
+/// keep both themes readable).
+#[cfg(test)]
 pub fn contrast(a: Color32, b: Color32) -> f32 {
     fn lum(c: Color32) -> f32 {
         let ch = |v: u8| {

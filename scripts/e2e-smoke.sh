@@ -36,7 +36,7 @@ run typing-and-navigation \
     "caretend Inspect the hydraulic lines;;type  Then bleed them.;;key Enter;;type Second step text;;key B ctrl;;type BOLD;;key Home;;key ArrowUp;;key End;;type X;;key Home;;type Y" \
     "YInspect the hydraulic lines Then bleed them.X</para><para>Second step text<b>BOLD</b>.</para>"
 run table-dialog \
-    "caretend Pa).;;cmd InsertTable;;wait 5;;clickui Insert;;wait 5;;type A1;;key Tab;;type B1" \
+    "caretend Pa).;;cmd InsertTable;;wait 5;;key Enter;;wait 5;;type A1;;key Tab;;type B1" \
     "<entry>A1</entry><entry>B1</entry>"
 run surround-palette \
     "select operation;;key Space ctrl;;wait 5;;type i;;key Enter;;wait 5" \
@@ -78,7 +78,7 @@ check follow-file-link "$out/link.xml" '<p id="second">XSecond.</p>'
 rm -rf "$out/ff" "$out/cfg-ff" && mkdir -p "$out/ff"
 printf '<doc><p>The pump is primed.</p></doc>\n' > "$out/ff/a.xml"
 printf '<doc><p id="pump">Check the pump &amp; seals.</p></doc>\n' > "$out/ff/b.xml"
-XYLEM_CONFIG_DIR="$native/cfg-ff" XYLEM_SCRIPT="key F ctrl shift;;wait 5;;type pump;;key Enter;;wait 30;;clickui Replace with;;type valve;;clickui Replace all…;;wait 20;;clickui Confirm replace;;wait 30;;save $native/ff-open.xml;;quit" \
+XYLEM_CONFIG_DIR="$native/cfg-ff" XYLEM_SCRIPT="key F ctrl shift;;wait 5;;type pump;;key Enter;;wait 30;;clickui Replace with;;type valve;;clickui Replace all…;;wait 20;;clickui Replace;;wait 30;;save $native/ff-open.xml;;quit" \
     timeout 90 "$bin" "$native/ff/a.xml" > /dev/null 2>&1
 check find-in-files-reloads-open "$out/ff-open.xml" "<p>The valve is primed.</p>"
 check find-in-files-writes-closed "$out/ff/b.xml" '<doc><p id="pump">Check the valve &amp; seals.</p></doc>'

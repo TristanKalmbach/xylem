@@ -2,7 +2,7 @@
 //! with a reference check. Scanning and checking live in `xylem_s1000d`; this
 //! file only runs the scan on a worker thread and draws the results.
 
-use egui::{Color32, RichText, Sense, Ui};
+use egui::{RichText, Sense, Ui};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -100,58 +100,81 @@ impl ProjectView {
     /// `can_insert` says, for data and publication modules, whether a
     /// reference to one may be inserted at the active document's caret.
     pub fn ui(&mut self, ui: &mut Ui, can_insert: (bool, bool), out: &mut Vec<ProjectAction>) {
+        use crate::ui::icon;
+        let pal = crate::ui::palette(ui.ctx());
+        if self.project.is_none() && self.scan.is_none() {
+            crate::ui::empty_state(
+                ui,
+                icon::FOLDERS,
+                "No project folder",
+                "Choose a folder of data and publication modules (a CSDB).",
+            );
+            ui.vertical_centered(|ui| {
+                if crate::ui::primary_button(ui, "Choose folder…").clicked() {
+                    out.push(ProjectAction::ChooseFolder);
+                }
+            });
+            return;
+        }
         ui.horizontal(|ui| {
-            if ui.button("Folder…").clicked() {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if crate::ui::button(ui, "Folder…").clicked() {
                 out.push(ProjectAction::ChooseFolder);
             }
             let has = self.project.is_some() && self.scan.is_none();
-            if ui.add_enabled(has, egui::Button::new("Rescan")).clicked()
-                && let Some(p) = &self.project
-            {
-                let dir = p.dir.clone();
-                self.start_scan(dir, ui.ctx());
-            }
-            if ui
-                .add_enabled(has, egui::Button::new("Check references"))
-                .clicked()
-            {
-                self.check_references();
-            }
+            ui.add_enabled_ui(has, |ui| {
+                if crate::ui::button(ui, "Check references").clicked() {
+                    self.check_references();
+                }
+                if crate::ui::icon_button(ui, icon::ARROWS_CLOCKWISE, "Rescan", None).clicked()
+                    && let Some(p) = &self.project
+                {
+                    let dir = p.dir.clone();
+                    self.start_scan(dir, ui.ctx());
+                }
+            });
         });
         if let Some(scan) = &self.scan {
             let done = scan.progress.done.load(Ordering::Relaxed);
             let total = scan.progress.total.load(Ordering::Relaxed);
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(format!("Scanning… {done} / {total}"));
+                crate::ui::muted(ui, format!("Scanning… {done} of {total}"));
             });
             return;
         }
         let Some(project) = self.project.clone() else {
-            ui.label(RichText::new("Choose a folder of data and publication modules.").weak());
             return;
         };
         let folder = project.dir.file_name().map_or_else(
             || project.dir.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
         );
-        ui.label(
-            RichText::new(format!(
-                "{folder}: {} module(s){}",
-                project.modules.len(),
-                if project.errors.is_empty() {
-                    String::new()
-                } else {
-                    format!(", {} unreadable", project.errors.len())
-                }
-            ))
-            .weak(),
-        )
-        .on_hover_text(project.dir.display().to_string());
-        ui.add(
-            egui::TextEdit::singleline(&mut self.filter)
-                .hint_text("Filter: code, title, issue, language, file")
-                .desired_width(f32::INFINITY),
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(icon::FOLDER_SIMPLE).color(pal.text_muted));
+            ui.label(RichText::new(&folder).strong())
+                .on_hover_text(project.dir.display().to_string());
+            let n = project.modules.len();
+            crate::ui::badge(
+                ui,
+                format!("{n} module{}", if n == 1 { "" } else { "s" }),
+                crate::ui::Tone::Neutral,
+            );
+            if !project.errors.is_empty() {
+                crate::ui::badge(
+                    ui,
+                    format!("{} unreadable", project.errors.len()),
+                    crate::ui::Tone::Warning,
+                );
+            }
+        });
+        let w = ui.available_width();
+        crate::ui::text_field(
+            ui,
+            "Filter modules",
+            &mut self.filter,
+            "Filter by code, title, issue, language or file",
+            w,
         );
         // Filtering thousands of modules every frame shows up in frame
         // times, so the matching rows are kept until the filter or the
@@ -177,19 +200,21 @@ impl ProjectView {
             ModuleType::Publication => can_insert.1,
         });
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
             if ui
-                .add_enabled(selected.is_some(), egui::Button::new("Open"))
+                .add_enabled_ui(selected.is_some(), |ui| crate::ui::button(ui, "Open"))
+                .inner
                 .clicked()
                 && let Some(s) = selected
             {
                 out.push(ProjectAction::Open(project.modules[s].path.clone()));
             }
             let r = ui
-                .add_enabled(insert_ok, egui::Button::new("Insert reference"))
+                .add_enabled_ui(insert_ok, |ui| crate::ui::button(ui, "Insert reference"))
+                .inner
                 .on_disabled_hover_text(
                     "Select a module, and put the caret where a reference is allowed.",
                 );
-            crate::script::track("Insert reference", &r);
             if r.clicked()
                 && let Some(s) = selected
             {
@@ -281,18 +306,33 @@ impl ProjectView {
                     };
                     resp.context_menu(|ui| {
                         self.selected = Some(i);
-                        if ui.button("Open").clicked() {
+                        if crate::ui::menu_item(
+                            ui,
+                            Some(crate::ui::icon::FOLDER_OPEN),
+                            "Open",
+                            None,
+                        )
+                        .clicked()
+                        {
                             out.push(ProjectAction::Open(m.path.clone()));
                             ui.close();
                         }
                         if ui
-                            .add_enabled(allowed, egui::Button::new("Insert reference"))
+                            .add_enabled_ui(allowed, |ui| {
+                                crate::ui::menu_item(
+                                    ui,
+                                    Some(crate::ui::icon::LINK),
+                                    "Insert reference",
+                                    None,
+                                )
+                            })
+                            .inner
                             .clicked()
                         {
                             out.push(ProjectAction::InsertRef(i));
                             ui.close();
                         }
-                        if ui.button("Copy code").clicked() {
+                        if crate::ui::menu_item(ui, None, "Copy code", None).clicked() {
                             ui.ctx().copy_text(m.code.clone());
                             ui.close();
                         }
@@ -300,7 +340,7 @@ impl ProjectView {
                 }
             });
         if self.findings.is_some() {
-            ui.separator();
+            crate::ui::divider(ui);
             self.findings_ui(ui, &project, out);
         }
     }
@@ -321,9 +361,25 @@ impl ProjectView {
             .collect();
         let hidden = findings.len() - shown.len();
         let mut close = false;
-        ui.horizontal(|ui| {
-            ui.strong(format!("Reference check ({})", shown.len()));
-            close = ui.small_button("x").on_hover_text("Close").clicked();
+        let pal = crate::ui::palette(ui.ctx());
+        crate::ui::section_header(ui, "Reference check", |ui| {
+            close =
+                crate::ui::icon_button(ui, crate::ui::icon::X, "Close the reference check", None)
+                    .clicked();
+            let n = shown.len();
+            crate::ui::badge(
+                ui,
+                if n == 0 {
+                    "No problems".to_string()
+                } else {
+                    format!("{n} found")
+                },
+                if n == 0 {
+                    crate::ui::Tone::Success
+                } else {
+                    crate::ui::Tone::Warning
+                },
+            );
         });
         let mut show_brex = self.show_brex;
         ui.checkbox(
@@ -335,21 +391,21 @@ impl ProjectView {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 if shown.is_empty() {
-                    ui.label(
-                        RichText::new(if hidden > 0 {
+                    crate::ui::muted(
+                        ui,
+                        if hidden > 0 {
                             "No problems apart from BREX references."
                         } else {
-                            "No problems found."
-                        })
-                        .weak(),
+                            "Every reference resolves to the latest issue in the folder."
+                        },
                     );
                 }
                 for f in shown {
                     let m = &project.modules[f.module];
                     let color = match f.kind {
-                        FindingKind::Unresolved => Color32::from_rgb(220, 70, 70),
+                        FindingKind::Unresolved => pal.danger,
                         FindingKind::OlderIssue { .. } | FindingKind::Outdated { .. } => {
-                            Color32::from_rgb(210, 150, 40)
+                            pal.warning
                         }
                     };
                     // The message matters more than the long file name, so

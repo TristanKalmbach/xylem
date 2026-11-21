@@ -168,91 +168,73 @@ impl FindState {
 }
 
 pub fn window(ctx: &egui::Context, st: &mut FindState, ds: &DocState, out: &mut Vec<FindAction>) {
-    let mut open = st.open;
+    use crate::ui::{Tone, form, icon, icon_button, notice, palette, text_field};
     if !st.focus_query {
         st.focus_query = true;
     }
-    egui::Window::new("Find / Replace")
-        .open(&mut open)
-        .default_width(380.0)
-        .resizable(false)
+    let p = palette(ctx);
+    let (close, _) = crate::ui::Dialog::new("Find and replace")
+        .width(420.0)
+        .modeless()
         .show(ctx, |ui| {
-            egui::Grid::new("find-grid").num_columns(2).show(ui, |ui| {
-                ui.label("Find");
-                let r = ui.add(egui::TextEdit::singleline(&mut st.query).desired_width(260.0));
-                crate::script::track("Find text", &r);
-                if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    st.refresh(ds);
-                    if let Some(i) = st.next_from_caret(ds, true) {
+            form(ui, "find-form", |f| {
+                f.row("Find", |ui| {
+                    let r = text_field(ui, "Find text", &mut st.query, "Text to find", 280.0);
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        st.refresh(ds);
+                        if let Some(i) = st.next_from_caret(ds, true) {
+                            st.current = Some(i);
+                            let m = st.matches[i].clone();
+                            out.push(FindAction::Goto(m.0, m.1));
+                        }
+                        r.request_focus();
+                    }
+                });
+                f.row("Replace with", |ui| {
+                    text_field(ui, "Replace text", &mut st.replacement, "", 280.0);
+                });
+                f.row("Only inside", |ui| {
+                    text_field(ui, "In element", &mut st.in_element, "Any element", 280.0);
+                });
+                f.row("", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut st.match_case, "Match case");
+                        ui.checkbox(&mut st.whole_word, "Whole word");
+                        ui.checkbox(&mut st.regex, "Regex");
+                    });
+                });
+            });
+            st.refresh(ds);
+            if let Some(e) = &st.error {
+                notice(ui, Tone::Danger, e.clone());
+            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let n = st.matches.len();
+                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.add_enabled_ui(n > 0, |ui| {
+                    if icon_button(ui, icon::CARET_LEFT, "Previous match", Some("Shift+F3"))
+                        .clicked()
+                        && let Some(i) = st.next_from_caret(ds, false)
+                    {
+                        let i = if Some(i) == st.current {
+                            (i + n - 1) % n.max(1)
+                        } else {
+                            i
+                        };
                         st.current = Some(i);
                         let m = st.matches[i].clone();
                         out.push(FindAction::Goto(m.0, m.1));
                     }
-                    r.request_focus();
-                }
-                ui.end_row();
-                ui.label("Replace");
-                ui.add(egui::TextEdit::singleline(&mut st.replacement).desired_width(260.0));
-                ui.end_row();
-                ui.label("In element");
-                ui.add(
-                    egui::TextEdit::singleline(&mut st.in_element)
-                        .hint_text("(anywhere)")
-                        .desired_width(260.0),
-                );
-                ui.end_row();
-            });
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut st.match_case, "Match case");
-                ui.checkbox(&mut st.whole_word, "Whole word");
-                ui.checkbox(&mut st.regex, "Regex");
-            });
-            st.refresh(ds);
-            if let Some(e) = &st.error {
-                ui.colored_label(egui::Color32::from_rgb(220, 70, 70), e);
-            }
-            ui.horizontal(|ui| {
-                let n = st.matches.len();
-                if ui.button("◀ Previous").clicked()
-                    && let Some(i) = st.next_from_caret(ds, false)
-                {
-                    let i = if Some(i) == st.current {
-                        (i + n - 1) % n.max(1)
-                    } else {
-                        i
-                    };
-                    st.current = Some(i);
-                    let m = st.matches[i].clone();
-                    out.push(FindAction::Goto(m.0, m.1));
-                }
-                if ui.button("Next ▶").clicked()
-                    && let Some(i) = st.next_from_caret(ds, true)
-                {
-                    st.current = Some(i);
-                    let m = st.matches[i].clone();
-                    out.push(FindAction::Goto(m.0, m.1));
-                }
-                if ui
-                    .add_enabled(st.current.is_some(), egui::Button::new("Replace"))
-                    .clicked()
-                    && let Some(i) = st.current
-                {
-                    let m = st.matches[i].clone();
-                    let with = st.expand(ds, &m);
-                    out.push(FindAction::Replace(m.0, m.1, with));
-                    st.current = None;
-                }
-                if ui
-                    .add_enabled(n > 0, egui::Button::new("Replace all"))
-                    .clicked()
-                {
-                    let items = st
-                        .matches
-                        .iter()
-                        .map(|m| (m.0, m.1.clone(), st.expand(ds, m)))
-                        .collect();
-                    out.push(FindAction::ReplaceAll(items));
-                }
+                    if icon_button(ui, icon::CARET_RIGHT, "Next match", Some("F3")).clicked()
+                        && let Some(i) = st.next_from_caret(ds, true)
+                    {
+                        st.current = Some(i);
+                        let m = st.matches[i].clone();
+                        out.push(FindAction::Goto(m.0, m.1));
+                    }
+                });
+                ui.add_space(6.0);
                 ui.label(
                     RichText::new(match (st.current, n) {
                         (_, 0) if !st.query.is_empty() => "No matches".to_string(),
@@ -260,9 +242,41 @@ pub fn window(ctx: &egui::Context, st: &mut FindState, ds: &DocState, out: &mut 
                         (None, n) if n > 0 => format!("{n} matches"),
                         _ => String::new(),
                     })
-                    .weak(),
+                    .color(if n == 0 && !st.query.is_empty() {
+                        p.danger
+                    } else {
+                        p.text_muted
+                    }),
                 );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    if ui
+                        .add_enabled_ui(n > 0, |ui| crate::ui::button(ui, "Replace all"))
+                        .inner
+                        .clicked()
+                    {
+                        let items = st
+                            .matches
+                            .iter()
+                            .map(|m| (m.0, m.1.clone(), st.expand(ds, m)))
+                            .collect();
+                        out.push(FindAction::ReplaceAll(items));
+                    }
+                    if ui
+                        .add_enabled_ui(st.current.is_some(), |ui| crate::ui::button(ui, "Replace"))
+                        .inner
+                        .clicked()
+                        && let Some(i) = st.current
+                    {
+                        let m = st.matches[i].clone();
+                        let with = st.expand(ds, &m);
+                        out.push(FindAction::Replace(m.0, m.1, with));
+                        st.current = None;
+                    }
+                });
             });
         });
-    st.open = open;
+    if close {
+        st.open = false;
+    }
 }

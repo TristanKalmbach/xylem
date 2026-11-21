@@ -383,7 +383,9 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
         .auto_shrink([false, false])
         .id_salt("attrs")
         .show(ui, |ui| {
-            let name_w = 96.0;
+            // Names get a share of the panel, so long ones (S1000D's
+            // modelIdentCode) fit when the panel is widened.
+            let name_w = (ui.available_width() * 0.42).clamp(80.0, 180.0);
             egui::Grid::new(("attr-grid", el))
                 .num_columns(3)
                 .spacing([6.0, 4.0])
@@ -579,17 +581,16 @@ pub fn issues(ui: &mut Ui, ds: &DocState, out: &mut Vec<PanelAction>) {
     let p = palette(ui.ctx());
     let doc = &ds.editor.doc;
     if ds.issues.is_empty() {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(icon::CHECK_CIRCLE).color(p.success));
-            crate::ui::muted(
-                ui,
-                if ds.grammar.is_some() {
-                    "The document is valid."
-                } else {
-                    "The document is well-formed. There is no schema to validate against."
-                },
-            );
-        });
+        // With a schema the header's "No problems" says it all.
+        if ds.grammar.is_none() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(icon::CHECK_CIRCLE).color(p.success));
+                crate::ui::muted(
+                    ui,
+                    "The document is well-formed. There is no schema to validate against.",
+                );
+            });
+        }
         return;
     }
     egui::ScrollArea::vertical()
