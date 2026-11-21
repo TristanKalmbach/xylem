@@ -70,6 +70,7 @@ pub enum Cmd {
     ImportXmax,
     Preferences,
     About,
+    CheckUpdates,
     ReloadPackages,
     S1000dInfo,
     RenameToCsdb,
@@ -91,6 +92,7 @@ pub enum Cmd {
 #[derive(Default)]
 struct Dialogs {
     about: bool,
+    update: bool,
     prefs: bool,
     table: Option<TableDialog>,
     node_edit: Option<NodeEditDialog>,
@@ -158,6 +160,7 @@ pub struct XylemApp {
     last_autosave: f64,
     /// Autosaved documents found at startup, offered for recovery.
     recovery: Vec<crate::autosave::Recovered>,
+    update: UpdateState,
     script: Option<crate::script::Script>,
     shot_path: Option<PathBuf>,
 }
@@ -227,6 +230,7 @@ impl XylemApp {
             shortcuts_open: false,
             last_autosave: 0.0,
             recovery: Vec::new(),
+            update: UpdateState::Idle,
             script: crate::script::Script::from_env(),
             shot_path: None,
         };
@@ -245,6 +249,15 @@ impl XylemApp {
                 .cloned()
                 .collect();
         }
+        if !scripted && app.team.update_source.is_some() {
+            app.start_update_check(true);
+        }
+        if !app.team.warnings.is_empty() {
+            app.toast(
+                "Team configuration has problems; see File › Preferences.",
+                true,
+            );
+        }
         app
     }
 
@@ -259,7 +272,12 @@ impl XylemApp {
         let fallback = crate::settings::config_dir()
             .map(|c| c.join("schemas").join("s1000d"))
             .filter(|p| p.is_dir());
-        if let Some(root) = settings.s1000d_schema_root.clone().or_else(|| team.s1000d_schemas.clone()).or(fallback) {
+        if let Some(root) = settings
+            .s1000d_schema_root
+            .clone()
+            .or_else(|| team.s1000d_schemas.clone())
+            .or(fallback)
+        {
             crate::s1000d_ui::add_s1000d_catalog(&mut cat, &root);
         }
         cat
@@ -268,11 +286,16 @@ impl XylemApp {
     fn load_speller(&mut self) {
         self.speller = if self.settings.spell_check {
             Speller::load(
-                self.settings.dictionary_dir.as_deref().or(self.team.dictionary_dir.as_deref()),
+                self.settings
+                    .dictionary_dir
+                    .as_deref()
+                    .or(self.team.dictionary_dir.as_deref()),
                 self.team
                     .dictionary_lang
                     .as_deref()
-                    .filter(|_| self.settings.dictionary_lang == Settings::default().dictionary_lang)
+                    .filter(|_| {
+                        self.settings.dictionary_lang == Settings::default().dictionary_lang
+                    })
                     .unwrap_or(&self.settings.dictionary_lang),
             )
         } else {
@@ -820,8 +843,13 @@ impl XylemApp {
             Cmd::ImportXmax => self.import_xmax(),
             Cmd::Preferences => self.dialogs.prefs = true,
             Cmd::About => self.dialogs.about = true,
+            Cmd::CheckUpdates => {
+                self.dialogs.update = true;
+                self.start_update_check(false);
+            }
             Cmd::ReloadPackages => {
-                self.registry = DoctypeRegistry::scan(&all_package_dirs(&self.team, &self.settings));
+                self.registry =
+                    DoctypeRegistry::scan(&all_package_dirs(&self.team, &self.settings));
                 self.catalog = Self::load_catalog(&self.settings, &self.team);
                 let n = self.registry.packages().len();
                 let errs = self.registry.errors().len();
@@ -1131,7 +1159,13 @@ impl XylemApp {
     }
 
     fn check_brex(&mut self) {
-        let path = match self.settings.brex.clone().or_else(|| self.team.brex.clone()).filter(|p| p.exists()) {
+        let path = match self
+            .settings
+            .brex
+            .clone()
+            .or_else(|| self.team.brex.clone())
+            .filter(|p| p.exists())
+        {
             Some(p) => p,
             None => match rfd::FileDialog::new()
                 .set_title("Choose a BREX data module")
@@ -1555,6 +1589,9 @@ impl XylemApp {
             ui.menu_button("Help", |ui| {
                 if ui.button("Keyboard shortcuts\tF1").clicked() {
                     cmds.push(Cmd::Shortcuts);
+                }
+                if ui.button("Check for updates…").clicked() {
+                    cmds.push(Cmd::CheckUpdates);
                 }
                 if ui.button("About Xylem").clicked() {
                     cmds.push(Cmd::About);
@@ -2175,6 +2212,126 @@ impl XylemApp {
         }
     }
 
+    /// Looks for a newer build in the team's update folder on a worker thread
+    /// (it may be a slow network share). A `quiet` check only speaks up when
+    /// there is something new.
+    fn start_update_check(&mut self, quiet: bool) {
+        if matches!(
+            self.update,
+            UpdateState::Checking { .. } | UpdateState::Applied(_)
+        ) {
+            return;
+        }
+        let Some(source) = self.team.update_source.clone() else {
+            self.update = UpdateState::Failed(
+                "No update folder is configured. Set update_source in xylem-team.toml (see docs/team-setup.md).".into(),
+            );
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = self.ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::install::check(&source));
+            ctx.request_repaint();
+        });
+        self.update = UpdateState::Checking { rx, quiet };
+    }
+
+    fn poll_update_check(&mut self) {
+        let UpdateState::Checking { rx, quiet } = &self.update else {
+            return;
+        };
+        let quiet = *quiet;
+        let result = match rx.try_recv() {
+            Ok(r) => r,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err("the update check stopped unexpectedly".into())
+            }
+        };
+        self.update = match result {
+            Ok(Some(a)) => {
+                if quiet {
+                    self.toast(
+                        format!(
+                            "Xylem {} is available: Help › Check for updates.",
+                            a.version
+                        ),
+                        false,
+                    );
+                }
+                UpdateState::Found(a)
+            }
+            Ok(None) => UpdateState::UpToDate,
+            Err(e) => {
+                if quiet {
+                    log::warn!("update check: {e}");
+                }
+                UpdateState::Failed(e)
+            }
+        };
+    }
+
+    fn update_dialog(&mut self, ctx: &egui::Context) {
+        if !self.dialogs.update {
+            return;
+        }
+        let mut open = true;
+        let mut apply = None;
+        let mut restart = None;
+        egui::Window::new("Check for updates")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!("This is Xylem {}.", crate::install::VERSION));
+                match &self.update {
+                    UpdateState::Idle | UpdateState::Checking { .. } => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Checking the update folder…");
+                        });
+                    }
+                    UpdateState::UpToDate => {
+                        ui.label("You have the latest version.");
+                    }
+                    UpdateState::Failed(e) => {
+                        ui.colored_label(ui.visuals().warn_fg_color, e);
+                    }
+                    UpdateState::Found(a) => {
+                        ui.label(format!("Version {} is available.", a.version));
+                        if ui.button("Update now").clicked() {
+                            apply = Some(a.clone());
+                        }
+                    }
+                    UpdateState::Applied(exe) => {
+                        ui.label("Updated. The new version starts the next time you open Xylem.");
+                        if self.docs.iter().any(|d| d.is_dirty()) {
+                            ui.weak("Save your documents, then restart.");
+                        } else if ui.button("Restart now").clicked() {
+                            restart = Some(exe.clone());
+                        }
+                    }
+                }
+            });
+        if let Some(a) = apply {
+            self.update = match crate::install::apply(&a) {
+                Ok(exe) => UpdateState::Applied(exe),
+                Err(e) => UpdateState::Failed(e),
+            };
+        }
+        if let Some(exe) = restart {
+            let files: Vec<PathBuf> = self.docs.iter().filter_map(|d| d.path.clone()).collect();
+            match std::process::Command::new(&exe).args(&files).spawn() {
+                Ok(_) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Err(e) => self.toast(format!("Could not start {}: {e}", exe.display()), true),
+            }
+        }
+        if !open {
+            self.dialogs.update = false;
+        }
+    }
+
     fn dialogs(&mut self, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
         self.find_window(ctx);
         if self.dialogs.about {
@@ -2392,6 +2549,22 @@ impl XylemApp {
                 .open(&mut open)
                 .default_width(520.0)
                 .show(ctx, |ui| {
+                    ui.strong("Team configuration");
+                    match &self.team.source {
+                        Some(src) => {
+                            ui.label(src.display().to_string());
+                            for d in &self.team.package_dirs {
+                                ui.weak(format!("packages: {}", d.display()));
+                            }
+                        }
+                        None => {
+                            ui.weak("None (no xylem-team.toml found; see docs/team-setup.md).");
+                        }
+                    }
+                    for w in &self.team.warnings {
+                        ui.colored_label(ui.visuals().warn_fg_color, w);
+                    }
+                    ui.separator();
                     ui.strong("Doctype package folders");
                     let mut remove = None;
                     for (i, d) in self.settings.package_dirs.iter().enumerate() {
@@ -3049,6 +3222,19 @@ fn all_package_dirs(team: &crate::team::TeamConfig, settings: &Settings) -> Vec<
     dirs
 }
 
+/// Progress of Help › Check for updates.
+enum UpdateState {
+    Idle,
+    Checking {
+        rx: std::sync::mpsc::Receiver<Result<Option<crate::install::Available>, String>>,
+        quiet: bool,
+    },
+    UpToDate,
+    Found(crate::install::Available),
+    Applied(PathBuf),
+    Failed(String),
+}
+
 fn table_menu(ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
     for (label, c) in [
         ("Insert table…", Cmd::InsertTable),
@@ -3293,6 +3479,8 @@ impl eframe::App for XylemApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let frame_start = std::time::Instant::now();
+        self.poll_update_check();
+        self.update_dialog(ctx);
         for p in std::mem::take(&mut self.pending_open) {
             self.open_path(p);
         }

@@ -7,6 +7,7 @@ mod autosave;
 mod doc;
 mod find;
 mod fonts;
+mod install;
 mod panels;
 mod s1000d_ui;
 mod script;
@@ -19,6 +20,12 @@ use std::path::PathBuf;
 
 fn main() -> eframe::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    // --install, --uninstall and friends run and exit without opening a window.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = install::run_cli(&args) {
+        std::process::exit(code);
+    }
+    install::clean_up_old();
     let files: Vec<PathBuf> = std::env::args_os()
         .skip(1)
         .map(PathBuf::from)

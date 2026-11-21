@@ -10,7 +10,14 @@
 //! 3. `xylem-team.toml` in the user's config folder.
 //!
 //! Relative paths in the file are relative to the file itself. Everything is
-//! optional, and a user's own Preferences win over the team values.
+//! optional. A user's own Preferences win over single values (schema folder,
+//! BREX, dictionary); team package folders are scanned before the user's, so
+//! on an equal match the team's package is used.
+//!
+//! A file can consist of just `include = "<path>"`, which reads the real
+//! configuration from elsewhere. That is what the installer leaves next to
+//! the executable, so that relative paths still resolve against the shared
+//! folder.
 //!
 //! ```toml
 //! package_dirs = ["doctypes"]
@@ -26,8 +33,10 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Clone, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct TeamConfig {
+    /// Read the configuration from this file instead.
+    pub include: Option<PathBuf>,
     /// Folders scanned for doctype packages, before the user's own.
     pub package_dirs: Vec<PathBuf>,
     /// Folder laid out like www.s1000d.org (`S1000D_4-1/xml_schema_flat/...`).
@@ -45,14 +54,32 @@ pub struct TeamConfig {
     /// Where the configuration was read from (filled in by [`load`]).
     #[serde(skip)]
     pub source: Option<PathBuf>,
+    /// Problems worth showing the user (unknown keys, unreadable includes).
+    #[serde(skip)]
+    pub warnings: Vec<String>,
 }
+
+const KNOWN_KEYS: &[&str] = &[
+    "include",
+    "package_dirs",
+    "s1000d_schemas",
+    "catalog",
+    "brex",
+    "dictionary_dir",
+    "dictionary_lang",
+    "update_source",
+];
+const MAX_INCLUDES: usize = 4;
 
 fn candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(p) = std::env::var_os("XYLEM_TEAM_CONFIG") {
         v.push(PathBuf::from(p));
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
         v.push(dir.join("xylem-team.toml"));
     }
     if let Some(dir) = crate::settings::config_dir() {
@@ -61,27 +88,63 @@ fn candidates() -> Vec<PathBuf> {
     v
 }
 
-/// Reads the first team configuration found. Errors are logged and the file
-/// is ignored: a broken shared file must not stop anyone from editing.
+/// Reads the first team configuration found. A broken shared file must not
+/// stop anyone from editing, so errors become warnings on an empty config.
 pub fn load() -> TeamConfig {
     for path in candidates() {
         if !path.is_file() {
             continue;
         }
-        match parse(&path) {
-            Ok(cfg) => {
-                log::info!("team configuration: {}", path.display());
-                return cfg;
-            }
-            Err(e) => log::warn!("ignoring team configuration {}: {e}", path.display()),
+        let cfg = match parse(&path) {
+            Ok(cfg) => cfg,
+            Err(e) => TeamConfig {
+                source: Some(path.clone()),
+                warnings: vec![format!("{}: {e}", path.display())],
+                ..TeamConfig::default()
+            },
+        };
+        log::info!("team configuration: {}", path.display());
+        for w in &cfg.warnings {
+            log::warn!("team configuration: {w}");
         }
+        return cfg;
     }
     TeamConfig::default()
 }
 
+/// Parses `path`, following `include` chains.
 pub fn parse(path: &Path) -> Result<TeamConfig, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut cfg: TeamConfig = toml::from_str(&text).map_err(|e| e.to_string())?;
+    let mut path = path.to_path_buf();
+    let mut warnings = Vec::new();
+    for _ in 0..=MAX_INCLUDES {
+        let mut cfg = parse_one(&path)?;
+        warnings.append(&mut cfg.warnings);
+        match cfg.include.take() {
+            Some(next) => path = next,
+            None => {
+                cfg.warnings = warnings;
+                return Ok(cfg);
+            }
+        }
+    }
+    Err(format!("more than {MAX_INCLUDES} nested includes"))
+}
+
+fn parse_one(path: &Path) -> Result<TeamConfig, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let table: toml::Table =
+        toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Unknown keys are warned about, not rejected: a shared file gains keys
+    // over time and older installations must keep working with it.
+    let warnings = table
+        .keys()
+        .filter(|k| !KNOWN_KEYS.contains(&k.as_str()))
+        .map(|k| format!("{}: unknown key `{k}`", path.display()))
+        .collect();
+    let mut cfg: TeamConfig = table
+        .try_into()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    cfg.warnings = warnings;
     let base = path.parent().unwrap_or(Path::new("."));
     let resolve = |p: &mut PathBuf| {
         if p.is_relative() {
@@ -89,9 +152,16 @@ pub fn parse(path: &Path) -> Result<TeamConfig, String> {
         }
     };
     cfg.package_dirs.iter_mut().for_each(resolve);
-    for p in [&mut cfg.s1000d_schemas, &mut cfg.catalog, &mut cfg.brex, &mut cfg.dictionary_dir, &mut cfg.update_source]
-        .into_iter()
-        .flatten()
+    for p in [
+        &mut cfg.include,
+        &mut cfg.s1000d_schemas,
+        &mut cfg.catalog,
+        &mut cfg.brex,
+        &mut cfg.dictionary_dir,
+        &mut cfg.update_source,
+    ]
+    .into_iter()
+    .flatten()
     {
         resolve(p);
     }
@@ -120,7 +190,22 @@ mod tests {
         assert_eq!(cfg.package_dirs[1], elsewhere);
         assert_eq!(cfg.s1000d_schemas, Some(dir.join("schemas/s1000d")));
         std::fs::write(&file, "pakage_dirs = []\n").unwrap();
-        assert!(parse(&file).is_err(), "typos are reported, not silently ignored");
+        let cfg = parse(&file).unwrap();
+        assert!(
+            cfg.warnings[0].contains("pakage_dirs"),
+            "typos are reported, not silently ignored"
+        );
+
+        // A stub elsewhere that includes the shared file resolves paths
+        // against the shared file, not the stub.
+        let stub_dir = dir.join("install");
+        std::fs::create_dir_all(&stub_dir).unwrap();
+        std::fs::write(&file, "package_dirs = [\"doctypes\"]\n").unwrap();
+        let stub = stub_dir.join("xylem-team.toml");
+        std::fs::write(&stub, format!("include = {:?}\n", file.to_string_lossy())).unwrap();
+        let cfg = parse(&stub).unwrap();
+        assert_eq!(cfg.package_dirs, vec![dir.join("doctypes")]);
+        assert_eq!(cfg.source, Some(file.clone()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
