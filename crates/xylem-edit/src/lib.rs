@@ -132,6 +132,10 @@ pub struct Editor {
     /// Set by the view when an edit should start a fresh undo step.
     pub break_undo_group: bool,
     pub undo_limit: usize,
+    /// When typing at a gap between two elements, prefer the element before
+    /// the gap. The view sets this when the caret is drawn at the end of a
+    /// line (after a closing tag) rather than at the start of the next one.
+    pub gap_prefers_before: bool,
 }
 
 impl Editor {
@@ -151,6 +155,7 @@ impl Editor {
             saved_state: 0,
             break_undo_group: false,
             undo_limit: 1000,
+            gap_prefers_before: false,
         }
     }
 
@@ -445,32 +450,34 @@ impl Editor {
     /// `parent[index]`, if that element can hold text.
     fn text_target_near(&self, rules: &dyn Rules, parent: NodeId, index: usize) -> Option<Pos> {
         let kids = self.doc.children(parent);
-        let after = kids[index.min(kids.len())..]
-            .iter()
-            .copied()
-            .find(|&c| !is_ignorable(&self.doc, rules, c));
-        if let Some(e) = after.filter(|&e| self.doc.is_element(e)) {
-            let p = first_editable(&self.doc, rules, e);
-            if p.node != parent
+        let usable = |p: Pos| {
+            p.node != parent
                 && (self.doc.is_text(p.node) || rules.can_contain_text(&self.doc, p.node))
-            {
-                return Some(p);
-            }
+        };
+        let after = || {
+            kids[index.min(kids.len())..]
+                .iter()
+                .copied()
+                .find(|&c| !is_ignorable(&self.doc, rules, c))
+                .filter(|&e| self.doc.is_element(e))
+                .map(|e| first_editable(&self.doc, rules, e))
+                .filter(|&p| usable(p))
+        };
+        let before = || {
+            kids[..index.min(kids.len())]
+                .iter()
+                .rev()
+                .copied()
+                .find(|&c| !is_ignorable(&self.doc, rules, c))
+                .filter(|&e| self.doc.is_element(e))
+                .map(|e| end_of(&self.doc, rules, e))
+                .filter(|&p| usable(p))
+        };
+        if self.gap_prefers_before {
+            before().or_else(after)
+        } else {
+            after().or_else(before)
         }
-        let before = kids[..index.min(kids.len())]
-            .iter()
-            .rev()
-            .copied()
-            .find(|&c| !is_ignorable(&self.doc, rules, c));
-        if let Some(e) = before.filter(|&e| self.doc.is_element(e)) {
-            let p = end_of(&self.doc, rules, e);
-            if p.node != parent
-                && (self.doc.is_text(p.node) || rules.can_contain_text(&self.doc, p.node))
-            {
-                return Some(p);
-            }
-        }
-        None
     }
 
     // ----------------------------------------------------------- deletion

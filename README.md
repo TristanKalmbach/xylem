@@ -1,22 +1,29 @@
 # Xylem
 
-Xylem is a fast, standalone structured XML editor written entirely in Rust. It replaces XMetaL XMAX for narrative XML authoring and supports S1000D issues 2.0 to 6.0. It is designed to run on Windows, macOS and Linux: all dependencies are pure Rust. So far it has been built and tested on Windows only.
+Xylem is a structured XML editor written in Rust. It was built to replace
+XMetaL XMAX for writing narrative XML, and it also handles S1000D (issues 2.0
+to 6.0). Everything is pure Rust, so it should run on Windows, macOS and
+Linux; so far it has been built and tested on Windows.
 
-- **Tags-on and normal views** styled by CSS. It supports the XMetaL CSS dialect, including `$PROCINS`, `$COMMENT`, counters and generated content. A **source view** with syntax highlighting is also available.
-- **Schema-guided editing** from XSD or DTD:
-  - Only valid elements are offered.
-  - Required content is generated, or taken from package templates.
-  - Validation runs as you type.
-- **Lossless round-trip:** untouched markup is saved byte for byte, including entities, quoting, whitespace and encoding.
-- **CALS and HTML tables**, find and replace, spell check (Hunspell), structure tree, attribute inspector and an issues list.
-- **S1000D tools:**
-  - New data module wizard.
-  - DMC and CSDB naming.
-  - BREX checking.
-  - dmRef navigation.
-  - A built-in stylesheet.
-- **XMAX migration:** `xylem-import` converts `.ctm` customization folders and `.xac` archives into Xylem doctype packages (see [docs/doctype-packages.md](docs/doctype-packages.md)).
-- **Comfortable for long documents:** incremental layout, collapsible elements, a Ctrl+Space insert palette, autosave with crash recovery, and drag-and-drop images.
+What it does:
+
+- Shows the document styled by CSS, either with tags visible ("tags on") or as
+  plain formatted text, plus a source view. The XMetaL flavour of CSS that
+  XMAX customizations use (`$PROCINS`, `$COMMENT`, counters, generated
+  content) works as-is.
+- Uses the XSD or DTD to guide editing: only valid elements are offered, new
+  elements come with their required content, and validation runs as you type.
+- Saves without reformatting: markup you didn't touch is written back byte for
+  byte, including entities, quoting, whitespace and encoding.
+- Has CALS and HTML tables, find and replace, spell checking with Hunspell
+  dictionaries, a structure tree, an attribute inspector and an issues list.
+- For S1000D: a new data module wizard, DMC and CSDB file naming, BREX
+  checking, dmRef navigation and a built-in stylesheet.
+- Converts XMAX customizations (`.ctm` folders and `.xac` archives) into Xylem
+  doctype packages with `xylem-import`; see
+  [docs/doctype-packages.md](docs/doctype-packages.md).
+- Stays quick on long documents (incremental layout, collapsible elements) and
+  keeps your work safe (autosave and crash recovery).
 
 ## Build and run
 
@@ -47,8 +54,8 @@ Put the output folders in a package folder; the default is `%APPDATA%\Xylem\doct
 
 Xylem never downloads schemas. To use them, either:
 
-- **Schema folder:** set *File › Preferences › S1000D schema folder* to a folder that contains one sub-folder per issue, for example `S1000D_4-1/…`. `http://www.s1000d.org/S1000D_4-1/...` URLs are then resolved there.
-- **Catalog:** point *Schema catalog* at a `catalog.toml` or an OASIS XML catalog.
+- Schema folder: set *File › Preferences › S1000D schema folder* to a folder that contains one sub-folder per issue, for example `S1000D_4-1/…`. `http://www.s1000d.org/S1000D_4-1/...` URLs are then resolved there.
+- Catalog: point *Schema catalog* at a `catalog.toml` or an OASIS XML catalog.
 
 ## Keyboard
 

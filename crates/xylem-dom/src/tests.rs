@@ -145,5 +145,9 @@ fn revisions_are_unique_across_documents() {
     let ra = a.document_element().unwrap();
     let rb = b.document_element().unwrap();
     assert_eq!(ra, rb, "same node ids...");
-    assert_ne!(a.subtree_stamp(ra), b.subtree_stamp(rb), "...but different stamps");
+    assert_ne!(
+        a.subtree_stamp(ra),
+        b.subtree_stamp(rb),
+        "...but different stamps"
+    );
 }

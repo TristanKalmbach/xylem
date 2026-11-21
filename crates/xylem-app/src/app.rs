@@ -169,7 +169,10 @@ impl XylemApp {
             settings.dictionary_dir = Some(PathBuf::from(dict));
             settings.spell_check = true;
         }
-        if let Some(secs) = std::env::var("XYLEM_AUTOSAVE_SECONDS").ok().and_then(|v| v.parse().ok()) {
+        if let Some(secs) = std::env::var("XYLEM_AUTOSAVE_SECONDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+        {
             settings.autosave_seconds = secs;
         }
         if let Some(brex) = std::env::var_os("XYLEM_BREX") {
@@ -224,16 +227,14 @@ impl XylemApp {
         if !scripted || isolated {
             app.recovery = crate::autosave::find();
         }
-        if !scripted {
-            if app.pending_open.is_empty() && app.settings.restore_session {
-                app.pending_open = app
-                    .settings
-                    .last_session
-                    .iter()
-                    .filter(|p| p.is_file())
-                    .cloned()
-                    .collect();
-            }
+        if !scripted && app.pending_open.is_empty() && app.settings.restore_session {
+            app.pending_open = app
+                .settings
+                .last_session
+                .iter()
+                .filter(|p| p.is_file())
+                .cloned()
+                .collect();
         }
         app
     }
@@ -486,6 +487,15 @@ impl XylemApp {
         }
     }
 
+    /// Inserts prepared markup for `name` (table, image…) with generated IDs.
+    fn insert_markup(&mut self, name: &str, xml: &str) -> Option<Result<(), EditError>> {
+        let package = self.docs.get(self.active)?.package.clone();
+        self.with_editor_result(|ed, r| {
+            let xml = crate::doc::with_generated_ids(&package, &ed.doc, xml);
+            ed.insert_element_xml(r, name, &xml).map(|_| ())
+        })
+    }
+
     fn with_editor_result<T>(
         &mut self,
         f: impl FnOnce(&mut xylem_edit::Editor, &dyn Rules) -> Result<T, EditError>,
@@ -616,10 +626,7 @@ impl XylemApp {
             }
             Cmd::CheckBrex => self.check_brex(),
             Cmd::InsertElement(name) => {
-                let r = self.with_editor(|ed, r| ed.insert_element(r, &name));
-                if r.is_some() {
-                    self.after_insert();
-                }
+                self.with_editor(|ed, r| ed.insert_element(r, &name));
             }
             Cmd::Surround(name) => {
                 let g = self.docs.get(self.active).and_then(|d| d.grammar.clone());
@@ -940,10 +947,8 @@ impl XylemApp {
             xylem_dom::escape_attr(&reference(&img.source_attr), &mut xml);
             xml.push_str("\"/>");
             let name = img.element.clone();
-            match self.with_editor_result(|ed, r| ed.insert_element_xml(r, &name, &xml).map(|_| ()))
-            {
+            match self.insert_markup(&name, &xml) {
                 Some(Ok(())) => {
-                    self.after_insert();
                     return true;
                 }
                 Some(Err(e)) => last_err = Some(e),
@@ -960,11 +965,8 @@ impl XylemApp {
                 &img.source_attr,
                 &reference(&img.source_attr),
             ) {
-                match self
-                    .with_editor_result(|ed, r| ed.insert_element_xml(r, &name, &xml).map(|_| ()))
-                {
+                match self.insert_markup(&name, &xml) {
                     Some(Ok(())) => {
-                        self.after_insert();
                         return true;
                     }
                     Some(Err(e)) => last_err = Some(e),
@@ -977,34 +979,6 @@ impl XylemApp {
             self.toast(format!("Can't insert the image here: {e}"), true);
         }
         true
-    }
-
-    fn after_insert(&mut self) {
-        // Auto IDs for configured elements.
-        let Some(ds) = self.docs.get_mut(self.active) else {
-            return;
-        };
-        let Some(idg) = ds.package.behaviour.id_generation.clone() else {
-            return;
-        };
-        let doc = &ds.editor.doc;
-        let mut todo = Vec::new();
-        let mut seq = doc
-            .descendants(doc.root())
-            .filter(|&n| doc.attr(n, &idg.attr).is_some())
-            .count();
-        for n in doc.descendants(doc.root()) {
-            if let Some(name) = doc.name(n)
-                && idg.elements.iter().any(|e| e == name)
-                && doc.attr(n, &idg.attr).is_none()
-            {
-                seq += 1;
-                todo.push((n, idg.generate(name, seq as u64)));
-            }
-        }
-        for (n, id) in todo {
-            ds.editor.doc.set_attr(n, &idg.attr, id);
-        }
     }
 
     fn set_view(&mut self, v: View) {
@@ -2228,7 +2202,9 @@ impl XylemApp {
                     xylem_edit::table::html_table_xml(t.rows, t.cols, t.header)
                 };
                 self.dialogs.table = None;
-                self.with_editor(|ed, r| ed.insert_element_xml(r, "table", &xml).map(|_| ()));
+                if let Some(Err(e)) = self.insert_markup("table", &xml) {
+                    self.toast(e.to_string(), true);
+                }
             } else if !open {
                 self.dialogs.table = None;
             }
@@ -2977,13 +2953,23 @@ impl XylemApp {
                 Ok(doc) => doc,
                 Err(e) => {
                     // Keep the copy: it may still be readable by hand.
-                    self.toast(format!("Could not open the recovered copy ({e}). It is kept at {}.", r.file.display()), true);
+                    self.toast(
+                        format!(
+                            "Could not open the recovered copy ({e}). It is kept at {}.",
+                            r.file.display()
+                        ),
+                        true,
+                    );
                     continue;
                 }
             };
             // If the original is already open (session restore), put the
             // recovered content into that tab, so undo goes back to the saved file.
-            let open_tab = r.original.as_ref().and_then(|p| self.docs.iter().position(|d| d.path.as_deref() == Some(p.as_path())));
+            let open_tab = r.original.as_ref().and_then(|p| {
+                self.docs
+                    .iter()
+                    .position(|d| d.path.as_deref() == Some(p.as_path()))
+            });
             match open_tab {
                 Some(i) => {
                     let ds = &mut self.docs[i];
@@ -2999,7 +2985,10 @@ impl XylemApp {
                     }
                 }
             }
-            self.toast("Recovered unsaved work. Save the document to keep it.", false);
+            self.toast(
+                "Recovered unsaved work. Save the document to keep it.",
+                false,
+            );
         }
         if discard_all {
             for r in self.recovery.drain(..) {
@@ -3011,7 +3000,9 @@ impl XylemApp {
     /// Writes unsaved documents to the autosave folder every few seconds.
     fn autosave_tick(&mut self, ctx: &egui::Context) {
         let isolated = std::env::var_os("XYLEM_CONFIG_DIR").is_some();
-        if self.settings.autosave_seconds == 0 || ((self.script.is_some() || self.screenshot.is_some()) && !isolated) {
+        if self.settings.autosave_seconds == 0
+            || ((self.script.is_some() || self.screenshot.is_some()) && !isolated)
+        {
             return;
         }
         let now = ctx.input(|i| i.time);

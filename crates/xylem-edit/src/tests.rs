@@ -443,3 +443,42 @@ fn moving_elements_keeps_whitespace_layout() {
 </doc>"
     );
 }
+
+#[test]
+fn table_columns_account_for_row_spans() {
+    let x = "<doc><table><tgroup cols=\"3\"><tbody>        <row><entry morerows=\"1\">A</entry><entry>B</entry><entry>C</entry></row>        <row><entry>E</entry><entry>F</entry></row>        </tbody></tgroup></table></doc>";
+    let e = ed(x);
+    let group = e
+        .doc
+        .descendants(e.doc.root())
+        .find(|&n| e.doc.name(n) == Some("tgroup"))
+        .unwrap();
+    let second = table::rows(&e.doc, group)[1];
+    let cols: Vec<(usize, usize)> =
+        table::cell_columns(&e.doc, table::TableModel::Cals, group, second)
+            .into_iter()
+            .map(|(_, s, en)| (s, en))
+            .collect();
+    assert_eq!(
+        cols,
+        vec![(1, 1), (2, 2)],
+        "E and F sit beside the spanning A"
+    );
+}
+
+#[test]
+fn gap_typing_follows_the_preferred_side() {
+    let mut e = ed("<doc><section><p>a</p><p>b</p></section></doc>");
+    let sec = e
+        .doc
+        .element_children(e.doc.document_element().unwrap())
+        .next()
+        .unwrap();
+    e.set_caret(Pos::new(sec, 1));
+    e.gap_prefers_before = true;
+    e.insert_text(&TestRules, "1").unwrap();
+    e.set_caret(Pos::new(sec, 1));
+    e.gap_prefers_before = false;
+    e.insert_text(&TestRules, "2").unwrap();
+    assert_eq!(xml(&e), "<doc><section><p>a1</p><p>2b</p></section></doc>");
+}

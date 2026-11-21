@@ -304,7 +304,9 @@ impl DocLayout {
             } else {
                 0.0
             };
-            let d = dy * 4.0 + dx;
+            // Vertical distance dominates; horizontal distance only decides
+            // between paragraphs on the same rows (table cells).
+            let d = dy * 10_000.0 + dx;
             if best.is_none_or(|(bd, _)| d < bd) {
                 best = Some((d, i));
             }

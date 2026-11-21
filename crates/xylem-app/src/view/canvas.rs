@@ -115,6 +115,21 @@ impl Canvas {
         }
     }
 
+    /// The caret is drawn at the very end of a line (after its last chip).
+    fn caret_at_line_end(&self, ed: &Editor) -> bool {
+        let Some((p, loc)) = self.caret_hint else {
+            return false;
+        };
+        if p != ed.sel.focus {
+            return false;
+        }
+        let Some(para) = self.layout.paras.get(loc.para) else {
+            return false;
+        };
+        let end = para.segs.last().map_or(0, |s| s.chars.end);
+        loc.ch >= end
+    }
+
     pub fn invalidate(&mut self) {
         self.key = None;
     }
@@ -450,6 +465,7 @@ impl Canvas {
                         continue;
                     }
                     if t.chars().all(|c| !c.is_control()) && !t.is_empty() {
+                        ed.gap_prefers_before = self.caret_at_line_end(ed);
                         let r = ed.insert_text(rules, &t);
                         Self::report(actions, r);
                         self.after_edit();

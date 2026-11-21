@@ -90,6 +90,10 @@ fn colnames(doc: &Document, group: NodeId) -> Vec<String> {
 }
 
 /// Cells of a row with their (start, end) column indices (inclusive).
+///
+/// Columns come from CALS `colname`/`namest`/`nameend` where given; other
+/// cells take the next free column, skipping columns still covered by a cell
+/// from an earlier row that spans down (`morerows` / `rowspan`).
 pub fn cell_columns(
     doc: &Document,
     model: TableModel,
@@ -102,35 +106,63 @@ pub fn cell_columns(
         Vec::new()
     };
     let idx = |n: &str| names.iter().position(|c| c == n);
-    let mut next = 0;
-    let mut out = Vec::new();
-    for c in doc.element_children(row).collect::<Vec<_>>() {
-        if is_cell(doc, c).is_none() {
-            continue;
-        }
-        let (s, e) = match model {
-            TableModel::Cals => {
-                let s = doc
+    // Rows still covered by a span, per column.
+    let mut covered: Vec<usize> = Vec::new();
+    for r in rows(doc, group) {
+        let mut next = 0;
+        let mut out = Vec::new();
+        for c in doc.element_children(r).collect::<Vec<_>>() {
+            if is_cell(doc, c).is_none() {
+                continue;
+            }
+            let explicit = match model {
+                TableModel::Cals => doc
                     .attr(c, "namest")
                     .and_then(idx)
                     .or_else(|| doc.attr(c, "colname").and_then(idx))
-                    .unwrap_or(next);
-                let e = doc.attr(c, "nameend").and_then(idx).unwrap_or(s);
-                (s, e.max(s))
-            }
-            TableModel::Html => {
+                    .map(|s| (s, doc.attr(c, "nameend").and_then(idx).unwrap_or(s).max(s))),
+                TableModel::Html => None,
+            };
+            let (s, e) = explicit.unwrap_or_else(|| {
+                while covered.get(next).is_some_and(|&n| n > 0) {
+                    next += 1;
+                }
                 let span = doc
                     .attr(c, "colspan")
                     .and_then(|v| v.parse::<usize>().ok())
                     .unwrap_or(1)
                     .max(1);
                 (next, next + span - 1)
+            });
+            next = e + 1;
+            let down = match model {
+                TableModel::Cals => doc
+                    .attr(c, "morerows")
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(0),
+                TableModel::Html => doc
+                    .attr(c, "rowspan")
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(1)
+                    .saturating_sub(1),
+            };
+            if covered.len() <= e {
+                covered.resize(e + 1, 0);
             }
-        };
-        next = e + 1;
-        out.push((c, s, e));
+            for col in covered.iter_mut().take(e + 1).skip(s) {
+                // +1: this row is decremented below like every other.
+                *col = (*col).max(down + 1);
+            }
+            out.push((c, s, e));
+        }
+        if r == row {
+            return out;
+        }
+        for col in &mut covered {
+            *col = col.saturating_sub(1);
+        }
     }
-    out
+    Vec::new()
 }
 
 /// All rows of the table group in document order.

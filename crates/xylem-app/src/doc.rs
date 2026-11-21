@@ -462,22 +462,72 @@ impl Rules for DocRules<'_> {
     }
 
     fn new_element_xml(&self, doc: &Document, parent: NodeId, index: usize, name: &str) -> String {
-        if let Some(t) = self.package.template(name)
+        let xml = if let Some(t) = self.package.template(name)
             && xylem_dom::parse_fragment(&t.xml).is_ok()
         {
-            return t.xml.clone();
-        }
-        if let Some(g) = self.grammar
+            t.xml.clone()
+        } else if let Some(g) = self.grammar
             && let Some(ins) = g
                 .insertable_at(doc, parent, index)
                 .into_iter()
                 .find(|i| i.name == name)
         {
-            let sk = g.required_skeleton(ins.decl);
-            return skeleton_xml(&sk);
-        }
-        format!("<{name}/>")
+            skeleton_xml(&g.required_skeleton(ins.decl))
+        } else {
+            format!("<{name}/>")
+        };
+        with_generated_ids(self.package, doc, &xml)
     }
+}
+
+/// Gives elements in a fragment about to be inserted an ID when the package
+/// asks for generated IDs and the element doesn't have one yet. Running this
+/// on the fragment (rather than the document afterwards) keeps the IDs in
+/// the same undo step as the insert and leaves existing elements alone.
+pub fn with_generated_ids(package: &DoctypePackage, doc: &Document, xml: &str) -> String {
+    let Some(idg) = &package.behaviour.id_generation else {
+        return xml.to_string();
+    };
+    let Ok(mut frag) = xylem_dom::parse_fragment(xml) else {
+        return xml.to_string();
+    };
+    let mut taken: std::collections::HashSet<String> = doc
+        .descendants(doc.root())
+        .filter_map(|n| doc.attr(n, &idg.attr).map(str::to_string))
+        .collect();
+    let mut seq = taken.len() as u64;
+    let targets: Vec<NodeId> = frag
+        .descendants(frag.root())
+        .filter(|&n| {
+            frag.name(n)
+                .is_some_and(|nm| idg.elements.iter().any(|e| e == nm))
+        })
+        .collect();
+    let mut changed = false;
+    for n in targets {
+        // Templates may carry a fixed placeholder ID; replace it if it clashes.
+        if frag.attr(n, &idg.attr).is_some_and(|v| !taken.contains(v)) {
+            continue;
+        }
+        let name = frag.name(n).unwrap_or("").to_string();
+        let id = loop {
+            seq += 1;
+            let candidate = idg.generate(&name, seq);
+            if !taken.contains(&candidate) {
+                break candidate;
+            }
+        };
+        taken.insert(id.clone());
+        frag.set_attr(n, &idg.attr, id);
+        changed = true;
+    }
+    if !changed {
+        return xml.to_string();
+    }
+    frag.children(frag.root())
+        .iter()
+        .map(|&c| frag.node_to_xml(c))
+        .collect()
 }
 
 pub fn skeleton_xml(s: &xylem_schema::Skeleton) -> String {
