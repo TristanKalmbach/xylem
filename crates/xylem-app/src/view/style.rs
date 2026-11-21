@@ -588,6 +588,84 @@ impl StyleLookup for PatchedStyles {
     }
 }
 
+/// How elements that do not apply under the current applicability filter are shown.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub enum ApplicDisplay {
+    /// Drawn in a faded colour.
+    #[default]
+    Dim,
+    /// Left out of the view.
+    Hide,
+}
+
+/// Wraps the document's styles to fade or hide inapplicable elements.
+pub struct ApplicStyles {
+    base: Rc<dyn StyleLookup>,
+    /// Inapplicable elements and everything inside them.
+    excluded: Rc<std::collections::HashSet<NodeId>>,
+    display: ApplicDisplay,
+    dim: Color32,
+    /// Fingerprint of the excluded set and display mode. Mixed into every
+    /// subtree hash, so cached blocks are laid out again when the filter
+    /// changes even though their own content did not.
+    salt: u64,
+}
+
+impl ApplicStyles {
+    pub fn new(
+        base: Rc<dyn StyleLookup>,
+        excluded: Rc<std::collections::HashSet<NodeId>>,
+        display: ApplicDisplay,
+        dim: Color32,
+        salt: u64,
+    ) -> Self {
+        Self {
+            base,
+            excluded,
+            display,
+            dim,
+            salt,
+        }
+    }
+
+    fn adjust(&self, n: NodeId, mut s: Sty) -> Sty {
+        if self.excluded.contains(&n) {
+            match self.display {
+                ApplicDisplay::Dim => {
+                    s.color = Some(self.dim);
+                    s.border_color = s.border_color.map(|c| c.map(|_| self.dim));
+                }
+                ApplicDisplay::Hide => s.display = Display::None,
+            }
+        }
+        s
+    }
+}
+
+impl StyleLookup for ApplicStyles {
+    fn subtree_hash(&self, n: NodeId) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (self.base.subtree_hash(n), self.salt).hash(&mut h);
+        h.finish()
+    }
+    fn get(&self, n: NodeId) -> Sty {
+        self.adjust(n, self.base.get(n))
+    }
+    fn before(&self, n: NodeId) -> Option<(String, Sty)> {
+        self.base.before(n).map(|(t, s)| (t, self.adjust(n, s)))
+    }
+    fn after(&self, n: NodeId) -> Option<(String, Sty)> {
+        self.base.after(n).map(|(t, s)| (t, self.adjust(n, s)))
+    }
+    fn list_marker(&self, n: NodeId) -> Option<String> {
+        self.base.list_marker(n)
+    }
+    fn generated_image(&self, n: NodeId, after: bool) -> Option<std::path::PathBuf> {
+        self.base.generated_image(n, after)
+    }
+}
+
 /// Attached element nodes created after the first `from` arena slots.
 fn new_element_ids(doc: &Document, from: usize) -> Vec<NodeId> {
     doc.descendants(doc.root())

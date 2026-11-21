@@ -6,7 +6,7 @@ approach before you spend time on it.
 
 ## Getting started
 
-You need a stable Rust toolchain (1.85 or later). On Linux, eframe also needs
+You need a stable Rust toolchain (1.88 or later). On Linux, eframe also needs
 the X11/Wayland development headers; the CI workflow lists the packages.
 
 ```

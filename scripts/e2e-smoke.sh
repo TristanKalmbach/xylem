@@ -81,6 +81,15 @@ XYLEM_CONFIG_DIR="$native/cfg-ff" XYLEM_SCRIPT="key F ctrl shift;;wait 5;;type p
 check find-in-files-reloads-open "$out/ff-open.xml" "<p>The valve is primed.</p>"
 check find-in-files-writes-closed "$out/ff/b.xml" '<doc><p id="pump">Check the valve &amp; seals.</p></doc>'
 
+# Project tab: scan the sample folder, put the caret in the publication
+# module's entry title and insert a reference to the lift cylinder module.
+# Where it lands depends on whether the S1000D schemas are installed (with
+# them it goes after the title), so only the reference itself is checked.
+rm -rf "$out/cfg-project"
+XYLEM_CONFIG_DIR="$native/cfg-project" XYLEM_SCRIPT="pick $repo/samples/s1000d;;click 232 12;;wait 5;;click 239 286;;wait 10;;click 33 85;;wait 30;;click 600 381;;wait 10;;click 100 302;;wait 10;;click 103 151;;wait 10;;save $native/pm.xml;;quit" \
+    timeout 90 "$bin" "$repo/samples/s1000d/PMC-XYLEM-00000-00001-00_001-00_en-US.XML" > /dev/null 2>&1
+check project-insert-reference "$out/pm.xml" '<dmRef><dmRefIdent><dmCode modelIdentCode="XYLEM" systemDiffCode="A" systemCode="29" subSystemCode="2"'
+
 # Zoom and the last session survive a restart.
 rm -rf "$out/cfg2"
 XYLEM_CONFIG_DIR="$native/cfg2" XYLEM_PACKAGES=samples/doctypes XYLEM_SCRIPT="key Plus ctrl;;quit"     timeout 90 "$bin" "$repo/samples/manual-sample.xml" > /dev/null 2>&1

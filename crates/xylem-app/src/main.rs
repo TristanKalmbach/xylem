@@ -11,6 +11,7 @@ mod fonts;
 mod html_export;
 mod install;
 mod panels;
+mod project_ui;
 mod s1000d_ui;
 mod script;
 mod settings;

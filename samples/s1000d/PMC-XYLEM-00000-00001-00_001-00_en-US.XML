@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pm xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.s1000d.org/S1000D_4-1/xml_schema_flat/pm.xsd">
+  <identAndStatusSection>
+    <pmAddress>
+      <pmIdent>
+        <pmCode modelIdentCode="XYLEM" pmIssuer="00000" pmNumber="00001" pmVolume="00"/>
+        <language languageIsoCode="en" countryIsoCode="US"/>
+        <issueInfo issueNumber="001" inWork="00"/>
+      </pmIdent>
+      <pmAddressItems>
+        <issueDate year="2026" month="11" day="21"/>
+        <pmTitle>Hydraulic lift maintenance manual</pmTitle>
+      </pmAddressItems>
+    </pmAddress>
+    <pmStatus>
+      <security securityClassification="01"/>
+      <responsiblePartnerCompany enterpriseCode="00000"><enterpriseName>Placeholder</enterpriseName></responsiblePartnerCompany>
+      <applic><displayText><simplePara>All</simplePara></displayText></applic>
+      <brexDmRef><dmRef><dmRefIdent><dmCode modelIdentCode="S1000D" systemDiffCode="E" systemCode="04" subSystemCode="1" subSubSystemCode="0" assyCode="0301" disassyCode="00" disassyCodeVariant="A" infoCode="022" infoCodeVariant="A" itemLocationCode="D"/></dmRefIdent></dmRef></brexDmRef>
+      <qualityAssurance><unverified/></qualityAssurance>
+    </pmStatus>
+  </identAndStatusSection>
+  <content>
+    <pmEntry>
+      <pmEntryTitle>Hydraulic system</pmEntryTitle>
+      <dmRef><dmRefIdent><dmCode modelIdentCode="XYLEM" systemDiffCode="A" systemCode="29" subSystemCode="1" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="040" infoCodeVariant="A" itemLocationCode="A"/><issueInfo issueNumber="001" inWork="00"/><language languageIsoCode="en" countryIsoCode="US"/></dmRefIdent><dmRefAddressItems><dmTitle><techName>Hydraulic pump</techName><infoName>Description</infoName></dmTitle></dmRefAddressItems></dmRef>
+      <dmRef><dmRefIdent><dmCode modelIdentCode="XYLEM" systemDiffCode="A" systemCode="29" subSystemCode="1" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/><issueInfo issueNumber="001" inWork="00"/><language languageIsoCode="en" countryIsoCode="US"/></dmRefIdent><dmRefAddressItems><dmTitle><techName>Hydraulic pump</techName><infoName>Remove procedure</infoName></dmTitle></dmRefAddressItems></dmRef>
+    </pmEntry>
+  </content>
+</pm>

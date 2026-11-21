@@ -3,7 +3,7 @@
 use xylem_dom::{escape_attr, escape_text};
 
 use crate::error::S1000dError;
-use crate::ident::{Dmc, IssueDate, IssueInfo};
+use crate::ident::{Dmc, IssueDate, IssueInfo, Pmc};
 use crate::issue::{Issue, Markup, SchemaKind, available_kinds};
 
 /// Tunable parts of a new data module.
@@ -132,16 +132,134 @@ struct Parts<'a> {
     options: &'a NewModuleOptions,
 }
 
-fn text(s: &str) -> String {
+pub(crate) fn text(s: &str) -> String {
     let mut out = String::new();
     escape_text(s, &mut out);
     out
 }
 
-fn attr_value(s: &str) -> String {
+pub(crate) fn attr_value(s: &str) -> String {
     let mut out = String::new();
     escape_attr(s, &mut out);
     out
+}
+
+/// A modern `dmCode` element for `dmc`.
+pub(crate) fn dm_code_element(dmc: &Dmc) -> String {
+    Parts::dm_code_element(dmc)
+}
+
+/// A modern `pmCode` element for `pmc`.
+pub(crate) fn pm_code_element(pmc: &Pmc) -> String {
+    format!(
+        r#"<pmCode modelIdentCode="{}" pmIssuer="{}" pmNumber="{}" pmVolume="{}"/>"#,
+        attr_value(&pmc.model_ident_code),
+        attr_value(&pmc.pm_issuer),
+        attr_value(&pmc.pm_number),
+        attr_value(&pmc.pm_volume),
+    )
+}
+
+/// Creates a new publication module skeleton (issues 4.0 and later).
+///
+/// The module has one `pmEntry` holding a placeholder `dmRef`, because the
+/// schema requires every entry to reference something; replace it with real
+/// references (the project view's "Insert reference" builds them).
+pub fn new_publication_module(
+    issue: Issue,
+    pmc: &Pmc,
+    title: &str,
+    lang: (&str, &str),
+    options: &NewModuleOptions,
+) -> Result<String, S1000dError> {
+    if issue.is_legacy() {
+        return Err(S1000dError::Unsupported {
+            issue,
+            kind: SchemaKind::Pm,
+        });
+    }
+    let o = options;
+    // The 4.0 and 4.0.1 pm schemas have no BREX reference in pmStatus; it
+    // became mandatory in 4.1.
+    let brex_ref = o
+        .brex
+        .clone()
+        .or_else(|| default_brex_dmc(issue))
+        .filter(|_| issue >= Issue::V4_1)
+        .map(|b| {
+            format!(
+                "<brexDmRef><dmRef><dmRefIdent>{}</dmRefIdent></dmRef></brexDmRef>\n",
+                dm_code_element(&b)
+            )
+        })
+        .unwrap_or_default();
+    let enterprise = format!(
+        r#"<responsiblePartnerCompany enterpriseCode="{}"><enterpriseName>{}</enterpriseName></responsiblePartnerCompany>"#,
+        attr_value(&o.enterprise_code),
+        text(&o.enterprise_name)
+    );
+    let placeholder = Dmc {
+        model_ident_code: pmc.model_ident_code.clone(),
+        system_diff_code: "A".into(),
+        system_code: "00".into(),
+        sub_system_code: "0".into(),
+        sub_sub_system_code: "0".into(),
+        assy_code: "00".into(),
+        disassy_code: "00".into(),
+        disassy_code_variant: "A".into(),
+        info_code: "000".into(),
+        info_code_variant: "A".into(),
+        item_location_code: "A".into(),
+        learn_code: None,
+        learn_event_code: None,
+    };
+    let body = format!(
+        "<pm xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"http://www.s1000d.org/S1000D_{token}/xml_schema_flat/pm.xsd\">\n\
+         <identAndStatusSection>\n\
+         <pmAddress>\n\
+         <pmIdent>\n\
+         {code}\n\
+         <language languageIsoCode=\"{lang}\" countryIsoCode=\"{country}\"/>\n\
+         <issueInfo issueNumber=\"{issue_no}\" inWork=\"{in_work}\"/>\n\
+         </pmIdent>\n\
+         <pmAddressItems>\n\
+         <issueDate year=\"{y}\" month=\"{m}\" day=\"{d}\"/>\n\
+         <pmTitle>{title}</pmTitle>\n\
+         </pmAddressItems>\n\
+         </pmAddress>\n\
+         <pmStatus>\n\
+         <security securityClassification=\"{security}\"/>\n\
+         {enterprise}\n\
+         <applic><displayText><simplePara>{applic}</simplePara></displayText></applic>\n\
+         {brex_ref}\
+         <qualityAssurance><unverified/></qualityAssurance>\n\
+         </pmStatus>\n\
+         </identAndStatusSection>\n\
+         <content>\n\
+         <pmEntry>\n\
+         <pmEntryTitle>Placeholder entry</pmEntryTitle>\n\
+         <dmRef><dmRefIdent>{placeholder}</dmRefIdent></dmRef>\n\
+         </pmEntry>\n\
+         </content>\n\
+         </pm>",
+        token = issue.schema_token(),
+        code = pm_code_element(pmc),
+        lang = attr_value(lang.0),
+        country = attr_value(lang.1),
+        issue_no = attr_value(&o.issue_info.issue_number),
+        in_work = attr_value(&o.issue_info.in_work),
+        y = attr_value(&o.date.year),
+        m = attr_value(&o.date.month),
+        d = attr_value(&o.date.day),
+        title = text(title),
+        security = attr_value(&o.security_classification),
+        applic = text(&o.applic_text),
+        placeholder = dm_code_element(&placeholder),
+    );
+    Ok(format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}\n",
+        Parts::reindent(&body)
+    ))
 }
 
 impl Parts<'_> {

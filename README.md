@@ -23,8 +23,10 @@ What it does:
 - Exports a styled, standalone HTML page that looks like the Normal view
   (File › Export to HTML). File › Print preview opens it in your browser to
   print or save as PDF.
-- For S1000D: a new data module wizard, DMC and CSDB file naming, BREX
-  checking, dmRef navigation and a built-in stylesheet.
+- For S1000D: a wizard for new data modules and publication modules, DMC and
+  CSDB file naming, BREX checking, dmRef navigation, a built-in stylesheet, a
+  project view that lists a CSDB folder and checks the references between its
+  modules, and applicability filtering; see [docs/s1000d.md](docs/s1000d.md).
 - Converts XMAX customizations (`.ctm` folders and `.xac` archives) into Xylem
   doctype packages with `xylem-import`; see
   [docs/doctype-packages.md](docs/doctype-packages.md).
@@ -33,7 +35,7 @@ What it does:
 
 ## Build and run
 
-You need a Rust stable toolchain (1.85 or later).
+You need a Rust stable toolchain (1.88 or later).
 
 ```
 cargo run --release -p xylem-app -- samples/manual-sample.xml

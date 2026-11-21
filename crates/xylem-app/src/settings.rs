@@ -37,6 +37,8 @@ pub struct Settings {
     /// Folder and file pattern last used by Find in files.
     pub find_files_folder: Option<PathBuf>,
     pub find_files_pattern: String,
+    /// The folder last shown in the Project tab.
+    pub project_dir: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -64,6 +66,7 @@ impl Default for Settings {
             autosave_seconds: 60,
             find_files_folder: None,
             find_files_pattern: crate::find_files::DEFAULT_PATTERN.into(),
+            project_dir: None,
         }
     }
 }

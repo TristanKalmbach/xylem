@@ -93,6 +93,21 @@ pub enum Cmd {
     ExpandAll,
     Replace(NodeId, std::ops::Range<usize>, String),
     AddToDictionary(String),
+    /// Show the Project tab of the left panel.
+    ShowProject,
+    /// Choose the project (CSDB) folder and scan it.
+    ProjectFolder,
+    CheckReferences,
+    /// View > Applicability.
+    Applicability,
+}
+
+/// Which view the left side panel shows.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+enum LeftTab {
+    #[default]
+    Structure,
+    Project,
 }
 
 #[derive(Default)]
@@ -170,6 +185,9 @@ pub struct XylemApp {
     update: UpdateState,
     script: Option<crate::script::Script>,
     shot_path: Option<PathBuf>,
+    left_tab: LeftTab,
+    project: crate::project_ui::ProjectView,
+    applic_dialog: crate::s1000d_ui::ApplicDialog,
 }
 
 impl XylemApp {
@@ -241,6 +259,9 @@ impl XylemApp {
             update: UpdateState::Idle,
             script: crate::script::Script::from_env(),
             shot_path: None,
+            left_tab: LeftTab::default(),
+            project: Default::default(),
+            applic_dialog: Default::default(),
         };
         app.load_speller();
         let scripted = app.script.is_some() || app.screenshot.is_some();
@@ -679,6 +700,17 @@ impl XylemApp {
                 }
             }
             Cmd::CheckBrex => self.check_brex(),
+            Cmd::ShowProject => self.show_project(ctx),
+            Cmd::ProjectFolder => self.choose_project_folder(ctx),
+            Cmd::CheckReferences => {
+                self.show_project(ctx);
+                if self.project.project.is_some() && !self.project.is_scanning() {
+                    self.project.check_references();
+                } else {
+                    self.toast("Choose a project folder first.", false);
+                }
+            }
+            Cmd::Applicability => self.applic_dialog.open = true,
             Cmd::InsertElement(name) => {
                 self.with_editor(|ed, r| ed.insert_element(r, &name));
             }
@@ -1320,6 +1352,95 @@ impl XylemApp {
         }
     }
 
+    // ------------------------------------------------------------ project
+
+    /// Shows the Project tab, scanning the remembered folder the first time.
+    fn show_project(&mut self, ctx: &egui::Context) {
+        self.settings.show_structure = true;
+        self.left_tab = LeftTab::Project;
+        if self.project.project.is_none()
+            && !self.project.is_scanning()
+            && let Some(dir) = self.settings.project_dir.clone().filter(|d| d.is_dir())
+        {
+            self.project.start_scan(dir, ctx);
+        }
+    }
+
+    fn choose_project_folder(&mut self, ctx: &egui::Context) {
+        let start = self.settings.project_dir.clone().or_else(|| {
+            self.docs
+                .get(self.active)
+                .and_then(|d| d.dir().map(Path::to_path_buf))
+        });
+        let Some(dir) = crate::script::file_dialog(|| {
+            let mut d = rfd::FileDialog::new().set_title("Choose a project (CSDB) folder");
+            if let Some(s) = &start {
+                d = d.set_directory(s);
+            }
+            d.pick_folder()
+        }) else {
+            return;
+        };
+        self.settings.project_dir = Some(dir.clone());
+        self.settings.show_structure = true;
+        self.left_tab = LeftTab::Project;
+        self.project.start_scan(dir, ctx);
+    }
+
+    fn project_action(&mut self, ctx: &egui::Context, a: crate::project_ui::ProjectAction) {
+        use crate::project_ui::ProjectAction;
+        match a {
+            ProjectAction::ChooseFolder => self.choose_project_folder(ctx),
+            ProjectAction::Open(p) => self.open_path(p),
+            ProjectAction::OpenAt(p, reference) => {
+                let target = std::path::absolute(&p).unwrap_or(p.clone());
+                self.open_path(p);
+                if self.docs.get(self.active).map(|d| d.path.as_deref()) != Some(Some(&target)) {
+                    return;
+                }
+                // Leaving the source view applies its pending edits first;
+                // when the text does not parse, the view stays as it is.
+                if self.docs[self.active].view == View::Source {
+                    self.set_view(View::TagsOn);
+                }
+                let ds = &mut self.docs[self.active];
+                if ds.view == View::Source {
+                    return;
+                }
+                match reference.locate(&ds.editor.doc) {
+                    Some(n) => {
+                        ds.editor.select_element(n);
+                        ds.canvas.reveal(n);
+                        ds.canvas.request_focus = true;
+                    }
+                    None => self.toast(
+                        "The reference is no longer where the check found it; check again.",
+                        false,
+                    ),
+                }
+            }
+            ProjectAction::InsertRef(i) => {
+                let Some(m) = self
+                    .project
+                    .project
+                    .as_ref()
+                    .and_then(|p| p.modules.get(i))
+                    .cloned()
+                else {
+                    return;
+                };
+                let name = m.reference_element();
+                match self.insert_markup(name, &m.reference_xml()) {
+                    Some(Ok(())) => {
+                        self.toast(format!("Inserted a reference to {}.", m.code), false)
+                    }
+                    Some(Err(e)) => self.toast(format!("Cannot insert {name} here: {e}"), true),
+                    None => {}
+                }
+            }
+        }
+    }
+
     /// Puts the caret in the element with this `id` in the active document.
     fn reveal_id(&mut self, id: &str) {
         let Some(ds) = self.docs.get_mut(self.active) else {
@@ -1433,7 +1554,7 @@ impl XylemApp {
                 if ui.button("New…\tCtrl+N").clicked() {
                     cmds.push(Cmd::New);
                 }
-                if ui.button("New S1000D data module…").clicked() {
+                if ui.button("New S1000D module…").clicked() {
                     cmds.push(Cmd::NewS1000d);
                 }
                 if ui.button("Open…\tCtrl+O").clicked() {
@@ -1607,6 +1728,15 @@ impl XylemApp {
                 ui.checkbox(&mut self.settings.show_elements, "Elements");
                 ui.checkbox(&mut self.settings.show_attributes, "Attributes");
                 ui.checkbox(&mut self.settings.show_issues, "Issues");
+                if ui.button("Project").clicked() {
+                    cmds.push(Cmd::ShowProject);
+                }
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Applicability…"))
+                    .clicked()
+                {
+                    cmds.push(Cmd::Applicability);
+                }
                 ui.separator();
                 if ui.button("Zoom in\tCtrl++").clicked() {
                     cmds.push(Cmd::ZoomIn);
@@ -1657,7 +1787,7 @@ impl XylemApp {
                 }
                 ui.separator();
                 ui.label(RichText::new("S1000D").weak());
-                if ui.button("New data module…").clicked() {
+                if ui.button("New module…").clicked() {
                     cmds.push(Cmd::NewS1000d);
                 }
                 if ui
@@ -1677,6 +1807,12 @@ impl XylemApp {
                     .clicked()
                 {
                     cmds.push(Cmd::RenameToCsdb);
+                }
+                if ui.button("Project folder…").clicked() {
+                    cmds.push(Cmd::ProjectFolder);
+                }
+                if ui.button("Check references").clicked() {
+                    cmds.push(Cmd::CheckReferences);
                 }
             });
             ui.menu_button("Help", |ui| {
@@ -1831,7 +1967,7 @@ impl XylemApp {
             if ui.button("New document…").clicked() {
                 cmds.push(Cmd::New);
             }
-            if ui.button("New S1000D data module…").clicked() {
+            if ui.button("New S1000D module…").clicked() {
                 cmds.push(Cmd::NewS1000d);
             }
             ui.add_space(16.0);
@@ -2131,19 +2267,58 @@ impl XylemApp {
 
     fn panels(&mut self, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
         let mut acts = Vec::new();
-        if self.docs.is_empty() {
-            return;
-        }
-        if self.settings.show_structure {
-            egui::SidePanel::left("structure")
+        self.project.poll(ctx);
+        // The Project tab is useful before any document is open.
+        let project_tab = self.left_tab == LeftTab::Project;
+        if self.settings.show_structure && (project_tab || !self.docs.is_empty()) {
+            let mut project_acts = Vec::new();
+            let can_insert = match self.docs.get(self.active) {
+                Some(ds) if project_tab => crate::s1000d_ui::reference_insertable(ds),
+                _ => (false, false),
+            };
+            // Each tab keeps its own panel width: the module list needs room
+            // for a full data module code, the structure tree does not.
+            let (id, width, min_width) = if project_tab {
+                ("project", 340.0, 300.0)
+            } else {
+                ("structure", 230.0, 96.0)
+            };
+            egui::SidePanel::left(id)
                 .resizable(true)
-                .default_width(230.0)
+                .default_width(width)
+                .min_width(min_width)
                 .show(ctx, |ui| {
-                    ui.heading("Structure");
-                    if let Some(ds) = self.docs.get(self.active) {
-                        panels::structure(ui, ds, &mut self.panel, &mut acts);
+                    ui.horizontal(|ui| {
+                        let heading = |t: &str| RichText::new(t).heading();
+                        ui.selectable_value(
+                            &mut self.left_tab,
+                            LeftTab::Structure,
+                            heading("Structure"),
+                        );
+                        ui.selectable_value(
+                            &mut self.left_tab,
+                            LeftTab::Project,
+                            heading("Project"),
+                        );
+                    });
+                    match self.left_tab {
+                        LeftTab::Structure => {
+                            if let Some(ds) = self.docs.get(self.active) {
+                                panels::structure(ui, ds, &mut self.panel, &mut acts);
+                            }
+                        }
+                        LeftTab::Project => self.project.ui(ui, can_insert, &mut project_acts),
                     }
                 });
+            if self.left_tab == LeftTab::Project && !project_tab {
+                cmds.push(Cmd::ShowProject);
+            }
+            for a in project_acts {
+                self.project_action(ctx, a);
+            }
+        }
+        if self.docs.is_empty() {
+            return;
         }
         if self.settings.show_elements || self.settings.show_attributes {
             egui::SidePanel::right("inspector")
@@ -3631,6 +3806,10 @@ impl eframe::App for XylemApp {
         self.show_recovery(ctx);
         self.autosave_tick(ctx);
         self.dialogs(ctx, &mut cmds);
+        if self.applic_dialog.open {
+            let ds = self.docs.get_mut(self.active);
+            crate::s1000d_ui::applic_window(ctx, &mut self.applic_dialog, ds);
+        }
         self.show_toasts(ctx);
         for c in cmds {
             self.run(ctx, c);
