@@ -40,6 +40,11 @@ pub trait Rules {
     fn is_non_removable(&self, _doc: &Document, _el: NodeId) -> bool {
         false
     }
+    /// Protected non-element nodes (marker PIs, entity references). These
+    /// can't be deleted on their own, only as part of a removed ancestor.
+    fn is_protected(&self, _doc: &Document, _node: NodeId) -> bool {
+        false
+    }
     /// Element to create when pressing Enter at the end of `name`.
     fn followed_by(&self, _name: &str) -> Option<String> {
         None
@@ -67,6 +72,8 @@ impl Rules for NoRules {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditError {
     ReadOnly,
+    /// A protected marker (PI or entity reference) would be removed.
+    Protected,
     NotAllowed(String),
     Nothing,
     Parse(String),
@@ -76,6 +83,7 @@ impl std::fmt::Display for EditError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EditError::ReadOnly => write!(f, "This part of the document is read-only."),
+            EditError::Protected => write!(f, "This marker is protected; it can only be removed with its parent element."),
             EditError::NotAllowed(m) => write!(f, "{m}"),
             EditError::Nothing => write!(f, "Nothing to do here."),
             EditError::Parse(m) => write!(f, "Not well-formed XML: {m}"),
@@ -469,6 +477,9 @@ impl Editor {
         }
         for &d in &doomed {
             self.check_writable(rules, d)?;
+            if rules.is_protected(&self.doc, d) {
+                return Err(EditError::Protected);
+            }
             for n in self.doc.descendants(d) {
                 if self.doc.is_element(n)
                     && (rules.is_read_only(&self.doc, n) || rules.is_non_removable(&self.doc, n))
@@ -584,6 +595,9 @@ impl Editor {
                 }
                 Some(Token::Atom(n)) => {
                     ed.check_writable(rules, n)?;
+                    if rules.is_protected(&ed.doc, n) {
+                        return Err(EditError::Protected);
+                    }
                     let parent = ed.doc.parent(n).unwrap();
                     let idx = ed.doc.index_in_parent(n).unwrap();
                     ed.doc.detach(n);
@@ -649,6 +663,9 @@ impl Editor {
                 self.delete_backward_inner(rules)
             }
             Some(Token::Atom(n)) => {
+                if rules.is_protected(&self.doc, n) {
+                    return Err(EditError::Protected);
+                }
                 let parent = self.doc.parent(n).unwrap();
                 let idx = self.doc.index_in_parent(n).unwrap();
                 self.doc.detach(n);
@@ -678,6 +695,9 @@ impl Editor {
                 }
                 Some(Token::Atom(n)) => {
                     ed.check_writable(rules, n)?;
+                    if rules.is_protected(&ed.doc, n) {
+                        return Err(EditError::Protected);
+                    }
                     let parent = ed.doc.parent(n).unwrap();
                     let idx = ed.doc.index_in_parent(n).unwrap();
                     ed.doc.detach(n);

@@ -1587,6 +1587,10 @@ impl XylemApp {
                 }
                 CanvasAction::EditAttributes(_) => self.settings.show_attributes = true,
                 CanvasAction::EditNode(n) => {
+                    if rules.is_protected(&ds.editor.doc, n) {
+                        self.toasts.push(("This marker is protected and can't be edited.".into(), 0.0, true));
+                        continue;
+                    }
                     let (target, text) = match ds.editor.doc.kind(n) {
                         NodeKind::Pi { target, data } => (target.clone(), data.clone()),
                         NodeKind::Comment(t) | NodeKind::CData(t) => (String::new(), t.clone()),

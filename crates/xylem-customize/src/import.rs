@@ -116,6 +116,15 @@ pub fn import_xmax(source: &Path, out_dir: &Path) -> Result<ImportReport> {
     package.files = files;
     package.templates = templates;
     package.behaviour = behaviour;
+    // XMAX hosts typically locked down the special processing instructions
+    // that the stylesheets give a `$PROCINS[xm-pi-target=...]` rule, as well
+    // as entity references. Carry that over as protected markers.
+    let targets = styled_pi_targets(out_dir);
+    if !targets.is_empty() {
+        run.report.converted.push(format!("protected PI targets: {}", targets.join(", ")));
+    }
+    package.behaviour.protected_pis = targets;
+    package.behaviour.protect_entity_refs = true;
     package.pretty_print = pretty;
     package.descriptions = descriptions;
     package.toolbar = toolbar;
@@ -664,4 +673,34 @@ mod tests {
         assert!(latin1);
         assert_eq!(encode_text(&text, latin1), bytes);
     }
+}
+
+/// PI targets selected by `xm-pi-target="..."` in the copied stylesheets,
+/// excluding the `xm-replace_text` placeholder (which typing replaces).
+fn styled_pi_targets(dir: &Path) -> Vec<String> {
+    let mut found = std::collections::BTreeSet::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("css")) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let mut rest = text.as_str();
+        while let Some(i) = rest.find("xm-pi-target") {
+            rest = &rest[i + "xm-pi-target".len()..];
+            let value = rest.trim_start().strip_prefix('=').map(str::trim_start);
+            if let Some(v) = value {
+                if let Some(q) = v.chars().next().filter(|c| *c == '"' || *c == '\'') {
+                    if let Some(end) = v[1..].find(q) {
+                        let target = &v[1..1 + end];
+                        if !target.is_empty() && target != "xm-replace_text" {
+                            found.insert(target.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found.into_iter().collect()
 }

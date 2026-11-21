@@ -113,6 +113,14 @@ pub struct Behaviour {
     /// Elements the user may not delete.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub non_removable_elements: Vec<String>,
+    /// Processing-instruction targets that act as protected markers (for
+    /// example generated reference labels). They cannot be deleted or edited
+    /// in the editor, only removed together with their parent element.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protected_pis: Vec<String>,
+    /// Treat entity references (`&name;`) as protected in the same way.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub protect_entity_refs: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id_generation: Option<IdGeneration>,
     /// Assign IDs automatically on insertion (needs `id_generation`).

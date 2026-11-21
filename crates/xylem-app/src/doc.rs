@@ -395,6 +395,15 @@ impl Rules for DocRules<'_> {
             .any(|p| p == name)
     }
 
+    fn is_protected(&self, doc: &Document, node: NodeId) -> bool {
+        let b = &self.package.behaviour;
+        match doc.kind(node) {
+            xylem_dom::NodeKind::Pi { target, .. } => b.protected_pis.iter().any(|t| t == target),
+            xylem_dom::NodeKind::EntityRef(_) => b.protect_entity_refs,
+            _ => false,
+        }
+    }
+
     fn followed_by(&self, name: &str) -> Option<String> {
         self.package.behaviour.followed_by.get(name).cloned()
     }

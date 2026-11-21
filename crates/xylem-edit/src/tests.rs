@@ -334,3 +334,32 @@ fn read_only_elements_reject_edits() {
     e.insert_text(&Ro, "!").unwrap();
     assert_eq!(xml(&e), "<doc><locked>fixed</locked><p>free!</p></doc>");
 }
+
+#[test]
+fn protected_markers_survive_deletes_but_not_parent_removal() {
+    struct Prot;
+    impl Rules for Prot {
+        fn is_protected(&self, doc: &Document, n: NodeId) -> bool {
+            matches!(doc.kind(n), NodeKind::Pi { target, .. } if target == "Ref_Label")
+        }
+        fn is_block(&self, doc: &Document, el: NodeId) -> bool {
+            doc.name(el) == Some("p")
+        }
+    }
+    let src = "<doc><p>see <?Ref_Label Fig 1?> above</p><p>next</p></doc>";
+    let mut e = ed(src);
+    // Backspace right after the marker.
+    e.set_caret(text_pos(&e, " above", 0));
+    assert_eq!(e.delete_backward(&Prot), Err(EditError::Protected));
+    // Delete right before it.
+    e.set_caret(text_pos(&e, "see ", 4));
+    assert_eq!(e.delete_forward(&Prot), Err(EditError::Protected));
+    // A selection that covers it.
+    e.sel = Selection { anchor: text_pos(&e, "see", 1), focus: text_pos(&e, "above", 2) };
+    assert_eq!(e.delete_selection(&Prot), Err(EditError::Protected));
+    assert_eq!(xml(&e), src);
+    // Deleting the whole paragraph is allowed.
+    let p = e.doc.element_children(e.doc.document_element().unwrap()).next().unwrap();
+    e.delete_element(&Prot, p).unwrap();
+    assert_eq!(xml(&e), "<doc><p>next</p></doc>");
+}
