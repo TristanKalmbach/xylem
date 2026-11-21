@@ -123,7 +123,49 @@ impl Default for Sty {
     }
 }
 
+/// Fingerprint of everything in a style that affects layout.
+fn hash_sty(s: &Sty, h: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    std::mem::discriminant(&s.display).hash(h);
+    s.font_size.to_bits().hash(h);
+    (s.bold, s.italic, s.underline, s.line_through, s.monospace, s.serif, s.has_rule).hash(h);
+    s.color.map(|c| c.to_array()).hash(h);
+    s.background.map(|c| c.to_array()).hash(h);
+    s.background_inline.map(|c| c.to_array()).hash(h);
+    std::mem::discriminant(&s.text_align).hash(h);
+    std::mem::discriminant(&s.text_transform).hash(h);
+    std::mem::discriminant(&s.white_space).hash(h);
+    std::mem::discriminant(&s.vertical_align).hash(h);
+    for v in s.margin.iter().chain(&s.padding).chain(&s.border_width) {
+        v.to_bits().hash(h);
+    }
+    for c in &s.border_color {
+        c.map(|c| c.to_array()).hash(h);
+    }
+    s.line_height.map(f32::to_bits).hash(h);
+    s.text_indent.to_bits().hash(h);
+}
+
+/// Bottom-up subtree fingerprints: a node's value covers its own style,
+/// generated content and every descendant's. Indexed by `NodeId::index`.
+fn subtree_hashes(doc: &Document, node_hash: impl Fn(NodeId) -> u64) -> Vec<u64> {
+    use std::hash::{Hash, Hasher};
+    let order: Vec<NodeId> = doc.descendants(doc.root()).collect();
+    let mut out = vec![0u64; doc.node_count()];
+    for &n in order.iter().rev() {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        node_hash(n).hash(&mut h);
+        for &c in doc.children(n) {
+            out[c.index()].hash(&mut h);
+        }
+        out[n.index()] = h.finish();
+    }
+    out
+}
+
 pub trait StyleLookup {
+    /// Changes whenever the styling of `n` or anything inside it changes.
+    fn subtree_hash(&self, n: NodeId) -> u64;
     fn get(&self, n: NodeId) -> Sty;
     fn before(&self, n: NodeId) -> Option<(String, Sty)>;
     fn after(&self, n: NodeId) -> Option<(String, Sty)>;
@@ -136,6 +178,7 @@ pub struct CssStyles {
     before: std::collections::HashMap<NodeId, (String, Sty)>,
     after: std::collections::HashMap<NodeId, (String, Sty)>,
     markers: std::collections::HashMap<NodeId, String>,
+    subtree: Vec<u64>,
     fallback: Sty,
 }
 
@@ -271,17 +314,35 @@ impl CssStyles {
                 after.insert(n, (g.text.clone(), convert(&g.style)));
             }
         }
+        let subtree = subtree_hashes(doc, |n| {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            if let Some(Some(st)) = styles.get(n.index()) {
+                hash_sty(st, &mut h);
+            }
+            for g in [before.get(&n), after.get(&n)].into_iter().flatten() {
+                let g: &(String, Sty) = g;
+                g.0.hash(&mut h);
+                hash_sty(&g.1, &mut h);
+            }
+            markers.get(&n).hash(&mut h);
+            h.finish()
+        });
         Self {
             styles,
             before,
             after,
             markers,
+            subtree,
             fallback: Sty::default(),
         }
     }
 }
 
 impl StyleLookup for CssStyles {
+    fn subtree_hash(&self, n: NodeId) -> u64 {
+        self.subtree.get(n.index()).copied().unwrap_or(u64::MAX)
+    }
     fn get(&self, n: NodeId) -> Sty {
         self.styles
             .get(n.index())
@@ -303,6 +364,7 @@ impl StyleLookup for CssStyles {
 /// in mixed content which flow inline; nesting is shown by indentation.
 pub struct DefaultStyles {
     styles: Vec<Option<Sty>>,
+    subtree: Vec<u64>,
 }
 
 impl DefaultStyles {
@@ -363,11 +425,22 @@ impl DefaultStyles {
                 _ => {}
             }
         }
-        Self { styles }
+        let subtree = subtree_hashes(doc, |n| {
+            use std::hash::Hasher;
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            if let Some(Some(st)) = styles.get(n.index()) {
+                hash_sty(st, &mut h);
+            }
+            h.finish()
+        });
+        Self { styles, subtree }
     }
 }
 
 impl StyleLookup for DefaultStyles {
+    fn subtree_hash(&self, n: NodeId) -> u64 {
+        self.subtree.get(n.index()).copied().unwrap_or(u64::MAX)
+    }
     fn get(&self, n: NodeId) -> Sty {
         self.styles
             .get(n.index())

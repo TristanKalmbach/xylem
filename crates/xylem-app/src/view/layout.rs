@@ -56,13 +56,30 @@ pub struct Para {
     /// Galley origin (differs from `rect.min` for centred/right text).
     pub anchor: Pos2,
     pub galley: Arc<Galley>,
-    pub segs: Vec<Seg>,
+    /// Key of the galley in [`LayoutCache`], so reused paragraphs keep it alive.
+    galley_key: u64,
+    pub segs: Arc<[Seg]>,
     /// Caret stops between segments: (char index, position).
-    pub stops: Vec<(usize, Pos)>,
+    pub stops: Arc<[(usize, Pos)]>,
     #[allow(dead_code)]
     pub owner: NodeId,
 }
 
+impl Para {
+    fn shifted(&self, dy: f32) -> Para {
+        Para {
+            rect: self.rect.translate(Vec2::new(0.0, dy)),
+            anchor: self.anchor + Vec2::new(0.0, dy),
+            galley: self.galley.clone(),
+            galley_key: self.galley_key,
+            segs: self.segs.clone(),
+            stops: self.stops.clone(),
+            owner: self.owner,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum Decor {
     Fill(Rect, Color32),
     /// List marker text painted in the left margin, right-aligned at `pos`.
@@ -80,6 +97,7 @@ pub enum Decor {
     Grid(Rect, Color32),
 }
 
+#[derive(Clone)]
 pub struct ImageBox {
     pub rect: Rect,
     pub node: NodeId,
@@ -92,10 +110,10 @@ pub struct DocLayout {
     pub decor: Vec<Decor>,
     pub images: Vec<ImageBox>,
     pub size: Vec2,
-    /// Text node -> list of (para, seg) holding its characters.
-    text_index: HashMap<NodeId, Vec<(usize, usize)>>,
-    /// Element-gap positions -> (para, char).
-    gap_index: HashMap<Pos, (usize, usize)>,
+    /// For each node (by `NodeId::index`), the first paragraph that shows
+    /// its text or has a caret stop inside it; `u32::MAX` if none. A flat
+    /// array is much cheaper to rebuild than a hash map on every edit.
+    first_para: Vec<u32>,
     /// Element -> (para of start tag/first content, para of end).
     pub element_paras: HashMap<NodeId, (usize, usize)>,
 }
@@ -107,6 +125,27 @@ pub struct Loc {
     pub ch: usize,
 }
 
+impl Decor {
+    fn shifted(&self, dy: f32) -> Decor {
+        let d = Vec2::new(0.0, dy);
+        match self {
+            Decor::Fill(r, c) => Decor::Fill(r.translate(d), *c),
+            Decor::Marker { pos, text, font, color } => Decor::Marker {
+                pos: *pos + d,
+                text: text.clone(),
+                font: font.clone(),
+                color: *color,
+            },
+            Decor::Border { rect, widths, colors } => Decor::Border {
+                rect: rect.translate(d),
+                widths: *widths,
+                colors: *colors,
+            },
+            Decor::Grid(r, c) => Decor::Grid(r.translate(d), *c),
+        }
+    }
+}
+
 impl DocLayout {
     /// Maps a DOM position to a (para, char) location.
     pub fn locate(&self, doc: &Document, rules: &dyn Rules, p: Pos) -> Option<Loc> {
@@ -115,51 +154,67 @@ impl DocLayout {
         } else {
             p
         };
+        let first = *self.first_para.get(p.node.index())? as usize;
+        if first == u32::MAX as usize {
+            return self.element_paras.get(&p.node).map(|&(a, _)| Loc { para: a, ch: 0 });
+        }
         if doc.is_text(p.node) {
-            let entries = self.text_index.get(&p.node)?;
+            // A text node's characters sit in one paragraph, or a few
+            // consecutive ones when a block interrupts its inline parent.
             let mut best = None;
-            for &(pi, si) in entries {
-                let seg = &self.paras[pi].segs[si];
-                if let SegKind::Text { bytes, .. } = &seg.kind {
-                    let (first, last) = (bytes[0], *bytes.last().unwrap());
-                    if p.offset >= first && p.offset <= last {
+            for (pi, para) in self.paras.iter().enumerate().skip(first) {
+                let mut seen = false;
+                for seg in para.segs.iter() {
+                    let SegKind::Text { node, bytes } = &seg.kind else { continue };
+                    if *node != p.node {
+                        continue;
+                    }
+                    seen = true;
+                    let (lo, hi) = (bytes[0], *bytes.last().unwrap());
+                    if p.offset >= lo && p.offset <= hi {
                         // Position of the first displayed char at or after offset.
                         let i = bytes.partition_point(|&b| b < p.offset);
-                        return Some(Loc {
-                            para: pi,
-                            ch: seg.chars.start + i.min(seg.chars.len()),
-                        });
+                        return Some(Loc { para: pi, ch: seg.chars.start + i.min(seg.chars.len()) });
                     }
-                    if p.offset < first && best.is_none() {
-                        best = Some(Loc {
-                            para: pi,
-                            ch: seg.chars.start,
-                        });
+                    if p.offset < lo && best.is_none() {
+                        best = Some(Loc { para: pi, ch: seg.chars.start });
                     }
-                    if p.offset > last {
-                        best = Some(Loc {
-                            para: pi,
-                            ch: seg.chars.end,
-                        });
+                    if p.offset > hi {
+                        best = Some(Loc { para: pi, ch: seg.chars.end });
+                    }
+                }
+                let stop_here = para.stops.iter().any(|(_, s)| s.node == p.node);
+                if !seen && !stop_here && pi > first {
+                    break;
+                }
+                if !seen && stop_here && best.is_none() {
+                    // Collapsed (all-whitespace) text keeps only a stop.
+                    if let Some(&(ch, _)) = para.stops.iter().find(|(_, s)| s.node == p.node) {
+                        best = Some(Loc { para: pi, ch });
                     }
                 }
             }
             return best;
         }
-        if let Some(&(para, ch)) = self.gap_index.get(&p) {
-            return Some(Loc { para, ch });
-        }
-        // Fall back to the nearest known gap in the same element.
-        let kids = doc.children(p.node).len();
-        for d in 1..=kids.max(1) {
-            for off in [p.offset.checked_sub(d), Some(p.offset + d)]
-                .into_iter()
-                .flatten()
-            {
-                if let Some(&(para, ch)) = self.gap_index.get(&Pos::new(p.node, off)) {
-                    return Some(Loc { para, ch });
+        // Element gap: the exact stop, else the nearest stop in the element.
+        let last = self.element_paras.get(&p.node).map_or(self.paras.len() - 1, |&(_, b)| b);
+        let mut nearest: Option<(usize, Loc)> = None;
+        for (pi, para) in self.paras.iter().enumerate().take(last + 1).skip(first) {
+            for &(ch, s) in para.stops.iter() {
+                if s.node != p.node {
+                    continue;
+                }
+                if s.offset == p.offset {
+                    return Some(Loc { para: pi, ch });
+                }
+                let d = s.offset.abs_diff(p.offset);
+                if nearest.is_none_or(|(bd, _)| d < bd) {
+                    nearest = Some((d, Loc { para: pi, ch }));
                 }
             }
+        }
+        if let Some((_, loc)) = nearest {
+            return Some(loc);
         }
         self.element_paras
             .get(&p.node)
@@ -172,7 +227,7 @@ impl DocLayout {
         let c = loc.ch;
         // Inside or at the edge of a text segment.
         let mut text_hit = None;
-        for seg in &para.segs {
+        for seg in para.segs.iter() {
             if let SegKind::Text { node, bytes } = &seg.kind {
                 if c > seg.chars.start && c < seg.chars.end {
                     return Some(Pos::new(*node, bytes[c - seg.chars.start]));
@@ -191,7 +246,7 @@ impl DocLayout {
         }
         // Inside an atom/generated/tag segment: snap to the nearer stop.
         let mut best: Option<(usize, Pos)> = None;
-        for &(ch, p) in &para.stops {
+        for &(ch, p) in para.stops.iter() {
             let d = ch.abs_diff(c);
             if best.is_none_or(|(bd, _)| d < bd) {
                 best = Some((d, p));
@@ -305,36 +360,71 @@ pub struct LayoutParams<'a> {
     pub image_size: &'a dyn Fn(NodeId) -> Option<(String, Vec2)>,
 }
 
-/// Persistent galley cache (egui only keeps galleys used every frame).
+/// What the layout keeps between runs: shaped galleys (egui only keeps
+/// galleys that are used every frame) and the output of whole blocks, so that
+/// typing in one paragraph doesn't re-lay-out the rest of the document.
 #[derive(Default)]
-pub struct GalleyCache {
-    map: HashMap<u64, Arc<Galley>>,
+pub struct LayoutCache {
+    galleys: HashMap<u64, Arc<Galley>>,
     used: HashSet<u64>,
-    pub stats: (u32, u32, std::time::Duration, std::time::Duration),
+    blocks: HashMap<NodeId, CachedBlock>,
+    /// Hash of the settings every cached block depends on (view, zoom, ...).
+    context: u64,
+    pub stats: LayoutStats,
 }
 
-impl GalleyCache {
-    fn get(&mut self, ctx: &egui::Context, job: LayoutJob) -> Arc<Galley> {
-        let t = std::time::Instant::now();
+#[derive(Default, Debug, Clone, Copy)]
+pub struct LayoutStats {
+    pub galley_hits: u32,
+    pub galley_misses: u32,
+    pub blocks_reused: u32,
+    pub blocks_laid_out: u32,
+}
+
+/// The laid-out output of one block element. It stays valid while the
+/// element's subtree, its styles and its box (x, width) are unchanged; the
+/// vertical position and the element's index among its siblings may move.
+struct CachedBlock {
+    stamp: u64,
+    style: u64,
+    x: f32,
+    width: f32,
+    /// The block's index in its parent when it was laid out.
+    index: u32,
+    y0: f32,
+    y1: f32,
+    paras: Vec<Para>,
+    decor: Vec<Decor>,
+    images: Vec<ImageBox>,
+    /// `element_paras` entries for the block and its descendants, with
+    /// paragraph indices relative to the block's first paragraph.
+    elements: Vec<(NodeId, (usize, usize))>,
+}
+
+impl LayoutCache {
+    fn galley(&mut self, ctx: &egui::Context, job: LayoutJob) -> (Arc<Galley>, u64) {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         job.hash(&mut h);
         let k = h.finish();
         self.used.insert(k);
-        self.stats.2 += t.elapsed();
-        if let Some(g) = self.map.get(&k) {
-            self.stats.0 += 1;
-            return g.clone();
+        if let Some(g) = self.galleys.get(&k) {
+            self.stats.galley_hits += 1;
+            return (g.clone(), k);
         }
-        self.stats.1 += 1;
-        let t = std::time::Instant::now();
+        self.stats.galley_misses += 1;
         let g = ctx.fonts_mut(|f| f.layout_job(job));
-        self.stats.3 += t.elapsed();
-        self.map.insert(k, g.clone());
-        g
+        self.galleys.insert(k, g.clone());
+        (g, k)
     }
-    fn sweep(&mut self) {
+
+    fn sweep(&mut self, doc: &Document) {
         let used = std::mem::take(&mut self.used);
-        self.map.retain(|k, _| used.contains(k));
+        self.galleys.retain(|k, _| used.contains(k));
+        // Forget blocks that are no longer part of the document.
+        let attached = |n: NodeId| {
+            doc.contains(n) && (n == doc.root() || doc.ancestors(n).any(|a| a == doc.root()))
+        };
+        self.blocks.retain(|&n, _| attached(n));
     }
 }
 
@@ -408,7 +498,7 @@ pub struct Layouter<'a> {
     styles: &'a dyn StyleLookup,
     rules: &'a dyn Rules,
     params: LayoutParams<'a>,
-    cache: &'a mut GalleyCache,
+    cache: &'a mut LayoutCache,
     out: DocLayout,
     cur: Option<ParaBuilder>,
     /// `index_in_parent` for every node (avoids O(siblings) scans).
@@ -425,9 +515,19 @@ impl<'a> Layouter<'a> {
         styles: &'a dyn StyleLookup,
         rules: &'a dyn Rules,
         params: LayoutParams<'a>,
-        cache: &'a mut GalleyCache,
+        cache: &'a mut LayoutCache,
     ) -> DocLayout {
         let width = params.width;
+        let context = {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (params.view, params.zoom.to_bits(), params.dark).hash(&mut h);
+            h.finish()
+        };
+        if cache.context != context {
+            cache.blocks.clear();
+            cache.context = context;
+        }
+        cache.stats = LayoutStats::default();
         let mut index = vec![0u32; doc.node_count()];
         for n in doc.descendants(doc.root()) {
             for (i, &c) in doc.children(n).iter().enumerate() {
@@ -462,15 +562,8 @@ impl<'a> Layouter<'a> {
             }
         }
         l.flush(false);
-        log::debug!(
-            "galleys: {} hits, {} misses, hash {:?}, shape {:?}",
-            l.cache.stats.0,
-            l.cache.stats.1,
-            l.cache.stats.2,
-            l.cache.stats.3
-        );
-        l.cache.stats = Default::default();
-        l.cache.sweep();
+        log::debug!("layout cache: {:?}", l.cache.stats);
+        l.cache.sweep(doc);
         l.out.size = Vec2::new(width, l.y + 40.0);
         l.out
     }
@@ -588,7 +681,7 @@ impl<'a> Layouter<'a> {
             };
             pb.job.append("", 0.0, f);
         }
-        let galley = self.cache.get(self.ctx, pb.job);
+        let (galley, galley_key) = self.cache.galley(self.ctx, pb.job);
         let x = match pb.align {
             TextAlign::Center => self.x + pb.indent + width / 2.0,
             TextAlign::Right => self.x + pb.indent + width,
@@ -602,24 +695,135 @@ impl<'a> Layouter<'a> {
         if rect.width() < 2.0 {
             rect.max.x = rect.min.x + 2.0;
         }
-        let pi = self.out.paras.len();
-        for (si, s) in pb.segs.iter().enumerate() {
-            if let SegKind::Text { node, .. } = &s.kind {
-                self.out.text_index.entry(*node).or_default().push((pi, si));
-            }
-        }
-        for &(ch, p) in &pb.stops {
-            self.out.gap_index.entry(p).or_insert((pi, ch));
-        }
         self.y += rect.height().max(self.z(14.0));
-        self.out.paras.push(Para {
+        let para = Para {
             rect,
             anchor,
             galley,
-            segs: pb.segs,
-            stops: pb.stops,
+            galley_key,
+            segs: pb.segs.into(),
+            stops: pb.stops.into(),
             owner: pb.owner,
-        });
+        };
+        self.push_para(para);
+    }
+
+    /// Appends a paragraph and indexes its text segments and caret stops.
+    fn push_para(&mut self, para: Para) {
+        let pi = self.out.paras.len() as u32;
+        let first = &mut self.out.first_para;
+        let mut note = |n: NodeId| {
+            let i = n.index();
+            if i >= first.len() {
+                first.resize(i + 1, u32::MAX);
+            }
+            if first[i] == u32::MAX {
+                first[i] = pi;
+            }
+        };
+        for s in para.segs.iter() {
+            if let SegKind::Text { node, .. } = &s.kind {
+                note(*node);
+            }
+        }
+        for &(_, p) in para.stops.iter() {
+            note(p.node);
+        }
+        self.out.paras.push(para);
+    }
+
+    /// Lays out a block, reusing the previous layout when nothing that affects
+    /// it has changed. A block whose first line is shared with an ancestor's
+    /// pending start tags is always laid out fresh.
+    fn block(&mut self, el: NodeId) {
+        let cacheable = self.cur.is_none();
+        let stamp = self.doc.subtree_stamp(el);
+        let style = self.styles.subtree_hash(el);
+        let index = self.index[el.index()];
+        if cacheable {
+            if let Some(cb) = self.cache.blocks.get(&el) {
+                if cb.stamp == stamp && cb.style == style && cb.x == self.x && cb.width == self.width {
+                    self.reuse_block(el, index);
+                    return;
+                }
+            }
+        }
+        self.cache.stats.blocks_laid_out += 1;
+        let (p0, d0, i0, y0) = (self.out.paras.len(), self.out.decor.len(), self.out.images.len(), self.y);
+        let (x, width) = (self.x, self.width);
+        self.block_inner(el);
+        if cacheable && self.cur.is_none() {
+            let elements = self
+                .doc
+                .descendants(el)
+                .filter_map(|n| {
+                    let &(a, b) = self.out.element_paras.get(&n)?;
+                    Some((n, (a.saturating_sub(p0), b.saturating_sub(p0))))
+                })
+                .collect();
+            let cb = CachedBlock {
+                stamp,
+                style,
+                x,
+                width,
+                index,
+                y0,
+                y1: self.y,
+                paras: self.out.paras[p0..].iter().map(|p| p.shifted(0.0)).collect(),
+                decor: self.out.decor[d0..].to_vec(),
+                images: self.out.images[i0..].to_vec(),
+                elements,
+            };
+            self.cache.blocks.insert(el, cb);
+        }
+    }
+
+    fn reuse_block(&mut self, el: NodeId, index: u32) {
+        self.cache.stats.blocks_reused += 1;
+        let mut cb = self.cache.blocks.remove(&el).expect("cached block");
+        let dy = self.y - cb.y0;
+        let base = self.out.paras.len();
+        // Caret stops just outside the block refer to its index in the parent;
+        // shift them when siblings were inserted or removed before it.
+        let parent = self.doc.parent(el);
+        let shift = index as i64 - cb.index as i64;
+        let old = cb.index as usize;
+        for p in &cb.paras {
+            let mut q = p.shifted(dy);
+            if shift != 0 && q.stops.iter().any(|(_, s)| Some(s.node) == parent) {
+                let stops: Vec<(usize, Pos)> = q
+                    .stops
+                    .iter()
+                    .map(|&(c, s)| {
+                        if Some(s.node) == parent && (s.offset == old || s.offset == old + 1) {
+                            (c, Pos::new(s.node, (s.offset as i64 + shift) as usize))
+                        } else {
+                            (c, s)
+                        }
+                    })
+                    .collect();
+                q.stops = stops.into();
+            }
+            self.cache.used.insert(q.galley_key);
+            self.push_para(q);
+        }
+        let d = Vec2::new(0.0, dy);
+        self.out.decor.extend(cb.decor.iter().map(|x| x.shifted(dy)));
+        self.out.images.extend(cb.images.iter().map(|i| ImageBox { rect: i.rect.translate(d), ..i.clone() }));
+        for &(n, (a, b)) in &cb.elements {
+            self.out.element_paras.insert(n, (a + base, b + base));
+        }
+        self.y = cb.y1 + dy;
+        // Keep the entry in step with where the block now sits.
+        if dy != 0.0 || shift != 0 {
+            cb.paras = self.out.paras[base..].iter().map(|p| p.shifted(0.0)).collect();
+            cb.decor = cb.decor.iter().map(|x| x.shifted(dy)).collect();
+            cb.images = cb.images.iter().map(|i| ImageBox { rect: i.rect.translate(d), ..i.clone() }).collect();
+            cb.y0 += dy;
+            cb.y1 += dy;
+            cb.index = index;
+        }
+        self.cache.blocks.insert(el, cb);
     }
 
     /// Ends the current line before a nested block — unless it holds only
@@ -882,7 +1086,7 @@ impl<'a> Layouter<'a> {
     }
 
     /// Lays out a block-level element.
-    fn block(&mut self, el: NodeId) {
+    fn block_inner(&mut self, el: NodeId) {
         let s = self.styles.get(el);
         match s.display {
             Display::None => return,

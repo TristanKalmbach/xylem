@@ -1544,6 +1544,15 @@ impl XylemApp {
             image_size: &image_size,
             image_texture: &image_texture,
             read_only: ds.read_only,
+            doc_key: {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                match &ds.path {
+                    Some(p) => p.hash(&mut h),
+                    None => ds.id.hash(&mut h),
+                }
+                h.finish()
+            },
         };
         let mut actions = Vec::new();
         ds.canvas.show(ui, &mut ds.editor, &mut cx, &mut actions);
@@ -2601,6 +2610,11 @@ impl eframe::App for XylemApp {
         if let Some(s) = &mut self.script {
             s.feed(raw);
         }
+    }
+
+    fn persist_egui_memory(&self) -> bool {
+        // Scripted test runs must start from a clean UI state every time.
+        self.script.is_none() && self.screenshot.is_none()
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

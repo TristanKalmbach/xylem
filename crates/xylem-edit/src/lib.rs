@@ -393,6 +393,11 @@ impl Editor {
             ));
         }
         if !rules.can_contain_text(&self.doc, parent) {
+            // Between two blocks: type into the following element (or the
+            // preceding one) when it takes text, as a word processor would.
+            if let Some(target) = self.text_target_near(rules, parent, p.offset) {
+                return self.insert_text_at(rules, target, text);
+            }
             let name = self.doc.name(parent).unwrap_or("?");
             return Err(EditError::NotAllowed(format!(
                 "Text is not allowed directly in <{name}>."
@@ -411,6 +416,27 @@ impl Editor {
         let t = self.doc.create_text(text);
         self.doc.insert_child(parent, p.offset, t);
         Ok(Pos::new(t, text.len()))
+    }
+
+    /// A text position just inside the element after (or before) the gap
+    /// `parent[index]`, if that element can hold text.
+    fn text_target_near(&self, rules: &dyn Rules, parent: NodeId, index: usize) -> Option<Pos> {
+        let kids = self.doc.children(parent);
+        let after = kids[index.min(kids.len())..].iter().copied().find(|&c| !is_ignorable(&self.doc, rules, c));
+        if let Some(e) = after.filter(|&e| self.doc.is_element(e)) {
+            let p = first_editable(&self.doc, rules, e);
+            if p.node != parent && (self.doc.is_text(p.node) || rules.can_contain_text(&self.doc, p.node)) {
+                return Some(p);
+            }
+        }
+        let before = kids[..index.min(kids.len())].iter().rev().copied().find(|&c| !is_ignorable(&self.doc, rules, c));
+        if let Some(e) = before.filter(|&e| self.doc.is_element(e)) {
+            let p = end_of(&self.doc, rules, e);
+            if p.node != parent && (self.doc.is_text(p.node) || rules.can_contain_text(&self.doc, p.node)) {
+                return Some(p);
+            }
+        }
+        None
     }
 
     // ----------------------------------------------------------- deletion

@@ -2,7 +2,7 @@
 //! and keyboard/clipboard handling for the tags-on and normal views.
 
 use super::layout::{
-    Decor, DocLayout, GalleyCache, LayoutParams, Layouter, Loc, SegKind, ViewMode, tag_color,
+    Decor, DocLayout, LayoutCache, LayoutParams, Layouter, Loc, SegKind, ViewMode, tag_color,
 };
 use super::style::StyleLookup;
 use egui::{
@@ -39,7 +39,7 @@ pub struct XmlClipboard {
 pub struct Canvas {
     pub layout: DocLayout,
     key: Option<(u64, u64, u32, ViewMode, u32, bool)>,
-    cache: GalleyCache,
+    cache: LayoutCache,
     /// Desired x for vertical caret movement.
     goal_x: Option<f32>,
     pub scroll_to_caret: bool,
@@ -54,6 +54,10 @@ pub struct Canvas {
     pub flagged: Vec<NodeId>,
     pub misspelled: Vec<(NodeId, std::ops::Range<usize>)>,
     misspelled_rev: Option<u64>,
+    /// Where the caret was last placed on screen. A position between two
+    /// blocks shows up twice (end of one line, start of the next); this keeps
+    /// the caret on the line the user put it on.
+    caret_hint: Option<(Pos, Loc)>,
 }
 
 pub struct CanvasCtx<'a> {
@@ -68,6 +72,8 @@ pub struct CanvasCtx<'a> {
     pub image_size: &'a dyn Fn(NodeId) -> Option<(String, egui::Vec2)>,
     pub image_texture: &'a dyn Fn(&egui::Context, NodeId) -> Option<egui::TextureHandle>,
     pub read_only: bool,
+    /// Identifies the document for per-document UI state (scroll position).
+    pub doc_key: u64,
 }
 
 impl Canvas {
@@ -107,6 +113,7 @@ impl Canvas {
             image_size: cx.image_size,
         };
         let t = std::time::Instant::now();
+        self.caret_hint = None;
         self.layout = Layouter::run(
             ui.ctx(),
             &ed.doc,
@@ -124,6 +131,11 @@ impl Canvas {
 
     /// Location of the caret (focus) in the layout.
     pub fn caret_loc(&self, ed: &Editor, rules: &dyn Rules) -> Option<Loc> {
+        if let Some((p, loc)) = self.caret_hint {
+            if p == ed.sel.focus && loc.para < self.layout.paras.len() {
+                return Some(loc);
+            }
+        }
         self.layout.locate(&ed.doc, rules, ed.sel.focus)
     }
 
@@ -138,7 +150,7 @@ impl Canvas {
         self.ensure_layout(ui, ed, cx, width);
         let mut scroll = egui::ScrollArea::both()
             .auto_shrink([false, false])
-            .id_salt("doc-canvas");
+            .id_salt(("doc-canvas", cx.doc_key));
         if let Some(y) = self.scroll_to_y.take() {
             scroll = scroll.vertical_scroll_offset((y - 60.0).max(0.0));
         }
@@ -299,6 +311,7 @@ impl Canvas {
                         } else {
                             ed.set_caret(p);
                         }
+                        self.caret_hint = Some((p, loc));
                         self.drag_anchor = Some(ed.sel.anchor);
                     }
                 }
@@ -474,7 +487,7 @@ impl Canvas {
                 moved(self, ed, p, false, actions);
             }
             Key::ArrowUp | Key::ArrowDown | Key::PageUp | Key::PageDown => {
-                let Some(loc) = self.layout.locate(doc, rules, ed.sel.focus) else {
+                let Some(loc) = self.caret_loc(ed, rules) else {
                     return;
                 };
                 let r = self.layout.caret_rect(loc);
@@ -491,6 +504,7 @@ impl Canvas {
                     && let Some(p) = self.layout.position_at(nl)
                 {
                     moved(self, ed, p, true, actions);
+                    self.caret_hint = Some((p, nl));
                 }
             }
             Key::Home | Key::End => {
@@ -506,7 +520,7 @@ impl Canvas {
                     }
                     return;
                 }
-                let Some(loc) = self.layout.locate(doc, rules, ed.sel.focus) else {
+                let Some(loc) = self.caret_loc(ed, rules) else {
                     return;
                 };
                 let para = &self.layout.paras[loc.para];
@@ -514,9 +528,30 @@ impl Canvas {
                 for row in &para.galley.rows {
                     let end = start + row.char_count_excluding_newline();
                     if loc.ch >= start && loc.ch <= end {
-                        let ch = if key == Key::Home { start } else { end };
-                        if let Some(p) = self.layout.position_at(Loc { para: loc.para, ch }) {
+                        // Stop at the first/last text on the row rather than
+                        // beyond leading start-tag or trailing end-tag chips.
+                        let is_chrome = |c: usize| {
+                            para.segs.iter().any(|sg| {
+                                sg.chars.contains(&c) && matches!(sg.kind, SegKind::StartTag(_) | SegKind::EndTag(_) | SegKind::EmptyTag(_) | SegKind::Generated(_))
+                            })
+                        };
+                        let ch = if key == Key::Home {
+                            let mut c = start;
+                            while c < end && is_chrome(c) {
+                                c += 1;
+                            }
+                            if c == end { start } else { c }
+                        } else {
+                            let mut c = end;
+                            while c > start && is_chrome(c - 1) {
+                                c -= 1;
+                            }
+                            if c == start { end } else { c }
+                        };
+                        let target = Loc { para: loc.para, ch };
+                        if let Some(p) = self.layout.position_at(target) {
                             moved(self, ed, p, false, actions);
+                            self.caret_hint = Some((p, target));
                         }
                         return;
                     }
@@ -682,7 +717,7 @@ impl Canvas {
             if !p.rect.intersects(clip) {
                 continue;
             }
-            for seg in &p.segs {
+            for seg in p.segs.iter() {
                 let (el, kind) = match seg.kind {
                     SegKind::StartTag(e) => (e, 0),
                     SegKind::EndTag(e) => (e, 1),
@@ -734,7 +769,7 @@ impl Canvas {
         }
         // Caret.
         if self.has_focus
-            && let Some(loc) = self.layout.locate(&ed.doc, cx.rules, ed.sel.focus)
+            && let Some(loc) = self.caret_loc(ed, cx.rules)
         {
             let r = self.layout.caret_rect(loc).translate(off);
             let t = ui.input(|i| i.time);

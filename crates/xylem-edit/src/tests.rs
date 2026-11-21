@@ -185,9 +185,12 @@ fn insert_element_and_text_rules() {
         .element_children(e.doc.document_element().unwrap())
         .next()
         .unwrap();
+    // Typing between blocks of element-only content goes into the neighbour.
     e.set_caret(Pos::new(sec, 1));
-    assert!(e.insert_text(&TestRules, "nope").is_err());
-    assert_eq!(xml(&e), "<doc><section><p>x</p></section></doc>");
+    e.insert_text(&TestRules, "!").unwrap();
+    assert_eq!(xml(&e), "<doc><section><p>x!</p></section></doc>");
+    e.undo();
+    e.set_caret(Pos::new(sec, 1));
     e.insert_element(&TestRules, "p").unwrap();
     e.insert_text(&TestRules, "y").unwrap();
     assert_eq!(xml(&e), "<doc><section><p>x</p><p>y</p></section></doc>");
@@ -303,11 +306,12 @@ fn journal_undo_redo_is_exact() {
 
 #[test]
 fn failed_edit_rolls_back_without_snapshot() {
-    let mut e = ed("<doc><section><p>x</p></section></doc>");
+    // Nowhere nearby can hold text, so typing fails and nothing changes.
+    let mut e = ed("<doc><section><list/></section></doc>");
     let sec = e.doc.element_children(e.doc.document_element().unwrap()).next().unwrap();
     e.set_caret(Pos::new(sec, 0));
     assert!(e.insert_text(&TestRules, "bad").is_err());
-    assert_eq!(xml(&e), "<doc><section><p>x</p></section></doc>");
+    assert_eq!(xml(&e), "<doc><section><list/></section></doc>");
     assert!(!e.can_undo());
     assert!(!e.is_dirty());
 }

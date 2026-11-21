@@ -128,6 +128,9 @@ pub struct Document {
     structure_revision: u64,
     /// Active change journal (see [`Document::begin_journal`]).
     journal: Option<Vec<Op>>,
+    /// Per node: the revision at which the node or anything inside it last
+    /// changed. Views use this to reuse work for untouched subtrees.
+    stamps: Vec<u64>,
 }
 
 /// One recorded primitive change, used to revert edits without snapshots.
@@ -163,6 +166,7 @@ impl Document {
             revision: 0,
             structure_revision: 0,
             journal: None,
+            stamps: vec![0],
         }
     }
 
@@ -180,6 +184,22 @@ impl Document {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// The revision at which `id` or any of its descendants last changed.
+    pub fn subtree_stamp(&self, id: NodeId) -> u64 {
+        self.stamps.get(id.index()).copied().unwrap_or(u64::MAX)
+    }
+
+    /// Records a change at `id`: it and all its ancestors get the current
+    /// revision as their stamp.
+    fn mark_changed(&mut self, id: NodeId) {
+        let rev = self.revision;
+        let mut cur = Some(id);
+        while let Some(n) = cur {
+            self.stamps[n.index()] = rev;
+            cur = self.nodes[n.index()].parent;
+        }
     }
 
     /// Changes only when structure, names or attributes change.
@@ -392,6 +412,7 @@ impl Document {
 
     fn alloc(&mut self, kind: NodeKind) -> NodeId {
         let id = NodeId(self.nodes.len() as u32);
+        self.stamps.push(self.revision);
         self.nodes.push(Node {
             kind,
             parent: None,
@@ -462,6 +483,7 @@ impl Document {
                     n.raw = raw.clone();
                     n.raw_end = raw_end.clone();
                     self.touch();
+                    self.mark_changed(*node);
                 }
             }
         }
@@ -477,6 +499,7 @@ impl Document {
         self.node_mut(child).parent = Some(parent);
         self.record(Op::Inserted { node: child });
         self.touch();
+        self.mark_changed(parent);
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) {
@@ -492,6 +515,7 @@ impl Document {
             self.node_mut(id).parent = None;
             self.record(Op::Detached { node: id, parent: p, index });
             self.touch();
+            self.mark_changed(p);
         }
     }
 
@@ -542,6 +566,7 @@ impl Document {
         } else {
             self.touch();
         }
+        self.mark_changed(id);
     }
 
     pub fn rename(&mut self, id: NodeId, name: impl Into<String>) {
@@ -553,6 +578,7 @@ impl Document {
             n.raw_end = None;
         }
         self.touch();
+        self.mark_changed(id);
     }
 
     pub fn set_attr(&mut self, id: NodeId, name: &str, value: impl Into<String>) {
@@ -575,6 +601,7 @@ impl Document {
             n.raw = None;
         }
         self.touch();
+        self.mark_changed(id);
     }
 
     pub fn remove_attr(&mut self, id: NodeId, name: &str) {
@@ -591,6 +618,7 @@ impl Document {
             }
         }
         self.touch();
+        self.mark_changed(id);
     }
 
     /// Merges adjacent text nodes and drops empty ones among `parent`'s children.
