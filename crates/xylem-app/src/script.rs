@@ -1,10 +1,23 @@
 //! Scripted input for end-to-end testing (`XYLEM_SCRIPT`).
 //!
-//! Steps are separated by `;;`:
-//! `wait N` · `type TEXT` · `paste TEXT` · `key NAME [ctrl] [shift] [alt]` · `click X Y` ·
-//! `dblclick X Y` · `rclick X Y` · `hover X Y` · `shot PATH` · `drop FILE` · `save PATH` (writes the active
-//! document's XML) · `pick PATH` (the answer the next file dialog gives; `pick -` cancels it) ·
-//! `quit`.
+//! Steps are separated by `;;`. Prefer the steps that find their target by
+//! name or text, so a script keeps working when the layout changes:
+//!
+//! * `cmd NAME [ARG]`: run an app command (`cmd SaveAs`, `cmd View normal`,
+//!   `cmd InsertElement para`; see `Cmd::from_script`).
+//! * `caret TEXT`, `caretend TEXT`, `select TEXT`: put the caret before or
+//!   after, or select, the first occurrence of TEXT in the document.
+//! * `clickat DX DY TEXT` (also `dblclickat`, `rclickat`, `ctrlclickat`):
+//!   click DX, DY points from where the caret sits before TEXT.
+//! * `clickui LABEL` (also `dblclickui`, `rclickui`, `ctrlclickui`): click a
+//!   widget by its label or tooltip; the last one drawn wins.
+//! * `pick PATH`: the answer the next file dialog gives (`pick -` cancels).
+//!   Scripted runs never show a real file dialog.
+//! * `type TEXT`, `paste TEXT`, `key NAME [ctrl] [shift] [alt]`.
+//! * `wait N` (frames), `shot PATH`, `save PATH` (the active document's
+//!   XML), `drop FILE`, `crash` (exit at once, as a crash would), `quit`.
+//! * Coordinates, for when nothing else will do: `click X Y`, `dblclick`,
+//!   `rclick`, `ctrlclick`, `hover`.
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput};
 use std::collections::VecDeque;
@@ -15,9 +28,16 @@ use std::sync::Mutex;
 static PICKS: Mutex<VecDeque<Option<PathBuf>>> = Mutex::new(VecDeque::new());
 
 /// Shows a file dialog, unless a script has queued the answer.
+/// In a scripted run a native dialog is never shown: with nothing queued
+/// the dialog counts as cancelled, so a test can't block on a window that
+/// would also pop up in front of whoever is using the machine.
 pub fn file_dialog(show: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
     if let Some(answer) = PICKS.lock().ok().and_then(|mut q| q.pop_front()) {
         return answer;
+    }
+    if ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+        log::warn!("script: a file dialog opened with no `pick` queued; treated as cancelled");
+        return None;
     }
     show()
 }
@@ -35,6 +55,7 @@ pub enum Step {
     Save(PathBuf),
     Drop(PathBuf),
     Quit,
+    Crash,
     /// Runs an app command by name (`cmd SaveAs`, `cmd InsertElement para`).
     Command(String, String),
     /// Puts the caret at, or selects, the first occurrence of some text.
@@ -205,6 +226,9 @@ impl Script {
                 "save" => Step::Save(PathBuf::from(rest.trim())),
                 "drop" => Step::Drop(PathBuf::from(rest.trim())),
                 "quit" => Step::Quit,
+                // Ends the process on the spot, as a crash would: no save
+                // prompt, no settings written (crash-recovery tests).
+                "crash" => Step::Crash,
                 "pick" => {
                     // Queued now and consumed in order by whatever dialogs open.
                     let answer = (rest.trim() != "-").then(|| PathBuf::from(rest.trim()));
@@ -344,6 +368,7 @@ impl Script {
                 ..Default::default()
             }),
             Step::Quit => self.quit = true,
+            Step::Crash => std::process::exit(3),
             Step::Command(name, arg) => self.pending_cmds.push((name, arg)),
             Step::Caret(text, at) => self.pending_caret = Some((text, at)),
             Step::ClickAnchor(offset, kind) => match self.anchor {
@@ -353,11 +378,19 @@ impl Script {
             Step::ClickUi(label, kind) => {
                 // Prefer an exact label, then one that starts with it ("Save"
                 // also finds "Save as…" only when nothing is called "Save").
+                // Latest drawn first: dialogs and popups are drawn after the
+                // panels, so they win when labels repeat ("Insert").
                 let hit = self
                     .ui_rects
                     .iter()
+                    .rev()
                     .find(|(l, _)| *l == label)
-                    .or_else(|| self.ui_rects.iter().find(|(l, _)| l.starts_with(&label)))
+                    .or_else(|| {
+                        self.ui_rects
+                            .iter()
+                            .rev()
+                            .find(|(l, _)| l.starts_with(&label))
+                    })
                     .map(|(_, r)| r.center());
                 match hit {
                     Some(p) => self.push_click(p, kind),

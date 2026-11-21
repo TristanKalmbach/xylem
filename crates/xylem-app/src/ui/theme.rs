@@ -65,7 +65,7 @@ impl Palette {
         border_strong: rgb(0xB9C3BE),
         text: rgb(0x1B2224),
         text_muted: rgb(0x535E60),
-        text_faint: rgb(0x7E898B),
+        text_faint: rgb(0x737E80),
         accent: rgb(0x16705F),
         accent_hover: rgb(0x105C4E),
         on_accent: rgb(0xFFFFFF),
@@ -90,11 +90,11 @@ impl Palette {
         border_strong: rgb(0x46504F),
         text: rgb(0xE3E7E6),
         text_muted: rgb(0xA4ADAD),
-        text_faint: rgb(0x778182),
+        text_faint: rgb(0x8A9495),
         accent: rgb(0x4DBEA6),
         accent_hover: rgb(0x68CDB8),
         on_accent: rgb(0x0B1916),
-        accent_soft: rgb(0x1C4740),
+        accent_soft: rgb(0x183D37),
         success: rgb(0x5CC58C),
         warning: rgb(0xE2AC45),
         danger: rgb(0xF07A70),
@@ -343,6 +343,22 @@ mod tests {
             assert!(sel >= 7.0, "{theme}: text on selection is {sel:.2}:1");
             let hov = contrast(p.text, p.hover);
             assert!(hov >= 7.0, "{theme}: text on hover is {hov:.2}:1");
+            // Detail text in list rows sits on hovered and selected rows too.
+            for (name, fg) in [("text_muted", p.text_muted), ("text_faint", p.text_faint)] {
+                for (bg_name, bg) in [("hover", p.hover), ("accent_soft", p.accent_soft)] {
+                    let min = if name == "text_muted" { 4.5 } else { 3.0 };
+                    let c = contrast(fg, bg);
+                    assert!(
+                        c >= min,
+                        "{theme}: {name} on {bg_name} is {c:.2}:1, needs {min}:1"
+                    );
+                }
+            }
+            let accent_on_soft = contrast(p.accent, p.accent_soft);
+            assert!(
+                accent_on_soft >= 3.0,
+                "{theme}: accent on accent_soft is {accent_on_soft:.2}:1"
+            );
             for (name, fg, bg) in [
                 ("danger on danger_soft", p.danger, p.danger_soft),
                 ("warning on warning_soft", p.warning, p.warning_soft),

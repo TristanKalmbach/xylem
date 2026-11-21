@@ -137,6 +137,12 @@ pub fn link_button(ui: &mut Ui, label: &str) -> Response {
     r
 }
 
+/// Menu row padding, as egui uses inside menus.
+const MENU_PAD: f32 = 2.0;
+/// Where menu labels start: after the padding, an icon and two spaces, as
+/// egui lays out a submenu row ("{icon}  {label}").
+const MENU_TEXT_X: f32 = MENU_PAD + 13.5 + 7.5;
+
 /// A menu entry with an optional icon and a right-aligned shortcut.
 pub fn menu_item(
     ui: &mut Ui,
@@ -145,15 +151,71 @@ pub fn menu_item(
     shortcut: Option<&str>,
 ) -> Response {
     let p = palette(ui.ctx());
-    let text = match glyph {
-        Some(g) => format!("{g}  {label}"),
-        None => label.to_string(),
-    };
-    let mut b = egui::Button::new(text).min_size(vec2(220.0, 0.0));
-    if let Some(s) = shortcut {
-        b = b.shortcut_text(RichText::new(s).color(p.text_faint));
+    let enabled = ui.is_enabled();
+    // Drawn by hand so every row keeps an icon column, with or without an
+    // icon, and labels line up down the whole menu.
+    let height = 26.0;
+    // Menus size to their widest row, so rows ask for what they need and
+    // no more (asking for all the room makes the menu grow every frame).
+    let label_w = ui.fonts_mut(|f| {
+        f.layout_no_wrap(label.to_string(), FontId::proportional(size::BODY), p.text)
+            .size()
+            .x
+    });
+    let short_w = shortcut.map_or(0.0, |sc| {
+        ui.fonts_mut(|f| {
+            f.layout_no_wrap(sc.to_string(), FontId::proportional(size::SMALL), p.text)
+                .size()
+                .x
+        }) + 24.0
+    });
+    let width = (MENU_TEXT_X + label_w + 16.0 + short_w + 10.0)
+        .max(200.0)
+        .max(ui.min_rect().width());
+    let (rect, r) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    if ui.is_rect_visible(rect) {
+        if r.hovered() && enabled {
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(radius::CONTROL), p.hover);
+        }
+        let text_color = if enabled { p.text } else { p.text_faint };
+        let cy = rect.center().y;
+        if let Some(g) = glyph {
+            // Same positions as egui's own submenu rows ("{icon}  {label}"),
+            // so both kinds line up.
+            ui.painter().text(
+                egui::pos2(rect.left() + MENU_PAD, cy),
+                Align2::LEFT_CENTER,
+                g,
+                FontId::proportional(size::BODY),
+                if enabled { p.text_muted } else { p.text_faint },
+            );
+        }
+        ui.painter().text(
+            egui::pos2(rect.left() + MENU_TEXT_X, cy),
+            Align2::LEFT_CENTER,
+            label,
+            FontId::proportional(size::BODY),
+            text_color,
+        );
+        if let Some(sc) = shortcut {
+            ui.painter().text(
+                egui::pos2(rect.right() - 10.0, cy),
+                Align2::RIGHT_CENTER,
+                sc,
+                FontId::proportional(size::SMALL),
+                p.text_faint,
+            );
+        }
     }
-    let r = ui.add(b);
+    let r = if enabled {
+        r.on_hover_cursor(egui::CursorIcon::Default)
+    } else {
+        r
+    };
+    if r.clicked() && enabled {
+        ui.close();
+    }
     track(label, &r);
     r
 }
@@ -516,8 +578,18 @@ impl<'a> Dialog<'a> {
             let modal = egui::Modal::new(self.id)
                 .frame(frame)
                 .backdrop_color(Color32::from_black_alpha(if p.dark { 110 } else { 70 }))
-                .show(ctx, |ui| contents(ui, &mut close));
-            if modal.should_close() {
+                .show(ctx, |ui| {
+                    // Keys typed while a modal is up belong to it.
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(keys_owner_id(), ui.layer_id()));
+                    contents(ui, &mut close)
+                });
+            // Escape closes the top modal. A click on the backdrop does not:
+            // it would throw away whatever was typed into the dialog.
+            if modal.is_top_modal
+                && !modal.any_popup_open
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            {
                 close = true;
             }
             Some(modal.inner)
@@ -531,17 +603,48 @@ impl<'a> Dialog<'a> {
                     ctx.content_rect().center().x - width / 2.0 - space::XL,
                     ctx.content_rect().top() + 90.0,
                 ))
-                .show(ctx, |ui| contents(ui, &mut close));
-            let focused_here = r.as_ref().is_some_and(|r| {
-                ctx.memory(|m| m.focused().is_some()) || r.response.contains_pointer()
+                .show(ctx, |ui| {
+                    if owns_keys(ui) {
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp(keys_owner_id(), ui.layer_id()));
+                    }
+                    contents(ui, &mut close)
+                });
+            // Escape closes a tool window only when the user is working in
+            // it, never while typing in the document behind it.
+            let mine = r.as_ref().is_some_and(|r| {
+                ctx.data(|d| d.get_temp::<egui::LayerId>(keys_owner_id()))
+                    == Some(r.response.layer_id)
             });
-            if focused_here && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if mine && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 close = true;
             }
             r.and_then(|r| r.inner)
         };
         (close, result)
     }
+}
+
+fn keys_owner_id() -> egui::Id {
+    egui::Id::new("xylem-dialog-keys")
+}
+
+/// True when keyboard input belongs to the window `ui` is in: a widget in
+/// it has focus, or nothing has focus and the pointer is over it.
+fn owns_keys(ui: &Ui) -> bool {
+    let ctx = ui.ctx();
+    let layer = ui.layer_id();
+    match ctx.memory(|m| m.focused()) {
+        Some(id) => ctx.read_response(id).is_some_and(|r| r.layer_id == layer),
+        None => ctx
+            .pointer_hover_pos()
+            .is_some_and(|pos| ctx.layer_id_at(pos) == Some(layer)),
+    }
+}
+
+/// Call once at the start of every frame, before any dialog is shown.
+pub fn begin_frame(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<egui::LayerId>(keys_owner_id()));
 }
 
 fn close_button(ui: &mut Ui) -> Response {
@@ -585,8 +688,13 @@ pub fn dialog_footer(
                 if r.clicked() {
                     res.confirmed = true;
                 }
+                // Enter confirms only the dialog the user is working in.
+                let mine = ui
+                    .ctx()
+                    .data(|d| d.get_temp::<egui::LayerId>(keys_owner_id()))
+                    == Some(ui.layer_id());
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
-                if enter && enabled && !multiline_focused(ui.ctx()) {
+                if mine && enter && enabled && !multiline_focused(ui.ctx()) {
                     res.confirmed = true;
                 }
             }

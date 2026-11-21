@@ -561,8 +561,15 @@ impl XylemApp {
         if let Some(dir) = self.doc().and_then(|d| d.dir().map(Path::to_path_buf)) {
             dlg = dlg.set_directory(dir);
         }
-        let scripted = crate::script::file_dialog(|| None);
-        if let Some(paths) = scripted.map(|p| vec![p]).or_else(|| dlg.pick_files()) {
+        // Scripts answer with one path; people can pick several.
+        let mut picked_many = None;
+        let first = crate::script::file_dialog(|| {
+            let paths = dlg.pick_files()?;
+            let first = paths.first().cloned();
+            picked_many = Some(paths);
+            first
+        });
+        if let Some(paths) = picked_many.or_else(|| first.map(|p| vec![p])) {
             for p in paths {
                 self.open_path(p);
             }
@@ -616,7 +623,7 @@ impl XylemApp {
             } else if let Some(name) = crate::s1000d_ui::suggested_filename(&ds.editor.doc) {
                 d = d.set_file_name(name);
             }
-            match d.save_file() {
+            match crate::script::file_dialog(|| d.save_file()) {
                 Some(p) => p,
                 None => return,
             }
@@ -787,7 +794,10 @@ impl XylemApp {
                     Ok(())
                 });
             }
-            Cmd::Find => self.find.open = true,
+            Cmd::Find => {
+                self.find.open = true;
+                self.find.focus_query = true;
+            }
             Cmd::FindInFiles => self.open_find_in_files(),
             Cmd::ExportHtml => self.export_html(),
             Cmd::PrintPreview => self.print_preview(),
@@ -1407,11 +1417,12 @@ impl XylemApp {
             .filter(|p| p.exists())
         {
             Some(p) => p,
-            None => match rfd::FileDialog::new()
-                .set_title("Choose a BREX data module")
-                .add_filter("XML", &["xml", "XML"])
-                .pick_file()
-            {
+            None => match crate::script::file_dialog(|| {
+                rfd::FileDialog::new()
+                    .set_title("Choose a BREX data module")
+                    .add_filter("XML", &["xml", "XML"])
+                    .pick_file()
+            }) {
                 Some(p) => {
                     self.settings.brex = Some(p.clone());
                     p
@@ -2002,7 +2013,7 @@ impl XylemApp {
                     if view == Some(v) {
                         let p = crate::ui::palette(ui.ctx());
                         ui.painter().circle_filled(
-                            egui::pos2(r.rect.right() - 6.0, r.rect.center().y),
+                            egui::pos2(r.rect.left() + 3.0, r.rect.center().y),
                             2.5,
                             p.accent,
                         );
@@ -2279,6 +2290,11 @@ impl XylemApp {
                 // paragraphs…). Known kinds get an icon, the rest their label.
                 if let Some(ds) = self.docs.get(self.active) {
                     let entries = ds.package.effective_toolbar();
+                    // Room left for package buttons before the fixed tools
+                    // (≈100 points) and the right-hand toggles (≈170). What
+                    // doesn't fit goes into a More menu rather than off the edge.
+                    let mut room = ui.available_width() - 290.0;
+                    let mut overflow: Vec<(String, String, Cmd)> = Vec::new();
                     for entry in &entries {
                         let (cmd, what) = match &entry.action {
                             xylem_customize::Action::InsertElement(e) => {
@@ -2294,7 +2310,17 @@ impl XylemApp {
                             }
                             _ => continue,
                         };
-                        let clicked = match toolbar_icon_for(&entry.label) {
+                        let glyph = toolbar_icon_for(&entry.label);
+                        let need = match glyph {
+                            Some(_) => 32.0,
+                            None => entry.label.chars().count() as f32 * 7.5 + 16.0,
+                        };
+                        if need > room {
+                            overflow.push((entry.label.clone(), what, cmd));
+                            continue;
+                        }
+                        room -= need;
+                        let clicked = match glyph {
                             Some(glyph) => icon_button(ui, glyph, &entry.label, None)
                                 .on_hover_text(&what)
                                 .clicked(),
@@ -2313,6 +2339,29 @@ impl XylemApp {
                         if clicked {
                             cmds.push(cmd);
                         }
+                    }
+                    if !overflow.is_empty() {
+                        let r = ui.menu_button(
+                            RichText::new(icon::DOTS_THREE)
+                                .size(crate::ui::theme::size::ICON + 1.0),
+                            |ui| {
+                                for (label, what, cmd) in overflow {
+                                    if crate::ui::menu_item(
+                                        ui,
+                                        toolbar_icon_for(&label),
+                                        &label,
+                                        None,
+                                    )
+                                    .on_hover_text(what)
+                                    .clicked()
+                                    {
+                                        cmds.push(cmd);
+                                    }
+                                }
+                            },
+                        );
+                        r.response
+                            .on_hover_text("More buttons for this document type");
                     }
                 }
                 toolbar_divider(ui);
@@ -2366,10 +2415,16 @@ impl XylemApp {
                     }
                 });
                 toolbar_divider(ui);
+                // Shown as on only while the panel is actually on screen (narrow
+                // windows hide it even when it is switched on).
+                let width = ui.ctx().content_rect().width();
                 let inspector = self.settings.show_elements || self.settings.show_attributes;
+                let inspector_visible = inspector
+                    && !self.docs.is_empty()
+                    && (width >= 1000.0 || (!self.settings.show_structure && width >= 760.0));
                 if icon_toggle(
                     ui,
-                    inspector,
+                    inspector_visible,
                     icon::SIDEBAR,
                     "Elements and attributes",
                     None,
@@ -2380,9 +2435,10 @@ impl XylemApp {
                     self.settings.show_elements = on;
                     self.settings.show_attributes = on;
                 }
+                let structure_visible = self.settings.show_structure && width >= 760.0;
                 if icon_toggle(
                     ui,
-                    self.settings.show_structure,
+                    structure_visible,
                     icon::TREE_STRUCTURE,
                     "Structure and project",
                     None,
@@ -3494,7 +3550,7 @@ impl XylemApp {
                     });
                     f.row("", |ui| ui.checkbox(&mut t.header, "Header row"));
                 });
-                dialog_footer(ui, Some(("Insert", true)), Some("Cancel"), |_| {})
+                dialog_footer(ui, Some(("Insert table", true)), Some("Cancel"), |_| {})
             });
             let res = res.unwrap_or_default();
             if res.confirmed {
@@ -4583,8 +4639,10 @@ impl XylemApp {
         }
         let mut open_items = Vec::new();
         let mut discard_all = false;
+        let mut later_clicked = false;
         let p = crate::ui::palette(ctx);
-        crate::ui::Dialog::new("Recover unsaved work")
+        // Closing keeps the copies for next time; only Discard all deletes them.
+        let (later, _) = crate::ui::Dialog::new("Recover unsaved work")
             .width(480.0)
             .show(ctx, |ui| {
                 crate::ui::notice(
@@ -4606,9 +4664,17 @@ impl XylemApp {
                 }
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    crate::ui::muted(ui, "Discarded copies cannot be brought back.");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if crate::ui::button(ui, "Discard all").clicked() {
+                        if crate::ui::button(ui, "Later")
+                            .on_hover_text("Keep the copies and ask again next time")
+                            .clicked()
+                        {
+                            later_clicked = true;
+                        }
+                        if crate::ui::danger_button(ui, "Discard all")
+                            .on_hover_text("Delete the recovered copies. This cannot be undone.")
+                            .clicked()
+                        {
                             discard_all = true;
                         }
                     });
@@ -4661,6 +4727,10 @@ impl XylemApp {
             for r in self.recovery.drain(..) {
                 r.remove();
             }
+        } else if later || later_clicked {
+            // The copies stay in the autosave folder and are offered again
+            // at the next start.
+            self.recovery.clear();
         }
     }
 
@@ -5011,6 +5081,7 @@ impl eframe::App for XylemApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let frame_start = std::time::Instant::now();
+        crate::ui::widgets::begin_frame(ctx);
         self.poll_update_check();
         self.update_dialog(ctx);
         for p in std::mem::take(&mut self.pending_open) {

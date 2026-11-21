@@ -36,8 +36,13 @@ run typing-and-navigation \
     "caretend Inspect the hydraulic lines;;type  Then bleed them.;;key Enter;;type Second step text;;key B ctrl;;type BOLD;;key Home;;key ArrowUp;;key End;;type X;;key Home;;type Y" \
     "YInspect the hydraulic lines Then bleed them.X</para><para>Second step text<b>BOLD</b>.</para>"
 run table-dialog \
-    "caretend Pa).;;cmd InsertTable;;wait 5;;key Enter;;wait 5;;type A1;;key Tab;;type B1" \
+    "caretend Pa).;;cmd InsertTable;;wait 5;;clickui Insert table;;wait 5;;type A1;;key Tab;;type B1" \
     "<entry>A1</entry><entry>B1</entry>"
+check table-dialog-keeps-text "$out/table-dialog.xml" "<para>Torque values are given in N·m; pressure in bar (10<sup>5</sup> Pa).</para>"
+# Enter typed in the document goes to the document, not to an open dialog.
+run enter-goes-to-document \
+    "cmd Shortcuts;;wait 5;;caretend Inspect the hydraulic lines;;key Enter;;type NEXT" \
+    "hydraulic lines</para><para>NEXT.</para>"
 run surround-palette \
     "select operation;;key Space ctrl;;wait 5;;type i;;key Enter;;wait 5" \
     "<b>safe <i>operation</i></b>"
@@ -45,7 +50,7 @@ run split-from-menu \
     "caretend Check the;;cmd SplitElement;;wait 5" \
     "<para>Check the</para><para> fluid level.</para>"
 run find-next \
-    "cmd Find;;wait 5;;clickui Find text;;type hydraulic;;wait 3;;clickat 2 4 Press the red;;key F3;;type ONE" \
+    "cmd Find;;wait 5;;type hydraulic;;wait 3;;clickat 2 4 Press the red;;key F3;;type ONE" \
     "ONE Lift"
 run type-after-closing-tag \
     "clickat 400 4 Inspect the hydraulic;;type Z" \

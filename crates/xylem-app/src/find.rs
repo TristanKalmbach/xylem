@@ -27,7 +27,8 @@ pub struct FindState {
     current: Option<usize>,
     key: Option<(String, bool, bool, bool, String, u64)>,
     pub error: Option<String>,
-    focus_query: bool,
+    /// Put the keyboard in the Find field on the next frame.
+    pub focus_query: bool,
 }
 
 impl FindState {
@@ -169,9 +170,6 @@ impl FindState {
 
 pub fn window(ctx: &egui::Context, st: &mut FindState, ds: &DocState, out: &mut Vec<FindAction>) {
     use crate::ui::{Tone, form, icon, icon_button, notice, palette, text_field};
-    if !st.focus_query {
-        st.focus_query = true;
-    }
     let p = palette(ctx);
     let (close, _) = crate::ui::Dialog::new("Find and replace")
         .width(420.0)
@@ -180,6 +178,20 @@ pub fn window(ctx: &egui::Context, st: &mut FindState, ds: &DocState, out: &mut 
             form(ui, "find-form", |f| {
                 f.row("Find", |ui| {
                     let r = text_field(ui, "Find text", &mut st.query, "Text to find", 280.0);
+                    if std::mem::take(&mut st.focus_query) {
+                        r.request_focus();
+                        // Select what is there, so typing replaces it.
+                        let mut state =
+                            egui::TextEdit::load_state(ui.ctx(), r.id).unwrap_or_default();
+                        let n = st.query.chars().count();
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(n),
+                            )));
+                        state.store(ui.ctx(), r.id);
+                    }
                     if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         st.refresh(ds);
                         if let Some(i) = st.next_from_caret(ds, true) {

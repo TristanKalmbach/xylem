@@ -136,10 +136,10 @@ XYLEM_SCHEMA_CORPUS=<folder of real XSDs and instances> cargo test -p xylem-sche
 The app has a scripted end-to-end harness for UI testing:
 
 ```
-XYLEM_SCRIPT="click 500 280;;type Hello;;key Enter;;shot out.png;;save out.xml;;quit" xylem file.xml
+XYLEM_SCRIPT="caretend Some text;;type Hello;;key Enter;;shot out.png;;save out.xml;;quit" xylem file.xml
 ```
 
-The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `hover X Y`, `pick PATH` (the answer to the next file dialog), `shot PATH`, `save PATH` and `quit`. `scripts/e2e-smoke.sh` runs the end-to-end cases; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Steps find their targets by command name, document text or widget label (`cmd SaveAs`, `caret Some text`, `clickui Insert table`), so scripts survive layout changes; `crates/xylem-app/src/script.rs` lists them all. `scripts/e2e-smoke.sh` runs the end-to-end cases and `scripts/ui-screens.sh` screenshots every window in both themes; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Scripted runs never open a web browser: Print preview writes its page to `xylem-print` in the temporary folder and reports the path. Set `XYLEM_NO_BROWSER=1` to get the same behaviour outside the harness.
 

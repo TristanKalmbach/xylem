@@ -385,15 +385,17 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
         .show(ui, |ui| {
             // Names get a share of the panel, so long ones (S1000D's
             // modelIdentCode) fit when the panel is widened.
-            let total = ui.available_width();
-            let name_w = (total * 0.42).clamp(80.0, 180.0);
+            // Inside a scroll area available_width can be the content's
+            // width, not the panel's, so take the panel's from the clip rect.
+            let total = ui.clip_rect().width().min(ui.available_width()) - 14.0;
+            let name_w = (total * 0.40).clamp(72.0, 170.0);
             // Editor width: what is left after the name and the remove button.
-            let edit_w = (total - name_w - 20.0 - 2.0 * 6.0).max(60.0);
-            egui::Grid::new(("attr-grid", el))
-                .num_columns(3)
-                .spacing([6.0, 4.0])
-                .min_col_width(0.0)
-                .show(ui, |ui| {
+            let edit_w = (total - name_w - 22.0 - 2.0 * 6.0).max(60.0);
+            // Plain rows with fixed widths: egui's Grid sizes columns from the
+            // previous frame, which leaves editors far too narrow at first.
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+            {
+                {
                     let mut shown = std::collections::HashSet::new();
                     for d in &decls {
                         shown.insert(d.name.clone());
@@ -407,33 +409,30 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
                         } else {
                             p.text_faint
                         };
-                        let lr = name_cell(ui, name_w, RichText::new(text).color(color));
-                        let tip = match (&d.documentation, d.required) {
-                            (Some(t), true) => format!("{} (required)\n{t}", d.name),
-                            (Some(t), false) => format!("{}\n{t}", d.name),
-                            (None, true) => format!("{} (required)", d.name),
-                            (None, false) => d.name.clone(),
-                        };
-                        lr.on_hover_text(tip);
-                        attr_editor(
-                            ui,
-                            edit_w,
-                            el,
-                            &d.name,
-                            current.as_deref(),
-                            d.default.as_deref(),
-                            &d.enumeration(),
-                            d.fixed.as_deref(),
-                            out,
-                        );
-                        if current.is_some() && !d.required {
-                            if remove_button(ui).clicked() {
+                        ui.horizontal(|ui| {
+                            let lr = name_cell(ui, name_w, RichText::new(text).color(color));
+                            let tip = match (&d.documentation, d.required) {
+                                (Some(t), true) => format!("{} (required)\n{t}", d.name),
+                                (Some(t), false) => format!("{}\n{t}", d.name),
+                                (None, true) => format!("{} (required)", d.name),
+                                (None, false) => d.name.clone(),
+                            };
+                            lr.on_hover_text(tip);
+                            attr_editor(
+                                ui,
+                                edit_w,
+                                el,
+                                &d.name,
+                                current.as_deref(),
+                                d.default.as_deref(),
+                                &d.enumeration(),
+                                d.fixed.as_deref(),
+                                out,
+                            );
+                            if current.is_some() && !d.required && remove_button(ui).clicked() {
                                 out.push(PanelAction::RemoveAttr(el, d.name.clone()));
                             }
-                        } else {
-                            ui.label("");
-                        }
-                        ui.end_row();
+                        });
                     }
                     for a in &e.attrs {
                         if shown.contains(&a.name) {
@@ -443,37 +442,39 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
                             && !a.name.starts_with("xmlns")
                             && !a.name.starts_with("xsi:")
                             && !a.name.starts_with("xml:");
-                        let lr = name_cell(
-                            ui,
-                            name_w,
-                            RichText::new(&a.name).color(if undeclared {
-                                p.warning
+                        ui.horizontal(|ui| {
+                            let lr = name_cell(
+                                ui,
+                                name_w,
+                                RichText::new(&a.name).color(if undeclared {
+                                    p.warning
+                                } else {
+                                    p.text_muted
+                                }),
+                            );
+                            if undeclared {
+                                lr.on_hover_text("Not declared in the schema");
                             } else {
-                                p.text_muted
-                            }),
-                        );
-                        if undeclared {
-                            lr.on_hover_text("Not declared in the schema");
-                        } else {
-                            lr.on_hover_text(&a.name);
-                        }
-                        attr_editor(
-                            ui,
-                            edit_w,
-                            el,
-                            &a.name,
-                            Some(&a.value),
-                            None,
-                            &[],
-                            None,
-                            out,
-                        );
-                        if remove_button(ui).clicked() {
-                            out.push(PanelAction::RemoveAttr(el, a.name.clone()));
-                        }
-                        ui.end_row();
+                                lr.on_hover_text(&a.name);
+                            }
+                            attr_editor(
+                                ui,
+                                edit_w,
+                                el,
+                                &a.name,
+                                Some(&a.value),
+                                None,
+                                &[],
+                                None,
+                                out,
+                            );
+                            if remove_button(ui).clicked() {
+                                out.push(PanelAction::RemoveAttr(el, a.name.clone()));
+                            }
+                        });
                     }
-                });
+                }
+            }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
