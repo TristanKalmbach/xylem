@@ -23,6 +23,9 @@
         <tbody>
           <row><entry>Hydraulic hoses</entry><entry>Daily</entry><entry>Inspect</entry></row>
           <row><entry>Pump seals</entry><entry>Monthly</entry><entry><i>Replace if worn</i></entry></row>
+          <row><entry morerows="1">Lift arms</entry><entry>Weekly</entry><entry>Lubricate</entry></row>
+          <row><entry colname="c2">Yearly</entry><entry colname="c3">Replace pivot pins</entry></row>
+          <row><entry namest="c1" nameend="c3">Record every inspection in the maintenance log.</entry></row>
         </tbody>
       </tgroup>
     </table>

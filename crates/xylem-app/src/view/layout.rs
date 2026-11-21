@@ -1333,39 +1333,97 @@ impl<'a> Layouter<'a> {
         } else {
             Color32::from_gray(170)
         };
+        // Cells that span rows (CALS `morerows`, HTML `rowspan`) reserve
+        // their columns in the following rows and are drawn as one tall cell
+        // once the last spanned row is known.
+        struct Spanning {
+            decor: Vec<usize>,
+            rows_left: usize,
+            content_bottom: f32,
+        }
+        let mut occupied = vec![0usize; ncols];
+        let mut spanning: Vec<Spanning> = Vec::new();
         for (row, cells) in rows {
             let row_top = self.y;
             let mut max_bottom = row_top;
-            let spans = self.cell_spans(row, &cells, ncols);
-            for (cell, (start, end)) in cells.iter().zip(spans) {
+            let mut row_decor: Vec<usize> = Vec::new();
+            let explicit = self.explicit_columns(row, &cells, ncols);
+            let mut next = 0;
+            for (k, cell) in cells.iter().enumerate() {
+                let (start, end) = match explicit.get(k).copied().flatten() {
+                    Some(span) => span,
+                    None => {
+                        while next < ncols && occupied[next] > 0 {
+                            next += 1;
+                        }
+                        let span = self.attr_usize(*cell, "colspan").unwrap_or(1).max(1);
+                        let s = next.min(ncols - 1);
+                        (s, (s + span - 1).min(ncols - 1))
+                    }
+                };
+                next = end + 1;
+                let rows_spanned = self
+                    .attr_usize(*cell, "morerows")
+                    .map(|m| m + 1)
+                    .or_else(|| self.attr_usize(*cell, "rowspan"))
+                    .unwrap_or(1)
+                    .max(1);
                 let cx = x0 + weights[..start].iter().sum::<f32>() * table_w;
-                let cw = weights[start..=end.min(ncols - 1)].iter().sum::<f32>() * table_w;
+                let cw = weights[start..=end].iter().sum::<f32>() * table_w;
                 self.x = cx + 4.0;
                 self.width = (cw - 8.0).max(20.0);
                 self.y = row_top + 3.0;
                 let cs = self.styles.get(*cell);
                 self.block_contents_as_cell(*cell, &cs);
-                max_bottom = max_bottom.max(self.y + 3.0);
+                let content_bottom = self.y + 3.0;
                 let r = Rect::from_min_max(Pos2::new(cx, row_top), Pos2::new(cx + cw, 0.0));
+                let mut idx = vec![self.out.decor.len()];
                 self.out.decor.push(Decor::Grid(r, grid));
                 if let Some(bg) = cs.background {
-                    self.out
-                        .decor
-                        .push(Decor::Fill(r, adjust_bg_for_dark(bg, self.params.dark)));
+                    idx.push(self.out.decor.len());
+                    self.out.decor.push(Decor::Fill(r, adjust_bg_for_dark(bg, self.params.dark)));
+                }
+                if rows_spanned > 1 {
+                    for c in occupied.iter_mut().take(end + 1).skip(start) {
+                        *c = rows_spanned;
+                    }
+                    spanning.push(Spanning { decor: idx, rows_left: rows_spanned, content_bottom });
+                } else {
+                    max_bottom = max_bottom.max(content_bottom);
+                    row_decor.extend(idx);
                 }
             }
-            // Fix up grid heights for this row.
-            for d in self.out.decor.iter_mut().rev() {
-                match d {
-                    Decor::Grid(r, _) | Decor::Fill(r, _)
-                        if r.max.y == 0.0 && (r.min.y - row_top).abs() < 0.5 =>
-                    {
-                        r.max.y = max_bottom;
-                    }
-                    _ => {}
+            // A spanning cell that ends here must fit by the end of this row.
+            for sp in &spanning {
+                if sp.rows_left == 1 {
+                    max_bottom = max_bottom.max(sp.content_bottom);
                 }
+            }
+            if max_bottom <= row_top {
+                max_bottom = row_top + self.z(18.0);
+            }
+            for i in row_decor {
+                set_decor_bottom(&mut self.out.decor[i], max_bottom);
+            }
+            for sp in &mut spanning {
+                sp.rows_left -= 1;
+                if sp.rows_left == 0 {
+                    for &i in &sp.decor {
+                        set_decor_bottom(&mut self.out.decor[i], max_bottom);
+                    }
+                }
+            }
+            spanning.retain(|sp| sp.rows_left > 0);
+            for c in &mut occupied {
+                *c = c.saturating_sub(1);
             }
             self.y = max_bottom;
+        }
+        // Spans that run past the last row end with the table.
+        for sp in spanning {
+            for i in sp.decor {
+                set_decor_bottom(&mut self.out.decor[i], self.y.max(sp.content_bottom));
+            }
         }
         self.x = outer_x + m[3];
         self.width = (outer_w - m[3] - m[1]).max(60.0);
@@ -1441,45 +1499,36 @@ impl<'a> Layouter<'a> {
             .sum()
     }
 
-    fn cell_spans(&self, row: NodeId, cells: &[NodeId], ncols: usize) -> Vec<(usize, usize)> {
-        // CALS: use namest/nameend/colname when the tgroup has colspecs.
-        let group = self.doc.ancestors(row).find(|&a| {
-            self.doc
-                .element(a)
-                .map(|e| e.local_name() == "tgroup")
-                .unwrap_or(false)
-        });
-        let mut out = Vec::new();
-        if let Some(g) = group {
-            for (c, s, e) in xylem_edit::table::cell_columns(
-                self.doc,
-                xylem_edit::table::TableModel::Cals,
-                g,
-                row,
-            ) {
-                if cells.contains(&c) {
-                    out.push((s.min(ncols - 1), e.min(ncols - 1)));
-                }
-            }
-            if out.len() == cells.len() {
-                return out;
-            }
-            out.clear();
-        }
-        let mut next = 0;
-        for &c in cells {
-            let span = self
+    fn attr_usize(&self, n: NodeId, name: &str) -> Option<usize> {
+        self.doc.attr(n, name).and_then(|v| v.trim().parse().ok())
+    }
+
+    /// Column ranges given explicitly by CALS `colname` / `namest`+`nameend`.
+    /// `None` for cells that are placed in the next free column instead.
+    fn explicit_columns(&self, row: NodeId, cells: &[NodeId], ncols: usize) -> Vec<Option<(usize, usize)>> {
+        let group = self
+            .doc
+            .ancestors(row)
+            .find(|&a| self.doc.element(a).is_some_and(|e| e.local_name() == "tgroup"));
+        let names: Vec<String> = match group {
+            Some(g) => self
                 .doc
-                .attr(c, "colspan")
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(1)
-                .max(1);
-            let s = next.min(ncols - 1);
-            let e = (next + span - 1).min(ncols - 1);
-            out.push((s, e));
-            next += span;
-        }
-        out
+                .element_children(g)
+                .filter(|&c| self.doc.element(c).is_some_and(|e| e.local_name() == "colspec"))
+                .enumerate()
+                .map(|(i, c)| self.doc.attr(c, "colname").map(str::to_string).unwrap_or_else(|| format!("col{}", i + 1)))
+                .collect(),
+            None => Vec::new(),
+        };
+        let col = |name: Option<&str>| name.and_then(|n| names.iter().position(|c| c == n));
+        cells
+            .iter()
+            .map(|&c| {
+                let start = col(self.doc.attr(c, "namest")).or_else(|| col(self.doc.attr(c, "colname")))?;
+                let end = col(self.doc.attr(c, "nameend")).unwrap_or(start).max(start);
+                Some((start.min(ncols - 1), end.min(ncols - 1)))
+            })
+            .collect()
     }
 
     fn block_contents_as_cell(&mut self, cell: NodeId, s: &Sty) {
@@ -1553,6 +1602,12 @@ impl<'a> Layouter<'a> {
         self.out
             .element_paras
             .insert(el, (first_para, last.max(first_para)));
+    }
+}
+
+fn set_decor_bottom(d: &mut Decor, bottom: f32) {
+    if let Decor::Grid(r, _) | Decor::Fill(r, _) = d {
+        r.max.y = bottom;
     }
 }
 
