@@ -3503,6 +3503,11 @@ impl XylemApp {
         if let Some(script) = &mut self.script {
             script.anchor = self.docs.get(self.active).and_then(|d| d.canvas.caret_screen);
         }
+        // A script repaints every frame; cap it near 30 fps so test runs
+        // don't keep a CPU core and the GPU busy.
+        if self.script.is_some() {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
         let script_cmds = self
             .script
             .as_mut()

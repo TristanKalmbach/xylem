@@ -52,7 +52,10 @@ fn main() -> eframe::Result<()> {
         viewport = viewport.with_position(pos);
     }
     if scripted {
-        viewport = viewport.with_active(false);
+        // Test windows stay out of the way: no focus, no taskbar button, and
+        // low CPU priority so they don't slow down whatever else is running.
+        viewport = viewport.with_active(false).with_taskbar(false);
+        lower_priority();
     }
     let options = eframe::NativeOptions {
         viewport,
@@ -68,4 +71,21 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(move |cc| Ok(Box::new(app::XylemApp::new(cc, files)))),
     )
+}
+
+/// Runs this process at idle priority (scripted test runs only).
+fn lower_priority() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetCurrentProcess() -> isize;
+            fn SetPriorityClass(process: isize, class: u32) -> i32;
+        }
+        const IDLE_PRIORITY_CLASS: u32 = 0x40;
+        // SAFETY: plain Win32 calls on our own process handle.
+        unsafe {
+            SetPriorityClass(GetCurrentProcess(), IDLE_PRIORITY_CLASS);
+        }
+    }
 }
