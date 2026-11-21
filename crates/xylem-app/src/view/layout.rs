@@ -61,6 +61,8 @@ pub struct Para {
     pub segs: Arc<[Seg]>,
     /// Caret stops between segments: (char index, position).
     pub stops: Arc<[(usize, Pos)]>,
+    /// Images from CSS generated content, drawn over placeholder characters.
+    pub icons: Arc<[(Range<usize>, std::path::PathBuf)]>,
     #[allow(dead_code)]
     pub owner: NodeId,
 }
@@ -74,6 +76,7 @@ impl Para {
             galley_key: self.galley_key,
             segs: self.segs.clone(),
             stops: self.stops.clone(),
+            icons: self.icons.clone(),
             owner: self.owner,
         }
     }
@@ -450,6 +453,7 @@ pub fn tag_color(name: &str, overrides: &HashMap<String, Color32>, dark: bool) -
 }
 
 struct ParaBuilder {
+    icons: Vec<(Range<usize>, std::path::PathBuf)>,
     owner: NodeId,
     job: LayoutJob,
     segs: Vec<Seg>,
@@ -467,6 +471,7 @@ impl ParaBuilder {
             owner,
             job: LayoutJob::default(),
             segs: Vec::new(),
+            icons: Vec::new(),
             stops: Vec::new(),
             chars: 0,
             last_space: true,
@@ -708,6 +713,7 @@ impl<'a> Layouter<'a> {
             galley_key,
             segs: pb.segs.into(),
             stops: pb.stops.into(),
+            icons: pb.icons.into(),
             owner: pb.owner,
         };
         self.push_para(para);
@@ -903,6 +909,24 @@ impl<'a> Layouter<'a> {
         pb.last_space = text.ends_with(char::is_whitespace);
     }
 
+    /// Reserves room for a generated-content image in the current line.
+    fn icon(&mut self, owner: NodeId, path: std::path::PathBuf, s: &Sty) {
+        let fmt = self.fmt(s);
+        // Roughly a square the height of the line: five spaces of the font.
+        let pb = self.para();
+        let start = pb.chars;
+        pb.push("\u{2007}\u{2007}\u{2007}", fmt, SegKind::Generated(owner));
+        let end = pb.chars;
+        pb.icons.push((start..end, path));
+        pb.has_content = true;
+    }
+
+    fn generated_images(&mut self, el: NodeId, after: bool, s: &Sty) {
+        if let Some(path) = self.styles.generated_image(el, after) {
+            self.icon(el, path, s);
+        }
+    }
+
     fn atom(&mut self, n: NodeId) {
         let (label, sty) = match self.doc.kind(n) {
             NodeKind::Comment(t) => {
@@ -1032,6 +1056,8 @@ impl<'a> Layouter<'a> {
             pb.stop(before);
             pb.stop(inside);
         }
+        // Generated images lead in ::before and trail in ::after.
+        self.generated_images(el, false, &s);
         if let Some((text, gs)) = self.styles.before(el) {
             self.generated(el, &text, &gs);
         }
@@ -1039,6 +1065,7 @@ impl<'a> Layouter<'a> {
             self.inline_image_placeholder(el, &src, size, &s);
         }
         self.inline_children(el, &s);
+        self.generated_images(el, true, &s);
         if let Some((text, gs)) = self.styles.after(el) {
             self.generated(el, &text, &gs);
         }
@@ -1132,6 +1159,8 @@ impl<'a> Layouter<'a> {
         } else {
             None
         };
+        // Generated images lead in ::before and trail in ::after.
+        self.generated_images(el, false, &s);
         if let Some((text, gs)) = self.styles.before(el) {
             self.generated(el, &text, &gs);
         }
@@ -1163,6 +1192,7 @@ impl<'a> Layouter<'a> {
                 _ => self.atom(c),
             }
         }
+        self.generated_images(el, true, &s);
         if let Some((text, gs)) = self.styles.after(el) {
             self.generated(el, &text, &gs);
         }
@@ -1553,6 +1583,8 @@ impl<'a> Layouter<'a> {
             pb.stop(before);
             pb.stop(inside);
         }
+        // Generated images lead in ::before and trail in ::after.
+        self.generated_images(el, false, &s);
         if let Some((text, gs)) = self.styles.before(el) {
             self.generated(el, &text, &gs);
         }
@@ -1582,6 +1614,7 @@ impl<'a> Layouter<'a> {
                 _ => self.atom(c),
             }
         }
+        self.generated_images(el, true, &s);
         if let Some((text, gs)) = self.styles.after(el) {
             self.generated(el, &text, &gs);
         }

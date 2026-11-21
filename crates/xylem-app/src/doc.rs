@@ -234,7 +234,7 @@ impl DocState {
                     for (n, css) in &self.inline_styles {
                         engine.set_inline_style(*n, css);
                     }
-                    Rc::new(CssStyles::compute(&self.editor.doc, engine))
+                    Rc::new(CssStyles::compute(&self.editor.doc, engine, self.package.resolved_files().style.as_deref().and_then(Path::parent)))
                 }
                 None => Rc::new(DefaultStyles::compute(&self.editor.doc)),
             };

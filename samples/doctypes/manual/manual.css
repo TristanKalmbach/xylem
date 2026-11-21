@@ -17,7 +17,7 @@ xref { color: #0b5fa5; text-decoration: underline; }
 xref:after { content: " [" attr(linkend) "]"; color: gray; font-size: 9pt; }
 code { display: block; white-space: pre; font-family: Consolas, monospace; background-color: #f3f3f3; padding: 6px; margin: 4px 0; }
 warning { display: block; border: 2px solid #c0392b; background-color: #fdecea; padding: 6px; margin: 8px 0; }
-warning:before { content: "WARNING"; font-weight: bold; color: #c0392b; }
+warning:before { content: url("warning.png") " WARNING"; font-weight: bold; color: #c0392b; }
 list { display: block; margin-left: 20px; }
 item { display: list-item; list-style-type: disc; }
 list[type="numbered"] > item { list-style-type: decimal; }

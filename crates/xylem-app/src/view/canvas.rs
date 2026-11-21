@@ -58,6 +58,8 @@ pub struct Canvas {
     /// blocks shows up twice (end of one line, start of the next); this keeps
     /// the caret on the line the user put it on.
     caret_hint: Option<(Pos, Loc)>,
+    /// Textures for CSS generated-content images, by file.
+    icons: std::collections::HashMap<std::path::PathBuf, Option<egui::TextureHandle>>,
     /// Elements collapsed to a single line in this document.
     pub collapsed: std::collections::HashSet<NodeId>,
     collapsed_rev: u64,
@@ -770,6 +772,18 @@ impl Canvas {
                 }
             }
             painter.galley(p.anchor + off, p.galley.clone(), Color32::GRAY);
+            for (range, path) in p.icons.iter() {
+                let Some(r) = self.layout.range_rects(pi, range.start, range.end).into_iter().next() else { continue };
+                let tex = self.icons.entry(path.clone()).or_insert_with(|| load_icon(ui.ctx(), path)).clone();
+                if let Some(tex) = tex {
+                    // Fit the image into the reserved box, keeping its aspect.
+                    let r = r.translate(off).shrink(1.0);
+                    let [w, h] = tex.size().map(|v| v as f32);
+                    let scale = (r.width() / w).min(r.height() / h);
+                    let dst = Rect::from_center_size(r.center(), vec2(w * scale, h * scale));
+                    painter.image(tex.id(), dst, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                }
+            }
         }
         // Images.
         for img in &self.layout.images {
@@ -914,4 +928,11 @@ fn squiggle(p: &egui::Painter, r: Rect, c: Color32) {
     if pts.len() > 1 {
         p.add(Shape::line(pts, Stroke::new(1.0_f32, c)));
     }
+}
+
+fn load_icon(ctx: &egui::Context, path: &std::path::Path) -> Option<egui::TextureHandle> {
+    let img = image::open(path).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    let ci = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+    Some(ctx.load_texture(path.display().to_string(), ci, egui::TextureOptions::LINEAR))
 }

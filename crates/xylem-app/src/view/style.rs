@@ -169,6 +169,10 @@ pub trait StyleLookup {
     fn get(&self, n: NodeId) -> Sty;
     fn before(&self, n: NodeId) -> Option<(String, Sty)>;
     fn after(&self, n: NodeId) -> Option<(String, Sty)>;
+    /// Image from `content: url(...)` in `::before` (false) or `::after` (true).
+    fn generated_image(&self, _n: NodeId, _after: bool) -> Option<std::path::PathBuf> {
+        None
+    }
     fn list_marker(&self, n: NodeId) -> Option<String>;
 }
 
@@ -178,6 +182,7 @@ pub struct CssStyles {
     before: std::collections::HashMap<NodeId, (String, Sty)>,
     after: std::collections::HashMap<NodeId, (String, Sty)>,
     markers: std::collections::HashMap<NodeId, String>,
+    images: std::collections::HashMap<(NodeId, bool), std::path::PathBuf>,
     subtree: Vec<u64>,
     fallback: Sty,
 }
@@ -271,12 +276,14 @@ fn convert(c: &xylem_style::ComputedStyle) -> Sty {
 }
 
 impl CssStyles {
-    pub fn compute(doc: &Document, engine: &xylem_style::StyleEngine) -> Self {
+    /// `css_dir` resolves `url(...)` references in generated content.
+    pub fn compute(doc: &Document, engine: &xylem_style::StyleEngine, css_dir: Option<&std::path::Path>) -> Self {
         let map = engine.compute(doc);
         let mut styles = vec![None; doc.node_count()];
         let mut before = std::collections::HashMap::new();
         let mut after = std::collections::HashMap::new();
         let mut markers = std::collections::HashMap::new();
+        let mut images = std::collections::HashMap::new();
         for n in doc.descendants(doc.root()) {
             if doc.is_text(n) {
                 continue;
@@ -302,6 +309,16 @@ impl CssStyles {
                         format!("{m}. ")
                     },
                 );
+            }
+            for (after, g) in [(false, map.before(n)), (true, map.after(n))] {
+                let Some(src) = g.and_then(|g| g.image.as_deref()) else { continue };
+                let path = match css_dir {
+                    Some(dir) => dir.join(src),
+                    None => std::path::PathBuf::from(src),
+                };
+                if path.is_file() {
+                    images.insert((n, after), path);
+                }
             }
             if let Some(g) = map.before(n)
                 && !g.text.is_empty()
@@ -333,6 +350,7 @@ impl CssStyles {
             before,
             after,
             markers,
+            images,
             subtree,
             fallback: Sty::default(),
         }
@@ -357,6 +375,9 @@ impl StyleLookup for CssStyles {
     }
     fn list_marker(&self, n: NodeId) -> Option<String> {
         self.markers.get(&n).cloned()
+    }
+    fn generated_image(&self, n: NodeId, after: bool) -> Option<std::path::PathBuf> {
+        self.images.get(&(n, after)).cloned()
     }
 }
 
