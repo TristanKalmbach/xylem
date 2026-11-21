@@ -605,6 +605,42 @@ impl Document {
         self.mark_changed(id);
     }
 
+    /// Replaces `range` (byte offsets into the decoded text) of a text or
+    /// CDATA node. Unlike [`Document::set_text`], the source text outside the
+    /// range is kept as written, so character references, `&gt;` and the like
+    /// elsewhere in the node survive and the file changes only where the
+    /// replacement went. Out-of-range or non-boundary ranges are ignored.
+    pub fn replace_text(&mut self, id: NodeId, range: std::ops::Range<usize>, with: &str) {
+        let Some(old) = self.text(id) else { return };
+        if range.start > range.end
+            || range.end > old.len()
+            || !old.is_char_boundary(range.start)
+            || !old.is_char_boundary(range.end)
+        {
+            return;
+        }
+        let mut text = old.to_string();
+        text.replace_range(range.clone(), with);
+        let node = self.node(id);
+        let raw = match (&node.kind, node.raw.as_deref()) {
+            (NodeKind::Text(t), Some(raw)) => splice_text_raw(raw, t, &range, with),
+            (NodeKind::CData(t), Some(raw)) if !with.contains("]]>") => {
+                // The CDATA content is the raw text between the delimiters.
+                let start = "<![CDATA[".len();
+                (raw.len() >= start + 3 && raw.get(start..raw.len() - 3) == Some(t)).then(|| {
+                    let mut r = raw.to_string();
+                    r.replace_range(start + range.start..start + range.end, with);
+                    r
+                })
+            }
+            _ => None,
+        };
+        self.set_text(id, text);
+        if raw.is_some() {
+            self.node_mut(id).raw = raw;
+        }
+    }
+
     pub fn rename(&mut self, id: NodeId, name: impl Into<String>) {
         self.record_change(id);
         let n = self.node_mut(id);
@@ -759,6 +795,17 @@ impl Document {
         s
     }
 
+    /// Serialises the whole document and reports, for every node (indexed by
+    /// [`NodeId::index`]), the byte offset where its markup starts in the
+    /// output. Nodes that are not attached to the document get `usize::MAX`.
+    /// Used to turn nodes into line numbers without a second parse.
+    pub fn to_xml_with_offsets(&self) -> (String, Vec<usize>) {
+        let mut s = String::new();
+        let mut offsets = vec![usize::MAX; self.nodes.len()];
+        serialize::write_tracked(self, self.root, &mut s, &mut Some(&mut offsets));
+        (s, offsets)
+    }
+
     /// Serialises the document into bytes using its original encoding.
     pub fn to_bytes(&self) -> Vec<u8> {
         encode(&self.to_xml(), self.encoding)
@@ -798,6 +845,51 @@ impl Iterator for Descendants<'_> {
         }
         Some(n)
     }
+}
+
+/// Source text for a text node after replacing `range` of its decoded value
+/// `text`. Character data is decoded only by expanding `&...;` references,
+/// so walking the source alongside the value maps every decoded character
+/// boundary to a source offset. `None` if the source does not decode to
+/// `text`, in which case the caller falls back to fresh escaping.
+fn splice_text_raw(
+    raw: &str,
+    text: &str,
+    range: &std::ops::Range<usize>,
+    with: &str,
+) -> Option<String> {
+    let mut map_start = None;
+    let (mut r, mut t) = (0, 0);
+    let map_end = loop {
+        if t == range.start && map_start.is_none() {
+            map_start = Some(r);
+        }
+        if t == range.end {
+            break r;
+        }
+        if r >= raw.len() || t >= text.len() {
+            return None;
+        }
+        let ch = text[t..].chars().next()?;
+        let step = if raw[r..].starts_with('&') {
+            let semi = raw[r..].find(';')?;
+            semi + 1
+        } else {
+            let rc = raw[r..].chars().next()?;
+            if rc != ch {
+                return None;
+            }
+            rc.len_utf8()
+        };
+        r += step;
+        t += ch.len_utf8();
+    };
+    let (start, end) = (map_start?, map_end);
+    let mut out = String::with_capacity(raw.len() + with.len());
+    out.push_str(&raw[..start]);
+    escape_text(with, &mut out);
+    out.push_str(&raw[end..]);
+    Some(out)
 }
 
 pub fn escape_text(s: &str, out: &mut String) {

@@ -344,6 +344,29 @@ impl DocState {
         self.styles.clone().unwrap()
     }
 
+    /// Styles that are exact even right after a structural edit. `styles()`
+    /// may then serve borrowed styles whose counters lag behind; that is
+    /// fine on screen for a moment but not in an exported or printed copy,
+    /// so this computes the exact styles on the spot instead of waiting.
+    pub fn exact_styles(&mut self) -> Rc<dyn StyleLookup> {
+        let styles = self.styles();
+        let (Some(_), Some(engine)) = (&self.style_job, self.style_engine.clone()) else {
+            return styles;
+        };
+        let css_dir = self
+            .package
+            .resolved_files()
+            .style
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
+        Rc::new(CssStyles::compute(
+            &self.editor.doc,
+            &engine,
+            css_dir.as_deref(),
+        ))
+    }
+
     fn spawn_restyle(
         &mut self,
         key: (u64, u64),

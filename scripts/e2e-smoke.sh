@@ -58,7 +58,7 @@ run read-only-element     "click 400 523;;type ZZ;;key BackSpace;;key BackSpace;
 
 # File > Import XMAX customization, then open a document that uses it.
 rm -rf "$out/pk" "$out/cfg" && mkdir -p "$out/pk"
-XYLEM_CONFIG_DIR="$native/cfg" XYLEM_PACKAGES="$native/pk"     XYLEM_SCRIPT="pick $repo/samples/xmax/Memo/Memo.ctm;;click 19 12;;wait 10;;click 100 202;;wait 20;;quit"     timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
+XYLEM_CONFIG_DIR="$native/cfg" XYLEM_PACKAGES="$native/pk"     XYLEM_SCRIPT="pick $repo/samples/xmax/Memo/Memo.ctm;;click 19 12;;wait 10;;click 100 253;;wait 20;;quit"     timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
 check import-from-menu "$out/pk/Memo/doctype.toml" 'schema = "Memo.xsd"'
 
 # Ctrl+click on a link to another file opens it at the #id.
@@ -69,6 +69,17 @@ printf '<doc><p id="first">First.</p><p id="second">Second.</p></doc>
 ' > "$out/links/b.xml"
 XYLEM_CONFIG_DIR="$native/cfg" XYLEM_SCRIPT="ctrlclick 400 105;;wait 10;;type X;;save $native/link.xml;;quit"     timeout 90 "$bin" "$native/links/a.xml" > /dev/null 2>&1
 check follow-file-link "$out/link.xml" '<p id="second">XSecond.</p>'
+
+# Edit > Find in files: replace across a folder. The open document is
+# clean, so it is rewritten on disk and reloaded; the other file is
+# rewritten without being opened, and its id attribute is left alone.
+rm -rf "$out/ff" "$out/cfg-ff" && mkdir -p "$out/ff"
+printf '<doc><p>The pump is primed.</p></doc>\n' > "$out/ff/a.xml"
+printf '<doc><p id="pump">Check the pump &amp; seals.</p></doc>\n' > "$out/ff/b.xml"
+XYLEM_CONFIG_DIR="$native/cfg-ff" XYLEM_SCRIPT="key F ctrl shift;;wait 5;;type pump;;key Enter;;wait 30;;click 770 189;;type valve;;click 521 282;;wait 20;;click 549 489;;wait 30;;save $native/ff-open.xml;;quit" \
+    timeout 90 "$bin" "$native/ff/a.xml" > /dev/null 2>&1
+check find-in-files-reloads-open "$out/ff-open.xml" "<p>The valve is primed.</p>"
+check find-in-files-writes-closed "$out/ff/b.xml" '<doc><p id="pump">Check the valve &amp; seals.</p></doc>'
 
 # Zoom and the last session survive a restart.
 rm -rf "$out/cfg2"

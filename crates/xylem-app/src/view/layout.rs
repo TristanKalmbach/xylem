@@ -1728,7 +1728,7 @@ fn set_decor_bottom(d: &mut Decor, bottom: f32) {
     }
 }
 
-fn parse_colwidth(v: &str) -> Option<f32> {
+pub(crate) fn parse_colwidth(v: &str) -> Option<f32> {
     let v = v.trim();
     if let Some(star) = v.strip_suffix('*') {
         return Some(if star.is_empty() {

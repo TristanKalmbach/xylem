@@ -1,6 +1,7 @@
 //! Find / Replace over the document's text content.
 
 use crate::doc::DocState;
+use crate::find_files::{SearchOptions, text_matches};
 use egui::RichText;
 use std::ops::Range;
 use xylem_dom::NodeId;
@@ -57,20 +58,7 @@ impl FindState {
             self.current = None;
             return;
         }
-        let pattern = if self.regex {
-            self.query.clone()
-        } else {
-            regex::escape(&self.query)
-        };
-        let pattern = if self.whole_word {
-            format!(r"\b(?:{pattern})\b")
-        } else {
-            pattern
-        };
-        let re = match regex::RegexBuilder::new(&pattern)
-            .case_insensitive(!self.match_case)
-            .build()
-        {
+        let re = match self.options().build() {
             Ok(r) => r,
             Err(e) => {
                 self.error = Some(e.to_string());
@@ -78,47 +66,50 @@ impl FindState {
             }
         };
         let doc = &ds.editor.doc;
-        for n in doc.descendants(doc.root()) {
-            let Some(t) = doc.text(n) else { continue };
-            if !self.in_element.is_empty() {
-                let inside = doc
-                    .ancestors(n)
-                    .any(|a| doc.name(a) == Some(self.in_element.as_str()));
-                if !inside {
-                    continue;
-                }
-            }
-            for m in re.find_iter(t) {
-                if m.start() < m.end() {
-                    self.matches.push((n, m.range()));
-                }
-            }
-        }
+        let within = self.in_element.as_str();
+        self.matches = text_matches(doc, &re, |n| {
+            within.is_empty() || doc.ancestors(n).any(|a| doc.name(a) == Some(within))
+        });
         self.current = None;
     }
 
-    fn expand(&self, ds: &DocState, m: &(NodeId, Range<usize>)) -> String {
-        if !self.regex {
-            return self.replacement.clone();
+    /// The current settings in the form the shared matcher takes.
+    fn options(&self) -> SearchOptions {
+        SearchOptions {
+            text: self.query.clone(),
+            match_case: self.match_case,
+            whole_word: self.whole_word,
+            regex: self.regex,
+            attributes: false,
         }
+    }
+
+    /// Takes over a search from find in files, so F3 continues through the
+    /// same matches in the document that was opened.
+    pub fn adopt(&mut self, opts: &SearchOptions) {
+        self.query = opts.text.clone();
+        self.match_case = opts.match_case;
+        self.whole_word = opts.whole_word;
+        self.regex = opts.regex;
+        self.in_element.clear();
+        self.key = None;
+    }
+
+    /// Selects the `n`th match in document order (the numbering find in
+    /// files reports), or the last one if the document has fewer.
+    pub fn goto_nth(&mut self, ds: &DocState, n: usize) -> Option<FindAction> {
+        self.refresh(ds);
+        let i = n.min(self.matches.len().checked_sub(1)?);
+        self.current = Some(i);
+        let m = self.matches[i].clone();
+        Some(FindAction::Goto(m.0, m.1))
+    }
+
+    fn expand(&self, ds: &DocState, m: &(NodeId, Range<usize>)) -> String {
         let t = ds.editor.doc.text(m.0).unwrap_or("");
-        let pattern = if self.whole_word {
-            format!(r"\b(?:{})\b", self.query)
-        } else {
-            self.query.clone()
-        };
-        match regex::RegexBuilder::new(&pattern)
-            .case_insensitive(!self.match_case)
-            .build()
-        {
-            Ok(re) => match re.captures(&t[m.1.clone()]) {
-                Some(c) => {
-                    let mut out = String::new();
-                    c.expand(&self.replacement, &mut out);
-                    out
-                }
-                None => self.replacement.clone(),
-            },
+        let opts = self.options();
+        match opts.build() {
+            Ok(re) => opts.expand(&re, t, m.1.clone(), &self.replacement),
             Err(_) => self.replacement.clone(),
         }
     }

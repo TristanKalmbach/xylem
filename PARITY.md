@@ -74,6 +74,9 @@ are unverified.
 |---|---|---|
 | Validation as you type; issues list; invalid tags flagged | verified | |
 | Find and replace; F3 / Shift+F3 | verified | |
+| Find and replace in files (Ctrl+Shift+F) | verified | Searched a folder with subfolders, opened a result at the match (text and attribute hits), and ran Replace all: an unsaved open file was skipped and reported, a clean one was reloaded, and the rewritten files kept CRLF line ends and character references. Unparseable files are listed, never written, and so is any file the DOM would not write back byte for byte. Read-only elements from a doctype package are not honoured, since files are not matched to packages. |
+| Export to HTML | verified | Rendered in headless Edge and Chrome next to the Normal view of the sample manual: counters, list markers, the warning box with its generated image, the CALS table with its spans and the code block all match. A generic document with image elements (one PNG, one missing CGM shown as a labelled box) and an HTML table with `colspan`/`rowspan` matched too. Printed to PDF with backgrounds kept. Vertical spacing is a little tighter than in the editor, because browsers collapse adjacent margins. |
+| Print preview (opens the export in the browser) | partial | Writes the page and, in normal use, opens it with the default browser. The browser launch is skipped in scripted runs and was not exercised there. |
 | Spell check with suggestions and a user dictionary | verified | With a small local dictionary. No dictionary ships with Xylem; point Preferences at Hunspell `.aff`/`.dic` files. |
 | Format document (pretty-print) | verified | Indent amount and per-element "indent content" from the package; mixed content is never touched. |
 | Save (lossless, atomic) | verified | |

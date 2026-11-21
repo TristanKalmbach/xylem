@@ -1,11 +1,25 @@
 use crate::{Document, NodeId, NodeKind, escape_attr, escape_text};
 
 pub(crate) fn write_node(doc: &Document, id: NodeId, out: &mut String) {
+    write_tracked(doc, id, out, &mut None);
+}
+
+/// Serialises `id`, recording in `offsets` (indexed by node) the byte offset
+/// at which each node's markup starts in `out`.
+pub(crate) fn write_tracked(
+    doc: &Document,
+    id: NodeId,
+    out: &mut String,
+    offsets: &mut Option<&mut Vec<usize>>,
+) {
+    if let Some(offs) = offsets.as_deref_mut() {
+        offs[id.index()] = out.len();
+    }
     let node = &doc.nodes[id.index()];
     match &node.kind {
         NodeKind::Document => {
             for &c in &node.children {
-                write_node(doc, c, out);
+                write_tracked(doc, c, out, offsets);
             }
         }
         NodeKind::Element(e) => {
@@ -43,7 +57,7 @@ pub(crate) fn write_node(doc: &Document, id: NodeId, out: &mut String) {
                 return;
             }
             for &c in &node.children {
-                write_node(doc, c, out);
+                write_tracked(doc, c, out, offsets);
             }
             match &node.raw_end {
                 Some(r) => out.push_str(r),

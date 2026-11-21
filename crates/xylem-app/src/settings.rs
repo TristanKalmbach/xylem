@@ -34,6 +34,9 @@ pub struct Settings {
     pub last_session: Vec<PathBuf>,
     /// Seconds between autosaves of unsaved work (0 turns it off).
     pub autosave_seconds: u32,
+    /// Folder and file pattern last used by Find in files.
+    pub find_files_folder: Option<PathBuf>,
+    pub find_files_pattern: String,
 }
 
 impl Default for Settings {
@@ -59,6 +62,8 @@ impl Default for Settings {
             restore_session: true,
             last_session: Vec::new(),
             autosave_seconds: 60,
+            find_files_folder: None,
+            find_files_pattern: crate::find_files::DEFAULT_PATTERN.into(),
         }
     }
 }
