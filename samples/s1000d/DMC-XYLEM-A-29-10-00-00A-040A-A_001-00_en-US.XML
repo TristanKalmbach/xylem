@@ -24,8 +24,8 @@
   <content>
     <description>
       <levelledPara>
-        <title>Placeholder title</title>
-        <para>Placeholder paragraph.</para>
+        <title>Hydraulic pump</title>
+        <para>The pump supplies fluid to the lift cylinder. To service it, follow <dmRef><dmRefIdent><dmCode modelIdentCode="XYLEM" systemDiffCode="A" systemCode="29" subSystemCode="1" subSubSystemCode="0" assyCode="00" disassyCode="00" disassyCodeVariant="A" infoCode="520" infoCodeVariant="A" itemLocationCode="A"/></dmRefIdent></dmRef>.</para>
       </levelledPara>
     </description>
   </content>

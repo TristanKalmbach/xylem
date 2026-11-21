@@ -1365,14 +1365,14 @@ impl Editor {
         self.transact(|ed| {
             let parent = ed.doc.parent(el).unwrap();
             ed.check_writable(rules, parent)?;
-            let idx = ed.doc.index_in_parent(sib).unwrap();
-            ed.doc.detach(el);
-            let idx = if up {
-                idx
-            } else {
-                ed.doc.index_in_parent(sib).unwrap() + 1
-            };
-            ed.doc.insert_child(parent, idx, el);
+            // Swap the two elements so the whitespace between them stays put.
+            let (a, b) = if up { (sib, el) } else { (el, sib) };
+            let ia = ed.doc.index_in_parent(a).unwrap();
+            let ib = ed.doc.index_in_parent(b).unwrap();
+            ed.doc.detach(b);
+            ed.doc.detach(a);
+            ed.doc.insert_child(parent, ia, b);
+            ed.doc.insert_child(parent, ib, a);
             ed.sel = Selection::caret(first_editable(&ed.doc, rules, el));
             Ok(())
         })

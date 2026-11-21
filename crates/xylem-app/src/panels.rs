@@ -80,7 +80,7 @@ pub fn structure(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec<
             }
         }
     }
-    egui::ScrollArea::both()
+    egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .id_salt("structure")
         .show(ui, |ui| {
@@ -170,7 +170,7 @@ fn structure_node(
             }
         });
         if !preview.is_empty() {
-            ui.label(RichText::new(preview).weak().small());
+            ui.add(egui::Label::new(RichText::new(preview).weak().small()).truncate());
         }
     });
     if st.structure_expanded.contains(&n) {

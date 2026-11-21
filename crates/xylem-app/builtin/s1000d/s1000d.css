@@ -51,6 +51,8 @@ internalRef:before { content: "[" attr(internalRefId) "]"; color: #0b5fa5; }
 dmRef { color: #0b5fa5; }
 dmRef:before { content: "→ "; }
 dmRefIdent, dmRefAddressItems { display: inline; }
+/* Inside a reference the code reads as part of the sentence. */
+dmRef dmCode, pmRef pmCode { display: inline; font-weight: normal; }
 dmRefAddressItems { display: none; }
 externalPubRef { color: #0b5fa5; }
 

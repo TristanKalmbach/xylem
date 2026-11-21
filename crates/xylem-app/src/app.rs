@@ -149,6 +149,8 @@ pub struct XylemApp {
     /// Debug hook: `XYLEM_SCREENSHOT=<png>` captures the window and exits.
     screenshot: Option<(PathBuf, u32)>,
     palette: Option<Palette>,
+    /// Messages already shown this session (schema warnings repeat per file).
+    shown_once: std::collections::HashSet<String>,
     shortcuts_open: bool,
     last_autosave: f64,
     /// Autosaved documents found at startup, offered for recovery.
@@ -163,6 +165,10 @@ impl XylemApp {
             .storage
             .and_then(|s| eframe::get_value(s, "settings"))
             .unwrap_or_default();
+        if let Some(dict) = std::env::var_os("XYLEM_DICTIONARY") {
+            settings.dictionary_dir = Some(PathBuf::from(dict));
+            settings.spell_check = true;
+        }
         if let Some(brex) = std::env::var_os("XYLEM_BREX") {
             settings.brex = Some(PathBuf::from(brex));
         }
@@ -202,6 +208,7 @@ impl XylemApp {
             allow_close: false,
             screenshot: std::env::var_os("XYLEM_SCREENSHOT").map(|p| (PathBuf::from(p), 0)),
             palette: None,
+            shown_once: Default::default(),
             shortcuts_open: false,
             last_autosave: 0.0,
             recovery: Vec::new(),
@@ -317,7 +324,9 @@ impl XylemApp {
         for w in ds.style_warnings.iter().take(3) {
             log::warn!("{w}");
         }
-        if ds.grammar_status.contains("failed") || ds.grammar_status.contains("not available") {
+        if (ds.grammar_status.contains("failed") || ds.grammar_status.contains("not available"))
+            && self.shown_once.insert(ds.grammar_status.clone())
+        {
             let m = ds.grammar_status.clone();
             self.toast(m, true);
         }

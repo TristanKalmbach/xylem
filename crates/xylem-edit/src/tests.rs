@@ -394,3 +394,22 @@ fn reformat_only_touches_formatting_whitespace() {
     e.undo();
     assert_eq!(xml(&e), src);
 }
+
+#[test]
+fn moving_elements_keeps_whitespace_layout() {
+    let mut e = ed("<doc>
+  <p>one</p>
+  <p>two</p>
+</doc>");
+    let second = e.doc.element_children(e.doc.document_element().unwrap()).nth(1).unwrap();
+    e.move_element(&TestRules, second, true).unwrap();
+    assert_eq!(xml(&e), "<doc>
+  <p>two</p>
+  <p>one</p>
+</doc>");
+    e.move_element(&TestRules, second, false).unwrap();
+    assert_eq!(xml(&e), "<doc>
+  <p>one</p>
+  <p>two</p>
+</doc>");
+}
