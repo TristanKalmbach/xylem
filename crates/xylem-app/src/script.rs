@@ -35,6 +35,67 @@ pub enum Step {
     Save(PathBuf),
     Drop(PathBuf),
     Quit,
+    /// Runs an app command by name (`cmd SaveAs`, `cmd InsertElement para`).
+    Command(String, String),
+    /// Puts the caret at, or selects, the first occurrence of some text.
+    Caret(String, CaretAt),
+    /// Clicks relative to where the caret was last drawn (see `clickat`).
+    ClickAnchor(egui::Vec2, ClickKind),
+    /// Clicks the widget registered under this label (see [`track`]).
+    ClickUi(String, ClickKind),
+}
+
+/// Where a `caret`, `caretend` or `select` step puts the selection.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CaretAt {
+    Start,
+    End,
+    Select,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ClickKind {
+    Click,
+    Double,
+    Right,
+    Ctrl,
+}
+
+impl ClickKind {
+    fn from_prefix(cmd: &str) -> Self {
+        if cmd.starts_with("dbl") {
+            Self::Double
+        } else if cmd.starts_with("r") {
+            Self::Right
+        } else if cmd.starts_with("ctrl") {
+            Self::Ctrl
+        } else {
+            Self::Click
+        }
+    }
+}
+
+static ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Widgets drawn in the last frame, by label, for `clickui` steps.
+static UI_RECTS: Mutex<Vec<(String, egui::Rect)>> = Mutex::new(Vec::new());
+
+/// Registers a widget so a script can click it by label (`clickui Save`).
+/// Free when no script is running. The shared UI components call this, so
+/// most buttons are reachable without fixed coordinates.
+pub fn track(label: &str, response: &egui::Response) {
+    if !ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    if let Ok(mut v) = UI_RECTS.lock() {
+        v.push((label.to_string(), response.rect));
+    }
+}
+
+/// Starts a new frame's widget registry; the previous frame's stays
+/// readable until then.
+pub fn begin_frame() -> Vec<(String, egui::Rect)> {
+    UI_RECTS.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default()
 }
 
 pub struct Script {
@@ -42,6 +103,13 @@ pub struct Script {
     wait: u32,
     pub pending_shot: Option<PathBuf>,
     pub pending_save: Option<PathBuf>,
+    /// Commands for the app to run this frame: (name, argument).
+    pub pending_cmds: Vec<(String, String)>,
+    pub pending_caret: Option<(String, CaretAt)>,
+    /// The caret's rectangle on screen in the last frame, set by the app.
+    pub anchor: Option<egui::Rect>,
+    /// Widgets registered in the last frame, set by the app.
+    pub ui_rects: Vec<(String, egui::Rect)>,
     pub quit: bool,
     release: Option<(Pos2, PointerButton)>,
     hold_ctrl: bool,
@@ -104,6 +172,32 @@ impl Script {
                         _ => Step::Click(p, b, 1),
                     }
                 }
+                "cmd" => {
+                    let (name, arg) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
+                    Step::Command(name.to_string(), arg.to_string())
+                }
+                "caret" => Step::Caret(rest.to_string(), CaretAt::Start),
+                "caretend" => Step::Caret(rest.to_string(), CaretAt::End),
+                "select" => Step::Caret(rest.to_string(), CaretAt::Select),
+                // `clickat DX DY TEXT`: put the caret before TEXT, then click
+                // DX, DY points from the top-left of the caret.
+                "clickat" | "dblclickat" | "rclickat" | "ctrlclickat" => {
+                    let mut it = rest.splitn(3, ' ');
+                    let (Some(dx), Some(dy), Some(text)) = (
+                        it.next().and_then(|v| v.parse::<f32>().ok()),
+                        it.next().and_then(|v| v.parse::<f32>().ok()),
+                        it.next(),
+                    ) else {
+                        log::warn!("script: expected `{cmd} DX DY TEXT` in `{part}`");
+                        continue;
+                    };
+                    steps.push_back(Step::Caret(text.to_string(), CaretAt::Start));
+                    steps.push_back(Step::Wait(3));
+                    Step::ClickAnchor(egui::vec2(dx, dy), ClickKind::from_prefix(cmd))
+                }
+                "clickui" | "dblclickui" | "rclickui" | "ctrlclickui" => {
+                    Step::ClickUi(rest.trim().to_string(), ClickKind::from_prefix(cmd))
+                }
                 "shot" => Step::Shot(PathBuf::from(rest.trim())),
                 "save" => Step::Save(PathBuf::from(rest.trim())),
                 "drop" => Step::Drop(PathBuf::from(rest.trim())),
@@ -124,11 +218,16 @@ impl Script {
             steps.push_back(step);
             steps.push_back(Step::Wait(4));
         }
+        ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
         Some(Self {
             steps,
             wait: 0,
             pending_shot: None,
             pending_save: None,
+            pending_cmds: Vec::new(),
+            pending_caret: None,
+            anchor: None,
+            ui_rects: Vec::new(),
             quit: false,
             release: None,
             hold_ctrl: false,
@@ -137,8 +236,30 @@ impl Script {
 
     /// Injects the next step's events into this frame's raw input.
     pub fn feed(&mut self, raw: &mut RawInput) {
-        // Scripted runs drive the window as if it had OS focus.
+        // Scripted runs drive the window as if it had OS focus, and only by
+        // the script: real keyboard and mouse input is dropped, so whatever
+        // the person at the machine is doing (in another window) can never
+        // leak into a test, and a test never depends on where the mouse is.
         raw.focused = true;
+        raw.events.retain(|e| {
+            !matches!(
+                e,
+                Event::Text(_)
+                    | Event::Key { .. }
+                    | Event::Paste(_)
+                    | Event::Copy
+                    | Event::Cut
+                    | Event::Ime(_)
+                    | Event::PointerMoved(_)
+                    | Event::MouseMoved(_)
+                    | Event::PointerButton { .. }
+                    | Event::PointerGone
+                    | Event::MouseWheel { .. }
+                    | Event::Zoom(_)
+                    | Event::Touch { .. }
+            )
+        });
+        raw.modifiers = Modifiers::NONE;
         if let Some((p, b)) = self.release.take() {
             let m = if std::mem::take(&mut self.hold_ctrl) {
                 Modifiers::COMMAND
@@ -220,6 +341,37 @@ impl Script {
                 ..Default::default()
             }),
             Step::Quit => self.quit = true,
+            Step::Command(name, arg) => self.pending_cmds.push((name, arg)),
+            Step::Caret(text, at) => self.pending_caret = Some((text, at)),
+            Step::ClickAnchor(offset, kind) => match self.anchor {
+                Some(r) => self.push_click(r.min + offset, kind),
+                None => log::warn!("script: clickat with no caret on screen"),
+            },
+            Step::ClickUi(label, kind) => {
+                // Prefer an exact label, then one that starts with it ("Save"
+                // also finds "Save as…" only when nothing is called "Save").
+                let hit = self
+                    .ui_rects
+                    .iter()
+                    .find(|(l, _)| *l == label)
+                    .or_else(|| self.ui_rects.iter().find(|(l, _)| l.starts_with(&label)))
+                    .map(|(_, r)| r.center());
+                match hit {
+                    Some(p) => self.push_click(p, kind),
+                    None => log::warn!("script: no widget labelled `{label}` on screen"),
+                }
+            }
         }
+    }
+
+    /// Queues a click of the given kind at `p`, to be sent on the next frames.
+    fn push_click(&mut self, p: Pos2, kind: ClickKind) {
+        let step = match kind {
+            ClickKind::Click => Step::Click(p, PointerButton::Primary, 1),
+            ClickKind::Double => Step::Click(p, PointerButton::Primary, 2),
+            ClickKind::Right => Step::Click(p, PointerButton::Secondary, 1),
+            ClickKind::Ctrl => Step::CtrlClick(p),
+        };
+        self.steps.push_front(step);
     }
 }

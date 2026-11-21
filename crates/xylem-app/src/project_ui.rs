@@ -184,12 +184,13 @@ impl ProjectView {
             {
                 out.push(ProjectAction::Open(project.modules[s].path.clone()));
             }
-            if ui
+            let r = ui
                 .add_enabled(insert_ok, egui::Button::new("Insert reference"))
                 .on_disabled_hover_text(
                     "Select a module, and put the caret where a reference is allowed.",
-                )
-                .clicked()
+                );
+            crate::script::track("Insert reference", &r);
+            if r.clicked()
                 && let Some(s) = selected
             {
                 out.push(ProjectAction::InsertRef(s));
@@ -213,6 +214,7 @@ impl ProjectView {
                         egui::vec2(ui.available_width(), row_h),
                         Sense::click(),
                     );
+                    crate::script::track(&m.code, &resp);
                     let visuals = ui.visuals();
                     if self.selected == Some(i) {
                         ui.painter()

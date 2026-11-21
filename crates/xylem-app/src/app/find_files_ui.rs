@@ -165,9 +165,10 @@ impl XylemApp {
                 }
                 ui.end_row();
                 ui.label("Replace with");
-                ui.add(
+                let r = ui.add(
                     egui::TextEdit::singleline(&mut st.replacement).desired_width(f32::INFINITY),
                 );
+                crate::script::track("Replace with", &r);
                 ui.end_row();
                 ui.label("Folder");
                 ui.horizontal(|ui| {
@@ -207,11 +208,11 @@ impl XylemApp {
                 actions.push(Action::Search);
             }
             let can_replace = !busy && st.results_current() && !st.results.is_empty();
-            if ui
+            let r = ui
                 .add_enabled(can_replace, egui::Button::new("Replace all…"))
-                .on_disabled_hover_text("Run Find all with the current settings first")
-                .clicked()
-            {
+                .on_disabled_hover_text("Run Find all with the current settings first");
+            crate::script::track("Replace all…", &r);
+            if r.clicked() {
                 actions.push(Action::AskReplace);
             }
             if st.replacing.is_some() {
@@ -375,7 +376,9 @@ impl XylemApp {
                         .weak(),
                 );
                 ui.horizontal(|ui| {
-                    if ui.button("Replace").clicked() {
+                    let r = ui.button("Replace");
+                    crate::script::track("Confirm replace", &r);
+                    if r.clicked() {
                         actions.push(Action::Replace);
                         keep = false;
                     }

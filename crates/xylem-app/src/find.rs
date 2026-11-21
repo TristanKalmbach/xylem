@@ -180,6 +180,7 @@ pub fn window(ctx: &egui::Context, st: &mut FindState, ds: &DocState, out: &mut 
             egui::Grid::new("find-grid").num_columns(2).show(ui, |ui| {
                 ui.label("Find");
                 let r = ui.add(egui::TextEdit::singleline(&mut st.query).desired_width(260.0));
+                crate::script::track("Find text", &r);
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     st.refresh(ds);
                     if let Some(i) = st.next_from_caret(ds, true) {

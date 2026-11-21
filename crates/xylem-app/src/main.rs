@@ -35,13 +35,28 @@ fn main() -> eframe::Result<()> {
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .collect();
+    // Scripted test runs: put the window where XYLEM_WINDOW_POS says ("x,y",
+    // in screen points, e.g. on a second monitor) and don't take focus, so
+    // tests can run while someone keeps using the machine.
+    let scripted = std::env::var_os("XYLEM_SCRIPT").is_some();
+    let window_pos = std::env::var("XYLEM_WINDOW_POS").ok().and_then(|v| {
+        let (x, y) = v.split_once(',')?;
+        Some([x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?])
+    });
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Xylem")
+        .with_inner_size([1400.0, 900.0])
+        .with_min_inner_size([640.0, 400.0])
+        .with_drag_and_drop(true);
+    if let Some(pos) = window_pos {
+        viewport = viewport.with_position(pos);
+    }
+    if scripted {
+        viewport = viewport.with_active(false);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Xylem")
-            .with_inner_size([1400.0, 900.0])
-            .with_min_inner_size([640.0, 400.0])
-            .with_drag_and_drop(true),
-        persist_window: true,
+        viewport,
+        persist_window: !scripted && window_pos.is_none(),
         // With XYLEM_CONFIG_DIR set, everything (eframe's store included)
         // stays inside that folder; otherwise eframe's default location.
         persistence_path: std::env::var_os("XYLEM_CONFIG_DIR")

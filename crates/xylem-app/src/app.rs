@@ -114,6 +114,93 @@ pub enum Cmd {
     Resolve(NodeId, bool),
 }
 
+impl Cmd {
+    /// The command a test script names (`cmd SaveAs`, `cmd InsertElement para`,
+    /// `cmd View normal`). Scripts use these instead of clicking menus, so they
+    /// keep working when the layout changes.
+    pub fn from_script(name: &str, arg: &str) -> Option<Cmd> {
+        let arg = arg.trim();
+        Some(match name {
+            "New" => Cmd::New,
+            "NewS1000d" => Cmd::NewS1000d,
+            "Open" => Cmd::Open,
+            "Save" => Cmd::Save,
+            "SaveAs" => Cmd::SaveAs,
+            "Undo" => Cmd::Undo,
+            "Redo" => Cmd::Redo,
+            "Cut" => Cmd::Cut,
+            "Copy" => Cmd::Copy,
+            "Paste" => Cmd::Paste,
+            "PasteText" => Cmd::PasteText,
+            "SelectAll" => Cmd::SelectAll,
+            "SelectElement" => Cmd::SelectElement,
+            "Find" => Cmd::Find,
+            "FindInFiles" => Cmd::FindInFiles,
+            "ExportHtml" => Cmd::ExportHtml,
+            "PrintPreview" => Cmd::PrintPreview,
+            "ZoomIn" => Cmd::ZoomIn,
+            "ZoomOut" => Cmd::ZoomOut,
+            "ZoomReset" => Cmd::ZoomReset,
+            "Validate" => Cmd::Validate,
+            "CheckBrex" => Cmd::CheckBrex,
+            "RemoveTags" => Cmd::RemoveTags,
+            "DeleteElement" => Cmd::DeleteElement,
+            "SplitElement" => Cmd::SplitElement,
+            "JoinPreceding" => Cmd::JoinPreceding,
+            "EditAttributes" => Cmd::EditAttributes,
+            "InsertComment" => Cmd::InsertComment,
+            "InsertPi" => Cmd::InsertPi,
+            "InsertCData" => Cmd::InsertCData,
+            "InsertTable" => Cmd::InsertTable,
+            "TableRowAbove" => Cmd::TableRowAbove,
+            "TableRowBelow" => Cmd::TableRowBelow,
+            "TableDeleteRow" => Cmd::TableDeleteRow,
+            "TableColLeft" => Cmd::TableColLeft,
+            "TableColRight" => Cmd::TableColRight,
+            "TableDeleteColumn" => Cmd::TableDeleteColumn,
+            "TableMergeRight" => Cmd::TableMergeRight,
+            "TableMergeDown" => Cmd::TableMergeDown,
+            "TableSplitCell" => Cmd::TableSplitCell,
+            "TableDelete" => Cmd::TableDelete,
+            "TableRowUp" => Cmd::TableRowUp,
+            "TableRowDown" => Cmd::TableRowDown,
+            "PrettyPrint" => Cmd::PrettyPrint,
+            "ImportXmax" => Cmd::ImportXmax,
+            "Preferences" => Cmd::Preferences,
+            "About" => Cmd::About,
+            "CheckUpdates" => Cmd::CheckUpdates,
+            "ReloadPackages" => Cmd::ReloadPackages,
+            "S1000dInfo" => Cmd::S1000dInfo,
+            "RenameToCsdb" => Cmd::RenameToCsdb,
+            "SpellCheck" => Cmd::SpellCheck,
+            "Palette" => Cmd::Palette,
+            "Shortcuts" => Cmd::Shortcuts,
+            "CollapseChildren" => Cmd::CollapseChildren,
+            "ExpandAll" => Cmd::ExpandAll,
+            "ShowProject" => Cmd::ShowProject,
+            "ProjectFolder" => Cmd::ProjectFolder,
+            "CheckReferences" => Cmd::CheckReferences,
+            "Applicability" => Cmd::Applicability,
+            "TrackChanges" => Cmd::TrackChanges,
+            "ReviewPanel" => Cmd::ReviewPanel,
+            "NewComment" => Cmd::NewComment,
+            "InsertElement" => Cmd::InsertElement(arg.to_string()),
+            "Surround" => Cmd::Surround(arg.to_string()),
+            "Toggle" => Cmd::Toggle(arg.to_string()),
+            "View" => Cmd::View(match arg.to_ascii_lowercase().as_str() {
+                "normal" => View::Normal,
+                "source" => View::Source,
+                _ => View::TagsOn,
+            }),
+            "FindNext" => Cmd::FindNext(arg != "back"),
+            "Collapse" => Cmd::Collapse(arg != "expand"),
+            "ResolveAtCaret" => Cmd::ResolveAtCaret(arg != "reject"),
+            "ResolveAll" => Cmd::ResolveAll(arg != "reject"),
+            _ => return None,
+        })
+    }
+}
+
 /// Which view the left side panel shows.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 enum LeftTab {
@@ -213,6 +300,10 @@ pub struct XylemApp {
 
 impl XylemApp {
     pub fn new(cc: &eframe::CreationContext<'_>, files: Vec<PathBuf>) -> Self {
+        if std::env::var_os("XYLEM_SCRIPT").is_some() {
+            // Screenshots must not catch menus and windows half faded in.
+            cc.egui_ctx.all_styles_mut(|s| s.animation_time = 0.0);
+        }
         let mut settings: Settings = cc
             .storage
             .and_then(|s| eframe::get_value(s, "settings"))
@@ -1526,6 +1617,33 @@ impl XylemApp {
                 }
             }
         }
+    }
+
+    /// Puts the caret at, or selects, the first occurrence of `text` in the
+    /// active document's text (scripted tests).
+    fn script_caret(&mut self, text: &str, at: crate::script::CaretAt) {
+        let Some(ds) = self.docs.get_mut(self.active) else {
+            return;
+        };
+        let doc = &ds.editor.doc;
+        let hit = doc.descendants(doc.root()).find_map(|n| {
+            let t = doc.text(n)?;
+            t.find(text).map(|i| (n, i, i + text.len()))
+        });
+        let Some((node, start, end)) = hit else {
+            log::warn!("script: `{text}` not found in the document");
+            return;
+        };
+        use crate::script::CaretAt;
+        ds.editor.sel = match at {
+            CaretAt::Start => Selection::caret(Pos::new(node, start)),
+            CaretAt::End => Selection::caret(Pos::new(node, end)),
+            CaretAt::Select => Selection {
+                anchor: Pos::new(node, start),
+                focus: Pos::new(node, end),
+            },
+        };
+        ds.canvas.scroll_to_caret = true;
     }
 
     /// Puts the caret in the element with this `id` in the active document.
@@ -2854,7 +2972,9 @@ impl XylemApp {
                         ui.radio_value(&mut t.cals, true, "CALS (table/tgroup/row/entry)");
                         ui.radio_value(&mut t.cals, false, "HTML (table/tr/td)");
                     });
-                    insert = ui.button("Insert").clicked();
+                    let r = ui.button("Insert");
+                    crate::script::track("Insert", &r);
+                    insert = r.clicked();
                 });
             if insert {
                 let xml = if t.cals {
@@ -3380,6 +3500,23 @@ impl XylemApp {
             }
         }
         // Scripted steps.
+        if let Some(script) = &mut self.script {
+            script.anchor = self.docs.get(self.active).and_then(|d| d.canvas.caret_screen);
+        }
+        let script_cmds = self
+            .script
+            .as_mut()
+            .map(|s| std::mem::take(&mut s.pending_cmds))
+            .unwrap_or_default();
+        for (name, arg) in script_cmds {
+            match Cmd::from_script(&name, &arg) {
+                Some(c) => self.run(ctx, c),
+                None => log::warn!("script: unknown command `{name}`"),
+            }
+        }
+        if let Some((text, at)) = self.script.as_mut().and_then(|s| s.pending_caret.take()) {
+            self.script_caret(&text, at);
+        }
         if let Some(script) = &mut self.script {
             if let Some(p) = script.pending_shot.take() {
                 self.shot_path = Some(p);
@@ -4021,6 +4158,7 @@ fn word_at(t: &str, off: usize) -> Option<(usize, usize)> {
 impl eframe::App for XylemApp {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         if let Some(s) = &mut self.script {
+            s.ui_rects = crate::script::begin_frame();
             s.feed(raw);
         }
     }

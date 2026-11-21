@@ -2,3 +2,4 @@
 
 # Local agent worktrees and settings
 .claude/
+/target-ui
