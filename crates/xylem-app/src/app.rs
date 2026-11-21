@@ -443,6 +443,22 @@ impl XylemApp {
         }
     }
 
+    fn with_editor_result<T>(&mut self, f: impl FnOnce(&mut xylem_edit::Editor, &dyn Rules) -> Result<T, EditError>) -> Option<Result<T, EditError>> {
+        let ds = self.docs.get_mut(self.active)?;
+        if ds.read_only || ds.view == View::Source {
+            return None;
+        }
+        let styles = ds.styles();
+        let grammar = ds.grammar.clone();
+        let package = ds.package.clone();
+        let memo = ds.rules_memo();
+        let rules = DocRules::new(grammar.as_deref(), &package, &*styles, memo);
+        let r = f(&mut ds.editor, &rules);
+        ds.canvas.scroll_to_caret = true;
+        ds.canvas.request_focus = true;
+        Some(r)
+    }
+
     fn run(&mut self, ctx: &egui::Context, cmd: Cmd) {
         match cmd {
             Cmd::New => {
@@ -801,6 +817,64 @@ impl XylemApp {
         if let Some(ds) = self.docs.get_mut(self.active) {
             ds.editor.fix_selection(&xylem_edit::NoRules);
         }
+    }
+
+    /// Inserts a dropped image file as the package's image element at the
+    /// caret. Returns false when the document has no image element configured.
+    fn insert_image_file(&mut self, file: &Path) -> bool {
+        let file = &std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+        let Some(ds) = self.docs.get(self.active) else { return false };
+        if ds.view == View::Source || ds.package.behaviour.images.is_empty() {
+            return false;
+        }
+        let images = ds.package.behaviour.images.clone();
+        let dir = ds.dir().map(Path::to_path_buf);
+        // S1000D refers to graphics by ICN (the file name without extension);
+        // other markup gets a path relative to the document when possible.
+        let reference = |attr: &str| -> String {
+            if attr == "infoEntityIdent" || attr == "boardno" {
+                return file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            }
+            match dir.as_deref().and_then(|d| file.strip_prefix(d).ok()) {
+                Some(rel) => rel.to_string_lossy().replace('\\', "/"),
+                None => file.to_string_lossy().replace('\\', "/"),
+            }
+        };
+        let mut last_err = None;
+        for img in images {
+            let mut xml = format!("<{} {}=\"", img.element, img.source_attr);
+            xylem_dom::escape_attr(&reference(&img.source_attr), &mut xml);
+            xml.push_str("\"/>");
+            let name = img.element.clone();
+            match self.with_editor_result(|ed, r| ed.insert_element_xml(r, &name, &xml).map(|_| ())) {
+                Some(Ok(())) => {
+                    self.after_insert();
+                    return true;
+                }
+                Some(Err(e)) => last_err = Some(e),
+                None => return false,
+            }
+        }
+        // Not allowed directly: wrap it in an allowed container whose template
+        // or required content holds the image element (e.g. a figure).
+        let ds = self.docs.get(self.active).unwrap();
+        for img in &ds.package.behaviour.images {
+            if let Some((name, xml)) = image_container_xml(ds, &img.element, &img.source_attr, &reference(&img.source_attr)) {
+                match self.with_editor_result(|ed, r| ed.insert_element_xml(r, &name, &xml).map(|_| ())) {
+                    Some(Ok(())) => {
+                        self.after_insert();
+                        return true;
+                    }
+                    Some(Err(e)) => last_err = Some(e),
+                    None => return false,
+                }
+                break;
+            }
+        }
+        if let Some(e) = last_err {
+            self.toast(format!("Can't insert the image here: {e}"), true);
+        }
+        true
     }
 
     fn after_insert(&mut self) {
@@ -2641,6 +2715,44 @@ fn load_texture(ctx: &egui::Context, p: &Path) -> Option<egui::TextureHandle> {
     Some(ctx.load_texture(p.display().to_string(), ci, egui::TextureOptions::LINEAR))
 }
 
+/// Markup for an element that may be inserted at the caret and contains the
+/// image element (from the package template or the schema's required
+/// content), with the image's source attribute filled in.
+fn image_container_xml(ds: &DocState, image: &str, attr: &str, value: &str) -> Option<(String, String)> {
+    let g = ds.grammar.as_deref()?;
+    let doc = &ds.editor.doc;
+    // Candidate positions: the caret, then after each enclosing element.
+    let (mut parent, mut index) = ds.editor.insertion_point();
+    let mut candidates = Vec::new();
+    loop {
+        candidates.extend(g.insertable_at(doc, parent, index).into_iter().filter(|i| i.keeps_valid).map(|i| (i.name, i.decl)));
+        let Some(up) = doc.parent(parent).filter(|&p| doc.is_element(p)) else { break };
+        index = doc.index_in_parent(parent).unwrap_or(0) + 1;
+        parent = up;
+    }
+    for (name, decl) in candidates {
+        let xml = ds
+            .package
+            .template(&name)
+            .map(|t| t.xml.clone())
+            .filter(|x| x.contains(&format!("<{image}")))
+            .unwrap_or_else(|| crate::doc::skeleton_xml(&g.required_skeleton(decl)));
+        let Ok(mut frag) = xylem_dom::parse_fragment(&xml) else { continue };
+        let target = frag.descendants(frag.root()).find(|&n| frag.name(n) == Some(image));
+        let Some(target) = target else { continue };
+        frag.set_attr(target, attr, value);
+        let out: String = frag.children(frag.root()).iter().map(|&c| frag.node_to_xml(c)).collect();
+        return Some((name, out));
+    }
+    None
+}
+
+fn is_image_file(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "svg" | "cgm" | "webp"))
+}
+
 fn parse_color(s: &str) -> Option<Color32> {
     let s = s.trim().trim_start_matches('#');
     if s.len() == 6 {
@@ -2706,6 +2818,9 @@ impl eframe::App for XylemApp {
                 .collect()
         });
         for p in dropped {
+            if is_image_file(&p) && self.insert_image_file(&p) {
+                continue;
+            }
             self.open_path(p);
         }
         // Confirm before closing with unsaved work.

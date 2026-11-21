@@ -2,7 +2,7 @@
 //!
 //! Steps are separated by `;;`:
 //! `wait N` · `type TEXT` · `paste TEXT` · `key NAME [ctrl] [shift] [alt]` · `click X Y` ·
-//! `dblclick X Y` · `rclick X Y` · `shot PATH` · `save PATH` (writes the active
+//! `dblclick X Y` · `rclick X Y` · `shot PATH` · `drop FILE` · `save PATH` (writes the active
 //! document's XML) · `quit`.
 
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput};
@@ -18,6 +18,7 @@ pub enum Step {
     CtrlClick(Pos2),
     Shot(PathBuf),
     Save(PathBuf),
+    Drop(PathBuf),
     Quit,
 }
 
@@ -83,6 +84,7 @@ impl Script {
                 }
                 "shot" => Step::Shot(PathBuf::from(rest.trim())),
                 "save" => Step::Save(PathBuf::from(rest.trim())),
+                "drop" => Step::Drop(PathBuf::from(rest.trim())),
                 "quit" => Step::Quit,
                 _ => {
                     log::warn!("script: unknown step `{part}`");
@@ -168,6 +170,7 @@ impl Script {
             }
             Step::Shot(p) => self.pending_shot = Some(p),
             Step::Save(p) => self.pending_save = Some(p),
+            Step::Drop(p) => raw.dropped_files.push(egui::DroppedFile { path: Some(p), ..Default::default() }),
             Step::Quit => self.quit = true,
         }
     }
