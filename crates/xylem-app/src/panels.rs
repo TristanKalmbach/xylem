@@ -385,7 +385,10 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
         .show(ui, |ui| {
             // Names get a share of the panel, so long ones (S1000D's
             // modelIdentCode) fit when the panel is widened.
-            let name_w = (ui.available_width() * 0.42).clamp(80.0, 180.0);
+            let total = ui.available_width();
+            let name_w = (total * 0.42).clamp(80.0, 180.0);
+            // Editor width: what is left after the name and the remove button.
+            let edit_w = (total - name_w - 20.0 - 2.0 * 6.0).max(60.0);
             egui::Grid::new(("attr-grid", el))
                 .num_columns(3)
                 .spacing([6.0, 4.0])
@@ -404,10 +407,7 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
                         } else {
                             p.text_faint
                         };
-                        let lr = ui.add_sized(
-                            [name_w, 22.0],
-                            egui::Label::new(RichText::new(text).color(color)).truncate(),
-                        );
+                        let lr = name_cell(ui, name_w, RichText::new(text).color(color));
                         let tip = match (&d.documentation, d.required) {
                             (Some(t), true) => format!("{} (required)\n{t}", d.name),
                             (Some(t), false) => format!("{}\n{t}", d.name),
@@ -417,6 +417,7 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
                         lr.on_hover_text(tip);
                         attr_editor(
                             ui,
+                            edit_w,
                             el,
                             &d.name,
                             current.as_deref(),
@@ -442,21 +443,31 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
                             && !a.name.starts_with("xmlns")
                             && !a.name.starts_with("xsi:")
                             && !a.name.starts_with("xml:");
-                        let lr = ui.add_sized(
-                            [name_w, 22.0],
-                            egui::Label::new(RichText::new(&a.name).color(if undeclared {
+                        let lr = name_cell(
+                            ui,
+                            name_w,
+                            RichText::new(&a.name).color(if undeclared {
                                 p.warning
                             } else {
                                 p.text_muted
-                            }))
-                            .truncate(),
+                            }),
                         );
                         if undeclared {
                             lr.on_hover_text("Not declared in the schema");
                         } else {
                             lr.on_hover_text(&a.name);
                         }
-                        attr_editor(ui, el, &a.name, Some(&a.value), None, &[], None, out);
+                        attr_editor(
+                            ui,
+                            edit_w,
+                            el,
+                            &a.name,
+                            Some(&a.value),
+                            None,
+                            &[],
+                            None,
+                            out,
+                        );
                         if remove_button(ui).clicked() {
                             out.push(PanelAction::RemoveAttr(el, a.name.clone()));
                         }
@@ -488,6 +499,20 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
         });
 }
 
+/// A left-aligned, truncated attribute name of a fixed width.
+fn name_cell(ui: &mut Ui, width: f32, text: RichText) -> egui::Response {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, 22.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.set_max_width(width);
+            ui.add(egui::Label::new(text).truncate())
+        },
+    )
+    .inner
+}
+
 fn remove_button(ui: &mut Ui) -> egui::Response {
     let p = palette(ui.ctx());
     let r = ui.add(
@@ -501,6 +526,7 @@ fn remove_button(ui: &mut Ui) -> egui::Response {
 #[allow(clippy::too_many_arguments)]
 fn attr_editor(
     ui: &mut Ui,
+    w: f32,
     el: NodeId,
     name: &str,
     current: Option<&str>,
@@ -510,8 +536,6 @@ fn attr_editor(
     out: &mut Vec<PanelAction>,
 ) {
     let p = palette(ui.ctx());
-    // Name column, editor, remove button: leave room for the button.
-    let w = (ui.available_width() - 34.0).max(60.0);
     if let Some(f) = fixed {
         ui.label(RichText::new(f).color(p.text_faint))
             .on_hover_text("Fixed value");

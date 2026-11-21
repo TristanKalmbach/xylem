@@ -143,6 +143,8 @@ The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X
 
 Scripted runs never open a web browser: Print preview writes its page to `xylem-print` in the temporary folder and reports the path. Set `XYLEM_NO_BROWSER=1` to get the same behaviour outside the harness.
 
+Set `XYLEM_WINDOW_POS=x,y` (and optionally `XYLEM_WINDOW_SIZE=w,h`) to put test windows somewhere out of the way, such as a second monitor; they never take focus. [docs/ui-design.md](docs/ui-design.md) describes the theme and shared UI components.
+
 See [PARITY.md](PARITY.md) for the XMAX feature checklist.
 
 ## License
