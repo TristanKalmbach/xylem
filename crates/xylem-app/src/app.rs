@@ -148,6 +148,7 @@ pub struct XylemApp {
     allow_close: bool,
     /// Debug hook: `XYLEM_SCREENSHOT=<png>` captures the window and exits.
     screenshot: Option<(PathBuf, u32)>,
+    ctx: egui::Context,
     palette: Option<Palette>,
     /// Messages already shown this session (schema warnings repeat per file).
     shown_once: std::collections::HashSet<String>,
@@ -216,6 +217,7 @@ impl XylemApp {
             pending_open: files,
             allow_close: false,
             screenshot: std::env::var_os("XYLEM_SCREENSHOT").map(|p| (PathBuf::from(p), 0)),
+            ctx: cc.egui_ctx.clone(),
             palette: None,
             shown_once: Default::default(),
             shortcuts_open: false,
@@ -338,6 +340,7 @@ impl XylemApp {
         let id = self.next_id;
         self.next_id += 1;
         let mut ds = DocState::new(id, doc, path, pkg);
+        ds.repaint = Some(self.ctx.clone());
         ds.view = self.settings.default_view;
         ds.load_styles();
         ds.load_grammar(&self.catalog);
@@ -1056,6 +1059,7 @@ impl XylemApp {
         let id = self.next_id;
         self.next_id += 1;
         let mut ds = DocState::new(id, doc, None, pkg_arc);
+        ds.repaint = Some(self.ctx.clone());
         ds.view = self.settings.default_view;
         ds.load_styles();
         ds.load_grammar(&self.catalog);

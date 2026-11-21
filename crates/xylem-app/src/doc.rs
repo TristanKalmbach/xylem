@@ -59,7 +59,7 @@ pub struct DocState {
     pub package: Arc<DoctypePackage>,
     pub grammar: Option<Arc<Grammar>>,
     pub grammar_status: String,
-    pub style_engine: Option<xylem_style::StyleEngine>,
+    pub style_engine: Option<std::sync::Arc<xylem_style::StyleEngine>>,
     pub style_warnings: Vec<String>,
     styles: Option<Rc<dyn StyleLookup>>,
     styles_key: (u64, u64),
@@ -77,6 +77,12 @@ pub struct DocState {
     pub spell_cache: crate::spell::SpellCache,
     images: (u64, Rc<HashMap<NodeId, String>>),
     words: (u64, usize),
+    /// Exact CSS styles for the last structure they were computed for.
+    exact_css: Option<Rc<CssStyles>>,
+    /// Background restyle in progress: (style key it is for, result channel).
+    style_job: Option<((u64, u64), std::sync::mpsc::Receiver<CssStyles>)>,
+    /// Asks the UI to repaint when background work finishes.
+    pub repaint: Option<egui::Context>,
     /// Autosave copy this document was recovered from. The document counts as
     /// unsaved, and the copy is kept, until the user saves or discards it.
     pub recovered_from: Option<std::path::PathBuf>,
@@ -116,6 +122,9 @@ impl DocState {
             spell_cache: Default::default(),
             images: (u64::MAX, Default::default()),
             words: (u64::MAX, 0),
+            exact_css: None,
+            style_job: None,
+            repaint: None,
             recovered_from: None,
         }
     }
@@ -211,7 +220,8 @@ impl DocState {
             match xylem_style::Stylesheet::load(&css) {
                 Ok(sheet) => {
                     self.style_warnings = sheet.warnings().to_vec();
-                    self.style_engine = Some(xylem_style::StyleEngine::new(sheet));
+                    self.style_engine =
+                        Some(std::sync::Arc::new(xylem_style::StyleEngine::new(sheet)));
                 }
                 Err(e) => self.style_warnings.push(format!("{}: {e}", css.display())),
             }
@@ -272,30 +282,89 @@ impl DocState {
             self.editor.doc.revision()
         };
         let key = (doc_key, self.style_revision);
-        if self.styles.is_none() || self.styles_key != key {
-            let t = std::time::Instant::now();
-            let s: Rc<dyn StyleLookup> = match &mut self.style_engine {
-                Some(engine) => {
-                    for (n, css) in &self.inline_styles {
-                        engine.set_inline_style(*n, css);
+        // Pick up a finished background restyle for the current structure.
+        if let Some((job_key, rx)) = &self.style_job {
+            match rx.try_recv() {
+                Ok(css) => {
+                    let fresh = *job_key == key;
+                    self.style_job = None;
+                    if fresh {
+                        let css = Rc::new(css);
+                        self.exact_css = Some(css.clone());
+                        self.styles = Some(css);
+                        self.styles_key = key;
                     }
-                    Rc::new(CssStyles::compute(
-                        &self.editor.doc,
-                        engine,
-                        self.package
-                            .resolved_files()
-                            .style
-                            .as_deref()
-                            .and_then(Path::parent),
-                    ))
                 }
-                None => Rc::new(DefaultStyles::compute(&self.editor.doc)),
-            };
-            self.styles = Some(s);
-            self.styles_key = key;
-            log::debug!("styles computed in {:?}", t.elapsed());
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.style_job = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
         }
+        if self.styles.is_some() && self.styles_key == key {
+            return self.styles.clone().unwrap();
+        }
+        let t = std::time::Instant::now();
+        let css_dir = self
+            .package
+            .resolved_files()
+            .style
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
+        let styles: Rc<dyn StyleLookup> = match self.style_engine.clone() {
+            None => Rc::new(DefaultStyles::compute(&self.editor.doc)),
+            Some(engine) => {
+                // After a structural edit, show patched styles at once and
+                // compute the exact ones on a worker thread.
+                let patched = (self.style_revision == self.styles_key.1)
+                    .then(|| self.exact_css.clone())
+                    .flatten()
+                    .and_then(|base| {
+                        crate::view::style::PatchedStyles::new(base, &self.editor.doc)
+                    });
+                match patched {
+                    Some(p) => {
+                        self.spawn_restyle(key, engine, css_dir);
+                        Rc::new(p)
+                    }
+                    None => {
+                        let css = Rc::new(CssStyles::compute(
+                            &self.editor.doc,
+                            &engine,
+                            css_dir.as_deref(),
+                        ));
+                        self.exact_css = Some(css.clone());
+                        css
+                    }
+                }
+            }
+        };
+        self.styles = Some(styles);
+        self.styles_key = key;
+        log::debug!("styles ready in {:?}", t.elapsed());
         self.styles.clone().unwrap()
+    }
+
+    fn spawn_restyle(
+        &mut self,
+        key: (u64, u64),
+        engine: std::sync::Arc<xylem_style::StyleEngine>,
+        css_dir: Option<std::path::PathBuf>,
+    ) {
+        let t = std::time::Instant::now();
+        // Styling ignores text, so a structure-only copy is all the worker needs.
+        let doc = self.editor.doc.structure_copy();
+        log::debug!("restyle: document copied in {:?}", t.elapsed());
+        let repaint = self.repaint.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let css = CssStyles::compute(&doc, &engine, css_dir.as_deref());
+            if tx.send(css).is_ok()
+                && let Some(ctx) = repaint
+            {
+                ctx.request_repaint();
+            }
+        });
+        self.style_job = Some((key, rx));
     }
 
     /// Schema-derived memo for [`DocRules`], valid for the current structure.

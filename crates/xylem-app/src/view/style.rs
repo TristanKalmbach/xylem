@@ -2,6 +2,7 @@
 //! engine and a heuristic default for documents without a stylesheet.
 
 use egui::Color32;
+use std::rc::Rc;
 use xylem_dom::{Document, NodeId, NodeKind};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -193,6 +194,9 @@ pub struct CssStyles {
     markers: std::collections::HashMap<NodeId, String>,
     images: std::collections::HashMap<(NodeId, bool), std::path::PathBuf>,
     subtree: Vec<u64>,
+    /// The document instance these styles were computed for (see
+    /// `Document::new`); node IDs mean nothing for any other instance.
+    instance: u64,
     fallback: Sty,
 }
 
@@ -291,7 +295,9 @@ impl CssStyles {
         engine: &xylem_style::StyleEngine,
         css_dir: Option<&std::path::Path>,
     ) -> Self {
+        let t0 = std::time::Instant::now();
         let map = engine.compute(doc);
+        let t_engine = t0.elapsed();
         let mut styles = vec![None; doc.node_count()];
         let mut before = std::collections::HashMap::new();
         let mut after = std::collections::HashMap::new();
@@ -346,6 +352,7 @@ impl CssStyles {
                 after.insert(n, (g.text.clone(), convert(&g.style)));
             }
         }
+        let t_convert = t0.elapsed() - t_engine;
         let subtree = subtree_hashes(doc, |n| {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -360,6 +367,10 @@ impl CssStyles {
             markers.get(&n).hash(&mut h);
             h.finish()
         });
+        log::debug!(
+            "styles: engine {t_engine:?}, convert {t_convert:?}, hashes {:?}",
+            t0.elapsed() - t_engine - t_convert
+        );
         Self {
             styles,
             before,
@@ -367,6 +378,7 @@ impl CssStyles {
             markers,
             images,
             subtree,
+            instance: doc.structure_revision() >> 32,
             fallback: Sty::default(),
         }
     }
@@ -492,4 +504,93 @@ impl StyleLookup for DefaultStyles {
     fn list_marker(&self, _n: NodeId) -> Option<String> {
         None
     }
+}
+
+/// Styles for a document that has just changed structurally, served while the
+/// exact styles are recomputed in the background. Existing nodes keep their
+/// previous styles; new elements borrow the style of an element with the same
+/// name (usually a sibling), which is right in all but unusual cases (counter
+/// values and sibling-dependent rules catch up when the exact styles arrive).
+pub struct PatchedStyles {
+    base: Rc<CssStyles>,
+    borrowed: std::collections::HashMap<NodeId, NodeId>,
+}
+
+impl PatchedStyles {
+    /// `None` when `base` belongs to a different document instance.
+    pub fn new(base: Rc<CssStyles>, doc: &Document) -> Option<Self> {
+        if base.instance != doc.structure_revision() >> 32 {
+            return None;
+        }
+        let known = |n: NodeId| base.styles.get(n.index()).is_some_and(Option::is_some);
+        // Nodes are never reused, so everything created since `base` was
+        // computed has a higher index than any node it covers.
+        let attached = |n: NodeId| doc.ancestors(n).any(|a| a == doc.root());
+        let mut borrowed = std::collections::HashMap::new();
+        let mut by_name: Option<std::collections::HashMap<String, NodeId>> = None;
+        for n in new_element_ids(doc, base.styles.len()) {
+            if !attached(n) {
+                continue;
+            }
+            let name = doc.name(n).unwrap_or("").to_string();
+            // Prefer a same-named sibling, then any element with that name.
+            let sibling = doc.parent(n).and_then(|p| {
+                doc.element_children(p)
+                    .find(|&c| c != n && known(c) && doc.name(c) == Some(name.as_str()))
+            });
+            let src = sibling.or_else(|| {
+                let map = by_name.get_or_insert_with(|| {
+                    let mut m = std::collections::HashMap::new();
+                    for e in doc.descendants(doc.root()).filter(|&e| known(e)) {
+                        m.entry(doc.name(e).unwrap_or("").to_string()).or_insert(e);
+                    }
+                    m
+                });
+                map.get(&name).copied()
+            });
+            if let Some(src) = src {
+                borrowed.insert(n, src);
+            }
+        }
+        Some(Self { base, borrowed })
+    }
+
+    fn source(&self, n: NodeId) -> NodeId {
+        self.borrowed.get(&n).copied().unwrap_or(n)
+    }
+}
+
+impl StyleLookup for PatchedStyles {
+    fn subtree_hash(&self, n: NodeId) -> u64 {
+        // New nodes get a value no cached layout can have; changed ancestors
+        // are caught by the document's subtree stamps.
+        if self.borrowed.contains_key(&n)
+            || self.base.styles.get(n.index()).is_none_or(Option::is_none)
+        {
+            return u64::MAX ^ n.index() as u64;
+        }
+        self.base.subtree_hash(n)
+    }
+    fn get(&self, n: NodeId) -> Sty {
+        self.base.get(self.source(n))
+    }
+    fn before(&self, n: NodeId) -> Option<(String, Sty)> {
+        self.base.before(self.source(n))
+    }
+    fn after(&self, n: NodeId) -> Option<(String, Sty)> {
+        self.base.after(self.source(n))
+    }
+    fn list_marker(&self, n: NodeId) -> Option<String> {
+        self.base.list_marker(self.source(n))
+    }
+    fn generated_image(&self, n: NodeId, after: bool) -> Option<std::path::PathBuf> {
+        self.base.generated_image(self.source(n), after)
+    }
+}
+
+/// Attached element nodes created after the first `from` arena slots.
+fn new_element_ids(doc: &Document, from: usize) -> Vec<NodeId> {
+    doc.descendants(doc.root())
+        .filter(|n| n.index() >= from && doc.is_element(*n))
+        .collect()
 }

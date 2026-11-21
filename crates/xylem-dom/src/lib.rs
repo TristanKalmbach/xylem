@@ -721,6 +721,37 @@ impl Document {
         Ok(tops.into_iter().map(|t| self.import(&frag, t)).collect())
     }
 
+    /// A copy with the same node IDs and structure but without text content
+    /// or preserved source text. Much cheaper than `clone()`, and enough for
+    /// work that only looks at names, attributes and processing instructions
+    /// (styling, for example).
+    pub fn structure_copy(&self) -> Document {
+        let nodes = self
+            .nodes
+            .iter()
+            .map(|n| Node {
+                kind: match &n.kind {
+                    NodeKind::Text(_) => NodeKind::Text(String::new()),
+                    NodeKind::CData(_) => NodeKind::CData(String::new()),
+                    other => other.clone(),
+                },
+                parent: n.parent,
+                children: n.children.clone(),
+                raw: None,
+                raw_end: None,
+            })
+            .collect();
+        Document {
+            nodes,
+            root: self.root,
+            encoding: self.encoding,
+            revision: self.revision,
+            structure_revision: self.structure_revision,
+            journal: None,
+            stamps: Vec::new(),
+        }
+    }
+
     /// Serialises the whole document.
     pub fn to_xml(&self) -> String {
         let mut s = String::new();
