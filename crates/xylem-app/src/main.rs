@@ -18,6 +18,7 @@ mod script;
 mod settings;
 mod spell;
 mod team;
+mod ui;
 mod view;
 
 use std::path::PathBuf;

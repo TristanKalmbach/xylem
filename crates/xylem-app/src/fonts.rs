@@ -205,6 +205,16 @@ const FACES: &[Face] = &[
     },
 ];
 
+/// Semibold faces for UI headings, by platform.
+const STRONG_UI: &[&str] = &[
+    "seguisb.ttf",
+    "Segoe UI Semibold.ttf",
+    "Inter-SemiBold.ttf",
+    "NotoSans-SemiBold.ttf",
+    "OpenSans-SemiBold.ttf",
+    "Ubuntu-Medium.ttf",
+];
+
 /// Installs document font families; falls back to egui's built-in fonts.
 pub fn install(ctx: &egui::Context) -> FontSet {
     let mut defs = FontDefinitions::default();
@@ -250,6 +260,26 @@ pub fn install(ctx: &egui::Context) -> FontSet {
     {
         p.insert(0, "doc-sans".into());
     }
+    // Headings and titles: the system's semibold face, else its bold one.
+    let mut strong = Vec::new();
+    if let Some(bytes) = find(STRONG_UI) {
+        defs.font_data
+            .insert("ui-strong".into(), Arc::new(FontData::from_owned(bytes)));
+        strong.push("ui-strong".to_string());
+    } else if loaded.contains("sans-b") {
+        strong.push("doc-sans-b".to_string());
+    }
+    // Icons (Phosphor, embedded) come right after the text face, so they
+    // are used for the private-use code points the text font lacks.
+    egui_phosphor::add_to_fonts(&mut defs, egui_phosphor::Variant::Regular);
+    let prop = defs
+        .families
+        .get(&FontFamily::Proportional)
+        .cloned()
+        .unwrap_or_default();
+    strong.extend(prop);
+    defs.families
+        .insert(crate::ui::theme::strong_family(), strong);
     ctx.set_fonts(defs);
     FontSet {
         has_bold: loaded.contains("sans-b"),

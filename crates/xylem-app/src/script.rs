@@ -95,7 +95,10 @@ pub fn track(label: &str, response: &egui::Response) {
 /// Starts a new frame's widget registry; the previous frame's stays
 /// readable until then.
 pub fn begin_frame() -> Vec<(String, egui::Rect)> {
-    UI_RECTS.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default()
+    UI_RECTS
+        .lock()
+        .map(|mut v| std::mem::take(&mut *v))
+        .unwrap_or_default()
 }
 
 pub struct Script {

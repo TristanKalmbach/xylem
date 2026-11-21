@@ -2,7 +2,8 @@
 //! and the issues list.
 
 use crate::doc::{DocState, Severity};
-use egui::{Color32, RichText, Ui};
+use crate::ui::{Row, Tone, icon, list_row, palette};
+use egui::{RichText, Ui};
 use xylem_dom::{NodeId, NodeKind};
 use xylem_edit::Rules;
 use xylem_edit::pos::{container, first_editable};
@@ -84,6 +85,7 @@ pub fn structure(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec<
         .auto_shrink([false, false])
         .id_salt("structure")
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             structure_node(ui, ds, root, cur, st, out, 0);
         });
 }
@@ -97,20 +99,12 @@ fn structure_node(
     out: &mut Vec<PanelAction>,
     depth: usize,
 ) {
+    let p = palette(ui.ctx());
     let doc = &ds.editor.doc;
     let kids: Vec<NodeId> = doc.element_children(n).collect();
     let name = doc.name(n).unwrap_or("?");
     let flagged = ds.canvas.flagged.contains(&n);
     let is_cur = cur == Some(n);
-    let mut label = RichText::new(name);
-    if is_cur {
-        label = label
-            .strong()
-            .background_color(ui.visuals().selection.bg_fill);
-    }
-    if flagged {
-        label = label.color(Color32::from_rgb(220, 70, 70));
-    }
     // A short preview of text content.
     let preview: String = doc
         .children(n)
@@ -118,69 +112,72 @@ fn structure_node(
         .filter_map(|&c| doc.text(c))
         .collect::<String>()
         .split_whitespace()
+        .take(12)
         .collect::<Vec<_>>()
         .join(" ");
-    let preview = if preview.chars().count() > 40 {
-        format!("{}…", preview.chars().take(40).collect::<String>())
-    } else {
-        preview
-    };
-    ui.horizontal(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        if kids.is_empty() {
-            ui.add_space(16.0);
+    let open = st.structure_expanded.contains(&n);
+    let row = list_row(
+        ui,
+        Row {
+            indent: depth as f32 * 14.0,
+            chevron: (!kids.is_empty()).then_some(open),
+            chevron_space: kids.is_empty(),
+            text: name,
+            text_color: Some(if flagged { p.danger } else { p.text }),
+            detail: Some(&preview),
+            selected: is_cur,
+            ..Default::default()
+        },
+    );
+    if row.toggled {
+        if open {
+            st.structure_expanded.remove(&n);
         } else {
-            let open = st.structure_expanded.contains(&n);
-            if ui.small_button(if open { "-" } else { "+" }).clicked() {
-                if open {
-                    st.structure_expanded.remove(&n);
-                } else {
-                    st.structure_expanded.insert(n);
-                }
-            }
+            st.structure_expanded.insert(n);
         }
-        let r = ui.selectable_label(is_cur, label);
-        if is_cur && st.structure_follow == cur {
-            // keep visible
+    } else if row.response.clicked() {
+        out.push(PanelAction::Select(n));
+    }
+    if row.response.double_clicked() && !kids.is_empty() {
+        if open {
+            st.structure_expanded.remove(&n);
+        } else {
+            st.structure_expanded.insert(n);
         }
-        if r.clicked() {
-            out.push(PanelAction::Select(n));
-        }
-        r.context_menu(|ui| {
-            if ui.button("Remove tags").clicked() {
-                out.push(PanelAction::RemoveTags(n));
-                ui.close();
-            }
-            if ui.button("Delete element").clicked() {
-                out.push(PanelAction::DeleteElement(n));
-                ui.close();
-            }
-            let collapsed = ds.canvas.collapsed.contains(&n);
-            if ui
-                .button(if collapsed {
+    }
+    let resp = if flagged {
+        row.response
+            .on_hover_text("This element has validation problems")
+    } else {
+        row.response
+    };
+    resp.context_menu(|ui| {
+        let collapsed = ds.canvas.collapsed.contains(&n);
+        let items: [(&str, PanelAction); 5] = [
+            ("Move up", PanelAction::MoveElement(n, true)),
+            ("Move down", PanelAction::MoveElement(n, false)),
+            (
+                if collapsed {
                     "Expand in document"
                 } else {
                     "Collapse in document"
-                })
-                .clicked()
-            {
-                out.push(PanelAction::Collapse(n, !collapsed));
+                },
+                PanelAction::Collapse(n, !collapsed),
+            ),
+            ("Remove tags", PanelAction::RemoveTags(n)),
+            ("Delete element", PanelAction::DeleteElement(n)),
+        ];
+        for (i, (label, action)) in items.into_iter().enumerate() {
+            if i == 2 || i == 3 {
+                ui.separator();
+            }
+            if crate::ui::menu_item(ui, None, label, None).clicked() {
+                out.push(action);
                 ui.close();
             }
-            if ui.button("Move up").clicked() {
-                out.push(PanelAction::MoveElement(n, true));
-                ui.close();
-            }
-            if ui.button("Move down").clicked() {
-                out.push(PanelAction::MoveElement(n, false));
-                ui.close();
-            }
-        });
-        if !preview.is_empty() {
-            ui.add(egui::Label::new(RichText::new(preview).weak().small()).truncate());
         }
     });
-    if st.structure_expanded.contains(&n) {
+    if open {
         for k in kids {
             structure_node(ui, ds, k, cur, st, out, depth + 1);
         }
@@ -196,26 +193,28 @@ pub fn elements(
     st: &mut PanelState,
     out: &mut Vec<PanelAction>,
 ) {
+    let p = palette(ui.ctx());
     let doc = &ds.editor.doc;
+    crate::ui::segmented(
+        ui,
+        &mut st.element_mode,
+        &[
+            (ElementMode::Insert, "Insert"),
+            (ElementMode::Surround, "Surround"),
+            (ElementMode::Change, "Change"),
+        ],
+    );
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut st.element_mode, ElementMode::Insert, "Insert");
-        ui.selectable_value(&mut st.element_mode, ElementMode::Surround, "Surround");
-        ui.selectable_value(&mut st.element_mode, ElementMode::Change, "Change");
-    });
-    ui.horizontal(|ui| {
-        ui.add(
-            egui::TextEdit::singleline(&mut st.element_filter)
-                .hint_text("Filter…")
-                .desired_width(120.0),
-        );
+        let w = (ui.available_width() - 56.0).max(80.0);
+        crate::ui::text_field(ui, "Filter elements", &mut st.element_filter, "Filter…", w);
         ui.checkbox(&mut st.show_all_elements, "All")
-            .on_hover_text("Show every element, not only the valid ones");
+            .on_hover_text("Also list elements that would make the document invalid here");
     });
-    ui.separator();
+    ui.add_space(2.0);
     let Some(g) = ds.grammar.as_deref() else {
-        ui.label(RichText::new("No schema loaded: any element name can be inserted.").weak());
+        crate::ui::muted(ui, "No schema: type any element name in the filter box.");
         let mut name = st.element_filter.clone();
-        if ui.button("Insert <element>").clicked() && !name.trim().is_empty() {
+        if crate::ui::button(ui, "Insert element").clicked() && !name.trim().is_empty() {
             name = name.trim().to_string();
             out.push(match st.element_mode {
                 ElementMode::Insert => PanelAction::InsertElement(name),
@@ -259,9 +258,8 @@ pub fn elements(
             if ds.editor.sel.is_caret() {
                 Vec::new()
             } else {
-                let (a, b) = ds.editor.sel.ordered(doc);
+                let (a, _) = ds.editor.sel.ordered(doc);
                 let p = container(doc, a);
-                let _ = b;
                 names
                     .into_iter()
                     .filter(|n| rules.can_insert(doc, p, 0, n) || st.show_all_elements)
@@ -296,40 +294,47 @@ pub fn elements(
         .auto_shrink([false, false])
         .id_salt("elements")
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             if items.is_empty() {
-                ui.label(
-                    RichText::new(match st.element_mode {
+                crate::ui::empty_state(
+                    ui,
+                    icon::BRACKETS_ANGLE,
+                    match st.element_mode {
                         ElementMode::Surround if ds.editor.sel.is_caret() => {
-                            "Select content to surround."
+                            "Select some content to surround"
                         }
-                        _ => "No elements are allowed here.",
-                    })
-                    .weak(),
+                        ElementMode::Change => "Nothing else is allowed here",
+                        _ => "No elements are allowed here",
+                    },
+                    "",
                 );
             }
             for (name, valid) in items
                 .iter()
                 .filter(|(n, _)| filter.is_empty() || n.to_lowercase().contains(&filter))
             {
-                let mut text = RichText::new(name);
-                if !valid {
-                    text = text.weak();
-                }
-                let resp = ui.selectable_label(false, text);
+                let row = list_row(
+                    ui,
+                    Row {
+                        text: name,
+                        text_color: Some(if *valid { p.text } else { p.text_faint }),
+                        ..Default::default()
+                    },
+                );
+                crate::script::track(&format!("element {name}"), &row.response);
                 let desc = ds
                     .package
                     .descriptions
                     .get(name)
                     .cloned()
                     .or_else(|| g.documentation_for_name(name).map(str::to_string));
-                let resp = match desc {
-                    Some(d) if !d.is_empty() => resp.on_hover_text(d),
-                    _ => resp,
-                };
-                if resp.double_clicked()
-                    || (resp.clicked() && ui.input(|i| i.modifiers.is_none()) && false)
-                    || resp.clicked()
-                {
+                let mut resp = row.response;
+                if let Some(d) = desc.filter(|d| !d.is_empty()) {
+                    resp = resp.on_hover_text(d);
+                } else if !valid {
+                    resp = resp.on_hover_text("Inserting this here makes the document invalid");
+                }
+                if resp.clicked() {
                     let a = match st.element_mode {
                         ElementMode::Insert => PanelAction::InsertElement(name.clone()),
                         ElementMode::Surround => PanelAction::Surround(name.clone()),
@@ -347,17 +352,23 @@ pub fn elements(
 // ------------------------------------------------------------------ attributes
 
 pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec<PanelAction>) {
+    let p = palette(ui.ctx());
     let doc = &ds.editor.doc;
     let Some(el) = current_element(ds) else {
         return;
     };
     let Some(e) = doc.element(el) else { return };
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("<{}>", e.name)).strong());
+        ui.label(
+            RichText::new(format!("<{}>", e.name))
+                .monospace()
+                .color(p.accent),
+        );
         if let Some(g) = ds.grammar.as_deref()
             && let Some(d) = g.element_decl_for(doc, el).and_then(|d| g.documentation(d))
         {
-            ui.label("(?)").on_hover_text(d);
+            ui.label(RichText::new(icon::INFO).color(p.text_faint))
+                .on_hover_text(d);
         }
     });
     let decls = ds
@@ -372,26 +383,36 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
         .auto_shrink([false, false])
         .id_salt("attrs")
         .show(ui, |ui| {
+            let name_w = 96.0;
             egui::Grid::new(("attr-grid", el))
                 .num_columns(3)
-                .striped(true)
                 .spacing([6.0, 4.0])
+                .min_col_width(0.0)
                 .show(ui, |ui| {
                     let mut shown = std::collections::HashSet::new();
                     for d in &decls {
                         shown.insert(d.name.clone());
                         let current = e.attr(&d.name).map(str::to_string);
-                        let mut label = RichText::new(&d.name);
+                        let mut text = d.name.clone();
                         if d.required {
-                            label = label.strong();
+                            text.push_str(" *");
                         }
-                        if current.is_none() {
-                            label = label.weak();
-                        }
-                        let lr = ui.label(label);
-                        if let Some(doc_text) = &d.documentation {
-                            lr.on_hover_text(doc_text);
-                        }
+                        let color = if current.is_some() || d.required {
+                            p.text_muted
+                        } else {
+                            p.text_faint
+                        };
+                        let lr = ui.add_sized(
+                            [name_w, 22.0],
+                            egui::Label::new(RichText::new(text).color(color)).truncate(),
+                        );
+                        let tip = match (&d.documentation, d.required) {
+                            (Some(t), true) => format!("{} (required)\n{t}", d.name),
+                            (Some(t), false) => format!("{}\n{t}", d.name),
+                            (None, true) => format!("{} (required)", d.name),
+                            (None, false) => d.name.clone(),
+                        };
+                        lr.on_hover_text(tip);
                         attr_editor(
                             ui,
                             el,
@@ -403,15 +424,11 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
                             out,
                         );
                         if current.is_some() && !d.required {
-                            if ui
-                                .small_button("x")
-                                .on_hover_text("Remove attribute")
-                                .clicked()
-                            {
+                            if remove_button(ui).clicked() {
                                 out.push(PanelAction::RemoveAttr(el, d.name.clone()));
                             }
                         } else {
-                            ui.label(if d.required { "*" } else { "" });
+                            ui.label("");
                         }
                         ui.end_row();
                     }
@@ -423,31 +440,40 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
                             && !a.name.starts_with("xmlns")
                             && !a.name.starts_with("xsi:")
                             && !a.name.starts_with("xml:");
-                        let mut label = RichText::new(&a.name);
+                        let lr = ui.add_sized(
+                            [name_w, 22.0],
+                            egui::Label::new(RichText::new(&a.name).color(if undeclared {
+                                p.warning
+                            } else {
+                                p.text_muted
+                            }))
+                            .truncate(),
+                        );
                         if undeclared {
-                            label = label.color(Color32::from_rgb(220, 120, 40));
+                            lr.on_hover_text("Not declared in the schema");
+                        } else {
+                            lr.on_hover_text(&a.name);
                         }
-                        ui.label(label);
                         attr_editor(ui, el, &a.name, Some(&a.value), None, &[], None, out);
-                        if ui.small_button("x").clicked() {
+                        if remove_button(ui).clicked() {
                             out.push(PanelAction::RemoveAttr(el, a.name.clone()));
                         }
                         ui.end_row();
                     }
                 });
-            ui.separator();
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut st.new_attr_name)
-                        .hint_text("name")
-                        .desired_width(90.0),
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let w = ((ui.available_width() - 60.0) / 2.0).max(60.0);
+                crate::ui::text_field(ui, "New attribute name", &mut st.new_attr_name, "name", w);
+                crate::ui::text_field(
+                    ui,
+                    "New attribute value",
+                    &mut st.new_attr_value,
+                    "value",
+                    w,
                 );
-                ui.add(
-                    egui::TextEdit::singleline(&mut st.new_attr_value)
-                        .hint_text("value")
-                        .desired_width(110.0),
-                );
-                if ui.button("Add").clicked() && !st.new_attr_name.trim().is_empty() {
+                if crate::ui::button(ui, "Add").clicked() && !st.new_attr_name.trim().is_empty() {
                     out.push(PanelAction::SetAttr(
                         el,
                         st.new_attr_name.trim().to_string(),
@@ -458,6 +484,16 @@ pub fn attributes(ui: &mut Ui, ds: &DocState, st: &mut PanelState, out: &mut Vec
                 }
             });
         });
+}
+
+fn remove_button(ui: &mut Ui) -> egui::Response {
+    let p = palette(ui.ctx());
+    let r = ui.add(
+        egui::Button::new(RichText::new(icon::X).color(p.text_faint).size(12.0))
+            .frame(false)
+            .min_size(egui::vec2(20.0, 20.0)),
+    );
+    r.on_hover_text("Remove attribute")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -471,8 +507,11 @@ fn attr_editor(
     fixed: Option<&str>,
     out: &mut Vec<PanelAction>,
 ) {
+    let p = palette(ui.ctx());
+    // Name column, editor, remove button: leave room for the button.
+    let w = (ui.available_width() - 34.0).max(60.0);
     if let Some(f) = fixed {
-        ui.label(RichText::new(f).weak())
+        ui.label(RichText::new(f).color(p.text_faint))
             .on_hover_text("Fixed value");
         return;
     }
@@ -480,14 +519,22 @@ fn attr_editor(
         let shown = current.unwrap_or("");
         egui::ComboBox::from_id_salt((el, name))
             .selected_text(if shown.is_empty() {
-                default.map(|d| format!("({d})")).unwrap_or_default()
+                RichText::new(
+                    default
+                        .map(|d| format!("{d} (default)"))
+                        .unwrap_or_default(),
+                )
+                .color(p.text_faint)
             } else {
-                shown.to_string()
+                RichText::new(shown)
             })
-            .width(150.0)
+            .width(w)
             .show_ui(ui, |ui| {
                 if ui
-                    .selectable_label(current.is_none(), "(not set)")
+                    .selectable_label(
+                        current.is_none(),
+                        RichText::new("Not set").color(p.text_muted),
+                    )
                     .clicked()
                 {
                     out.push(PanelAction::RemoveAttr(el, name.to_string()));
@@ -507,12 +554,13 @@ fn attr_editor(
     let mut buf: String = ui
         .data_mut(|d| d.get_temp::<String>(id))
         .unwrap_or_else(|| current.unwrap_or("").to_string());
-    let w = (ui.available_width() - 30.0).max(80.0);
     let resp = ui.add(
         egui::TextEdit::singleline(&mut buf)
-            .desired_width(w)
+            .desired_width(w - 12.0)
+            .margin(egui::Margin::symmetric(6, 3))
             .hint_text(default.unwrap_or("")),
     );
+    crate::script::track(&format!("attribute {name}"), &resp);
     if resp.has_focus() {
         ui.data_mut(|d| d.insert_temp(id, buf.clone()));
     } else {
@@ -528,28 +576,34 @@ fn attr_editor(
 // ------------------------------------------------------------------ issues
 
 pub fn issues(ui: &mut Ui, ds: &DocState, out: &mut Vec<PanelAction>) {
+    let p = palette(ui.ctx());
     let doc = &ds.editor.doc;
     if ds.issues.is_empty() {
-        ui.label(
-            RichText::new(if ds.grammar.is_some() {
-                "✔ Document is valid."
-            } else {
-                "✔ Well-formed. (No schema to validate against.)"
-            })
-            .color(Color32::from_rgb(60, 160, 80)),
-        );
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(icon::CHECK_CIRCLE).color(p.success));
+            crate::ui::muted(
+                ui,
+                if ds.grammar.is_some() {
+                    "The document is valid."
+                } else {
+                    "The document is well-formed. There is no schema to validate against."
+                },
+            );
+        });
         return;
     }
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .id_salt("issues")
         .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
             for (i, issue) in ds.issues.iter().enumerate() {
-                let (icon, color) = match issue.severity {
-                    Severity::Error => ("⛔", Color32::from_rgb(220, 70, 70)),
-                    Severity::Warning => ("⚠", Color32::from_rgb(220, 160, 40)),
-                    Severity::Info => ("ℹ", Color32::from_rgb(90, 140, 220)),
+                let (glyph, tone) = match issue.severity {
+                    Severity::Error => (icon::WARNING_CIRCLE, Tone::Danger),
+                    Severity::Warning => (icon::WARNING, Tone::Warning),
+                    Severity::Info => (icon::INFO, Tone::Accent),
                 };
+                let (color, _) = tone.colors(&p);
                 let place = issue
                     .node
                     .filter(|n| doc.contains(*n))
@@ -561,16 +615,25 @@ pub fn issues(ui: &mut Ui, ds: &DocState, out: &mut Vec<PanelAction>) {
                         }
                     })
                     .unwrap_or_default();
-                let text = RichText::new(format!(
-                    "{icon} [{}] {}   {place}",
-                    issue.source, issue.message
-                ))
-                .color(color);
-                if ui.selectable_label(false, text).clicked() {
+                let detail = format!("{}  ·  {place}", issue.source);
+                let row = list_row(
+                    ui,
+                    Row {
+                        icon: Some((glyph, color)),
+                        text: &issue.message,
+                        detail: Some(&detail),
+                        ..Default::default()
+                    },
+                );
+                if row
+                    .response
+                    .on_hover_text(format!("{}\n{}  {place}", issue.message, issue.source))
+                    .clicked()
+                {
                     out.push(PanelAction::GotoIssue(issue.node));
                 }
                 if i > 2000 {
-                    ui.label(format!("… {} more", ds.issues.len() - i));
+                    crate::ui::muted(ui, format!("… and {} more", ds.issues.len() - i));
                     break;
                 }
             }
@@ -579,6 +642,7 @@ pub fn issues(ui: &mut Ui, ds: &DocState, out: &mut Vec<PanelAction>) {
 
 /// Breadcrumb of the caret's ancestors (status bar).
 pub fn breadcrumb(ui: &mut Ui, ds: &DocState, out: &mut Vec<PanelAction>) {
+    let p = palette(ui.ctx());
     let doc = &ds.editor.doc;
     let c = container(doc, ds.editor.sel.focus);
     let mut chain: Vec<NodeId> = std::iter::once(c)
@@ -587,17 +651,36 @@ pub fn breadcrumb(ui: &mut Ui, ds: &DocState, out: &mut Vec<PanelAction>) {
         .collect();
     chain.reverse();
     let cur = current_element(ds);
-    for (i, n) in chain.iter().enumerate() {
-        if i > 0 {
-            ui.label(RichText::new("›").weak());
+    // Long paths keep their tail: the elements nearest the caret matter most.
+    let skip = chain.len().saturating_sub(8);
+    ui.spacing_mut().item_spacing.x = 2.0;
+    if skip > 0 {
+        ui.label(RichText::new("…").color(p.text_faint));
+    }
+    for (i, n) in chain.iter().enumerate().skip(skip) {
+        if i > skip {
+            ui.label(
+                RichText::new(icon::CARET_RIGHT)
+                    .size(10.0)
+                    .color(p.text_faint),
+            );
         }
         let name = doc.name(*n).unwrap_or("");
-        if ui.selectable_label(cur == Some(*n), name).clicked() {
+        let is_cur = cur == Some(*n);
+        let text = RichText::new(name)
+            .size(crate::ui::theme::size::SMALL)
+            .color(if is_cur { p.accent } else { p.text_muted });
+        let r = ui.add(
+            egui::Button::new(text)
+                .frame(false)
+                .min_size(egui::vec2(0.0, 18.0)),
+        );
+        if r.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if r.on_hover_text("Select this element").clicked() {
             out.push(PanelAction::Select(*n));
         }
     }
-    if let NodeKind::Text(_) = doc.kind(ds.editor.sel.focus.node) {
-    } else if !ds.editor.sel.is_caret() {
-    }
-    let _ = first_editable;
+    let _ = (first_editable, NodeKind::Comment);
 }

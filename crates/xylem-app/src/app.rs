@@ -332,13 +332,16 @@ impl XylemApp {
             }
         }
         let fonts = crate::fonts::install(&cc.egui_ctx);
-        if let Some(dark) = settings.dark_mode {
-            cc.egui_ctx.set_theme(if dark {
-                egui::Theme::Dark
-            } else {
-                egui::Theme::Light
-            });
-        }
+        // No saved choice: follow the system theme.
+        // XYLEM_THEME=light|dark overrides it (screenshots and tests).
+        let dark = match std::env::var("XYLEM_THEME").as_deref() {
+            Ok("light") => false,
+            Ok("dark") => true,
+            _ => settings
+                .dark_mode
+                .unwrap_or_else(|| cc.egui_ctx.style().visuals.dark_mode),
+        };
+        crate::ui::theme::apply(&cc.egui_ctx, dark);
         install_builtin_packages();
         let team = crate::team::load();
         let mut app = Self {
@@ -1674,6 +1677,9 @@ impl XylemApp {
             if i.consume_shortcut(&sh(Key::O)) {
                 cmds.push(Cmd::Open);
             }
+            if i.consume_shortcut(&sh(Key::Comma)) {
+                cmds.push(Cmd::Preferences);
+            }
             if i.consume_shortcut(&shs(Key::S)) {
                 cmds.push(Cmd::SaveAs);
             }
@@ -1765,130 +1771,196 @@ impl XylemApp {
     }
 
     fn menu_bar(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
+        use crate::ui::icon;
         let has_doc = !self.docs.is_empty();
+        // One line per entry: (enabled, icon, label, shortcut, command).
+        let item = |ui: &mut egui::Ui,
+                    enabled: bool,
+                    glyph: Option<&str>,
+                    label: &str,
+                    shortcut: Option<&str>|
+         -> bool {
+            ui.add_enabled_ui(enabled, |ui| {
+                crate::ui::menu_item(ui, glyph, label, shortcut)
+            })
+            .inner
+            .clicked()
+        };
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("New…\tCtrl+N").clicked() {
+                if item(ui, true, Some(icon::FILE_PLUS), "New…", Some("Ctrl+N")) {
                     cmds.push(Cmd::New);
                 }
-                if ui.button("New S1000D module…").clicked() {
+                if item(ui, true, Some(icon::CUBE), "New S1000D module…", None) {
                     cmds.push(Cmd::NewS1000d);
                 }
-                if ui.button("Open…\tCtrl+O").clicked() {
+                if item(ui, true, Some(icon::FOLDER_OPEN), "Open…", Some("Ctrl+O")) {
                     cmds.push(Cmd::Open);
                 }
-                ui.menu_button("Open recent", |ui| {
-                    if self.settings.recent_files.is_empty() {
-                        ui.label(RichText::new("(none)").weak());
-                    }
-                    for p in self.settings.recent_files.clone() {
-                        if ui.button(p.display().to_string()).clicked() {
-                            cmds.push(Cmd::OpenPath(p));
+                ui.menu_button(
+                    crate::ui::icon_text(icon::CLOCK_COUNTER_CLOCKWISE, "Open recent"),
+                    |ui| {
+                        if self.settings.recent_files.is_empty() {
+                            crate::ui::muted(ui, "No recent files");
                         }
-                    }
-                });
+                        for p in self.settings.recent_files.clone() {
+                            let name = p
+                                .file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default();
+                            let dir = p
+                                .parent()
+                                .map(|d| d.display().to_string())
+                                .unwrap_or_default();
+                            if crate::ui::menu_item(ui, None, &name, None)
+                                .on_hover_text(dir)
+                                .clicked()
+                            {
+                                cmds.push(Cmd::OpenPath(p));
+                            }
+                        }
+                    },
+                );
                 ui.separator();
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Save\tCtrl+S"))
-                    .clicked()
-                {
+                if item(ui, has_doc, Some(icon::FLOPPY_DISK), "Save", Some("Ctrl+S")) {
                     cmds.push(Cmd::Save);
                 }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Save as…\tCtrl+Shift+S"))
-                    .clicked()
-                {
+                if item(ui, has_doc, None, "Save as…", Some("Ctrl+Shift+S")) {
                     cmds.push(Cmd::SaveAs);
                 }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Close\tCtrl+W"))
-                    .clicked()
-                {
+                if item(ui, has_doc, None, "Close", Some("Ctrl+W")) {
                     cmds.push(Cmd::Close(self.active));
                 }
                 ui.separator();
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Export to HTML…"))
-                    .clicked()
-                {
+                if item(ui, has_doc, Some(icon::FILE_HTML), "Export to HTML…", None) {
                     cmds.push(Cmd::ExportHtml);
                 }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Print preview"))
-                    .on_hover_text(
-                        "Opens the document in your web browser, ready to print or save as PDF",
-                    )
-                    .clicked()
-                {
+                if item(ui, has_doc, Some(icon::PRINTER), "Print preview", None) {
                     cmds.push(Cmd::PrintPreview);
                 }
                 ui.separator();
-                if ui.button("Import XMAX customization…").clicked() {
+                if item(ui, true, None, "Import XMAX customization…", None) {
                     cmds.push(Cmd::ImportXmax);
                 }
-                if ui.button("Reload doctype packages").clicked() {
+                if item(
+                    ui,
+                    true,
+                    Some(icon::ARROWS_CLOCKWISE),
+                    "Reload doctype packages",
+                    None,
+                ) {
                     cmds.push(Cmd::ReloadPackages);
                 }
-                if ui.button("Preferences…").clicked() {
+                if item(ui, true, Some(icon::GEAR), "Preferences…", Some("Ctrl+,")) {
                     cmds.push(Cmd::Preferences);
                 }
                 ui.separator();
-                if ui.button("Exit").clicked() {
+                if item(ui, true, None, "Exit", Some("Alt+F4")) {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
             ui.menu_button("Edit", |ui| {
-                for (label, c) in [
-                    ("Undo\tCtrl+Z", Cmd::Undo),
-                    ("Redo\tCtrl+Y", Cmd::Redo),
-                    ("Cut\tCtrl+X", Cmd::Cut),
-                    ("Copy\tCtrl+C", Cmd::Copy),
-                    ("Paste (internal clipboard)", Cmd::Paste),
-                    ("Paste as text\tCtrl+Shift+V", Cmd::PasteText),
-                    ("Select all\tCtrl+A", Cmd::SelectAll),
-                    ("Select element\tCtrl+E", Cmd::SelectElement),
-                    ("Find / Replace…\tCtrl+F", Cmd::Find),
-                    ("Find next\tF3", Cmd::FindNext(true)),
-                    ("Find previous\tShift+F3", Cmd::FindNext(false)),
-                    ("Insert or surround…\tCtrl+Space", Cmd::Palette),
-                ] {
-                    if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
+                let entries: [(Option<&str>, &str, Option<&str>, Cmd); 13] = [
+                    (
+                        Some(icon::ARROW_U_UP_LEFT),
+                        "Undo",
+                        Some("Ctrl+Z"),
+                        Cmd::Undo,
+                    ),
+                    (
+                        Some(icon::ARROW_U_UP_RIGHT),
+                        "Redo",
+                        Some("Ctrl+Y"),
+                        Cmd::Redo,
+                    ),
+                    (None, "Cut", Some("Ctrl+X"), Cmd::Cut),
+                    (None, "Copy", Some("Ctrl+C"), Cmd::Copy),
+                    (None, "Paste", Some("Ctrl+V"), Cmd::Paste),
+                    (None, "Paste as text", Some("Ctrl+Shift+V"), Cmd::PasteText),
+                    (None, "Select all", Some("Ctrl+A"), Cmd::SelectAll),
+                    (None, "Select element", Some("Ctrl+E"), Cmd::SelectElement),
+                    (
+                        Some(icon::MAGNIFYING_GLASS),
+                        "Find and replace…",
+                        Some("Ctrl+F"),
+                        Cmd::Find,
+                    ),
+                    (None, "Find next", Some("F3"), Cmd::FindNext(true)),
+                    (
+                        None,
+                        "Find previous",
+                        Some("Shift+F3"),
+                        Cmd::FindNext(false),
+                    ),
+                    (
+                        None,
+                        "Insert or surround…",
+                        Some("Ctrl+Space"),
+                        Cmd::Palette,
+                    ),
+                    (None, "", None, Cmd::Palette),
+                ];
+                for (i, (glyph, label, sc, c)) in entries.into_iter().enumerate() {
+                    if label.is_empty() {
+                        continue;
+                    }
+                    if matches!(i, 2 | 6 | 8 | 11) {
+                        ui.separator();
+                    }
+                    if item(ui, has_doc, glyph, label, sc) {
                         cmds.push(c);
                     }
                 }
+                ui.separator();
                 // Works on files, so it needs no open document.
-                if ui.button("Find in files…\tCtrl+Shift+F").clicked() {
+                if item(
+                    ui,
+                    true,
+                    Some(icon::FILE_MAGNIFYING_GLASS),
+                    "Find in files…",
+                    Some("Ctrl+Shift+F"),
+                ) {
                     cmds.push(Cmd::FindInFiles);
                 }
             });
             ui.menu_button("Insert", |ui| {
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Element…"))
-                    .clicked()
-                {
-                    self.settings.show_elements = true;
-                    self.panel.element_mode = panels::ElementMode::Insert;
+                if item(
+                    ui,
+                    has_doc,
+                    Some(icon::BRACKETS_ANGLE),
+                    "Element…",
+                    Some("Ctrl+Space"),
+                ) {
+                    cmds.push(Cmd::Palette);
                 }
+                if item(ui, has_doc, Some(icon::TABLE), "Table…", None) {
+                    cmds.push(Cmd::InsertTable);
+                }
+                ui.separator();
                 for (label, c) in [
-                    ("Table…", Cmd::InsertTable),
                     ("Comment", Cmd::InsertComment),
                     ("Processing instruction", Cmd::InsertPi),
                     ("CDATA section", Cmd::InsertCData),
                 ] {
-                    if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
+                    if item(ui, has_doc, None, label, None) {
                         cmds.push(c);
                     }
                 }
             });
             ui.menu_button("Format", |ui| {
-                for (label, kind) in [
-                    ("Bold\tCtrl+B", "bold"),
-                    ("Italic\tCtrl+I", "italic"),
-                    ("Underline\tCtrl+U", "underline"),
-                    ("Superscript", "superscript"),
-                    ("Subscript", "subscript"),
+                for (glyph, label, sc, kind) in [
+                    (icon::TEXT_B, "Bold", Some("Ctrl+B"), "bold"),
+                    (icon::TEXT_ITALIC, "Italic", Some("Ctrl+I"), "italic"),
+                    (
+                        icon::TEXT_UNDERLINE,
+                        "Underline",
+                        Some("Ctrl+U"),
+                        "underline",
+                    ),
+                    (icon::TEXT_SUPERSCRIPT, "Superscript", None, "superscript"),
+                    (icon::TEXT_SUBSCRIPT, "Subscript", None, "subscript"),
                 ] {
-                    if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
+                    if item(ui, has_doc, Some(glyph), label, sc) {
                         cmds.push(Cmd::Toggle(kind.into()));
                     }
                 }
@@ -1899,148 +1971,175 @@ impl XylemApp {
                     ("Join to preceding", Cmd::JoinPreceding),
                     ("Delete element", Cmd::DeleteElement),
                 ] {
-                    if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
+                    if item(ui, has_doc, None, label, None) {
                         cmds.push(c);
                     }
+                }
+                ui.separator();
+                if item(
+                    ui,
+                    has_doc,
+                    Some(icon::TEXT_INDENT),
+                    "Format document",
+                    None,
+                ) {
+                    cmds.push(Cmd::PrettyPrint);
                 }
             });
             ui.menu_button("Table", |ui| table_menu(ui, cmds));
             ui.menu_button("View", |ui| {
-                for (label, v) in [
-                    ("Tags On\tF5", View::TagsOn),
-                    ("Normal\tF6", View::Normal),
-                    ("Source\tF8", View::Source),
+                let view = self.docs.get(self.active).map(|d| d.view);
+                for (glyph, label, sc, v) in [
+                    (icon::TAG, "Tags on", "F5", View::TagsOn),
+                    (icon::ARTICLE, "Normal", "F6", View::Normal),
+                    (icon::CODE, "Source", "F8", View::Source),
                 ] {
-                    if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
+                    let r = ui
+                        .add_enabled_ui(has_doc, |ui| {
+                            crate::ui::menu_item(ui, Some(glyph), label, Some(sc))
+                        })
+                        .inner;
+                    if view == Some(v) {
+                        let p = crate::ui::palette(ui.ctx());
+                        ui.painter().circle_filled(
+                            egui::pos2(r.rect.right() - 6.0, r.rect.center().y),
+                            2.5,
+                            p.accent,
+                        );
+                    }
+                    if r.clicked() {
                         cmds.push(Cmd::View(v));
                     }
                 }
                 ui.separator();
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Collapse element\tCtrl+Shift+-"))
-                    .clicked()
-                {
-                    cmds.push(Cmd::Collapse(true));
-                }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Expand element\tCtrl+Shift+="))
-                    .clicked()
-                {
-                    cmds.push(Cmd::Collapse(false));
-                }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Collapse children"))
-                    .clicked()
-                {
-                    cmds.push(Cmd::CollapseChildren);
-                }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Expand all"))
-                    .clicked()
-                {
-                    cmds.push(Cmd::ExpandAll);
+                for (label, sc, c) in [
+                    (
+                        "Collapse element",
+                        Some("Ctrl+Shift+-"),
+                        Cmd::Collapse(true),
+                    ),
+                    ("Expand element", Some("Ctrl+Shift+="), Cmd::Collapse(false)),
+                    ("Collapse children", None, Cmd::CollapseChildren),
+                    ("Expand all", None, Cmd::ExpandAll),
+                ] {
+                    if item(ui, has_doc, None, label, sc) {
+                        cmds.push(c);
+                    }
                 }
                 ui.separator();
-                ui.checkbox(&mut self.settings.show_structure, "Structure");
-                ui.checkbox(&mut self.settings.show_elements, "Elements");
-                ui.checkbox(&mut self.settings.show_attributes, "Attributes");
-                ui.checkbox(&mut self.settings.show_issues, "Issues");
-                if ui.button("Project").clicked() {
+                ui.checkbox(
+                    &mut self.settings.show_structure,
+                    "Structure and project panel",
+                );
+                ui.checkbox(&mut self.settings.show_elements, "Elements panel");
+                ui.checkbox(&mut self.settings.show_attributes, "Attributes panel");
+                ui.checkbox(&mut self.settings.show_issues, "Issues panel");
+                let mut review = self.review.open;
+                if ui.checkbox(&mut review, "Review panel").clicked() {
+                    cmds.push(Cmd::ReviewPanel);
+                }
+                ui.separator();
+                if item(ui, true, Some(icon::FOLDERS), "Project", None) {
                     cmds.push(Cmd::ShowProject);
                 }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Applicability…"))
-                    .clicked()
-                {
+                if item(ui, has_doc, Some(icon::FUNNEL), "Applicability…", None) {
                     cmds.push(Cmd::Applicability);
                 }
                 ui.separator();
-                if ui.button("Zoom in\tCtrl++").clicked() {
+                if item(
+                    ui,
+                    true,
+                    Some(icon::MAGNIFYING_GLASS_PLUS),
+                    "Zoom in",
+                    Some("Ctrl++"),
+                ) {
                     cmds.push(Cmd::ZoomIn);
                 }
-                if ui.button("Zoom out\tCtrl+-").clicked() {
+                if item(
+                    ui,
+                    true,
+                    Some(icon::MAGNIFYING_GLASS_MINUS),
+                    "Zoom out",
+                    Some("Ctrl+-"),
+                ) {
                     cmds.push(Cmd::ZoomOut);
                 }
-                if ui.button("Actual size\tCtrl+0").clicked() {
+                if item(ui, true, None, "Actual size", Some("Ctrl+0")) {
                     cmds.push(Cmd::ZoomReset);
                 }
                 ui.separator();
                 let dark = ui.visuals().dark_mode;
-                if ui
-                    .button(if dark { "Light theme" } else { "Dark theme" })
-                    .clicked()
-                {
+                let (glyph, label) = if dark {
+                    (icon::SUN, "Light theme")
+                } else {
+                    (icon::MOON, "Dark theme")
+                };
+                if item(ui, true, Some(glyph), label, None) {
                     self.settings.dark_mode = Some(!dark);
-                    ui.ctx().set_theme(if dark {
-                        egui::Theme::Light
-                    } else {
-                        egui::Theme::Dark
-                    });
+                    crate::ui::theme::apply(ui.ctx(), !dark);
                 }
             });
             ui.menu_button("Tools", |ui| {
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Validate\tF7"))
-                    .clicked()
-                {
+                if item(
+                    ui,
+                    has_doc,
+                    Some(icon::CHECK_CIRCLE),
+                    "Validate",
+                    Some("F7"),
+                ) {
                     cmds.push(Cmd::Validate);
                 }
                 ui.checkbox(&mut self.settings.auto_validate, "Validate as you type");
-                if ui
-                    .button(if self.settings.spell_check {
-                        "Turn spell check off"
-                    } else {
-                        "Turn spell check on"
-                    })
-                    .clicked()
-                {
+                let mut spell = self.settings.spell_check;
+                if ui.checkbox(&mut spell, "Check spelling").clicked() {
                     cmds.push(Cmd::SpellCheck);
                 }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Format document (pretty-print)"))
-                    .clicked()
-                {
-                    cmds.push(Cmd::PrettyPrint);
-                }
                 ui.separator();
-                ui.label(RichText::new("S1000D").weak());
-                if ui.button("New module…").clicked() {
+                ui.label(
+                    RichText::new("S1000D")
+                        .text_style(crate::ui::theme::section_style())
+                        .color(crate::ui::palette(ui.ctx()).text_muted),
+                );
+                if item(ui, true, Some(icon::CUBE), "New module…", None) {
                     cmds.push(Cmd::NewS1000d);
                 }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Check BREX…"))
-                    .clicked()
-                {
+                if item(ui, has_doc, Some(icon::SEAL_WARNING), "Check BREX…", None) {
                     cmds.push(Cmd::CheckBrex);
                 }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Data module info…"))
-                    .clicked()
-                {
+                if item(ui, has_doc, Some(icon::INFO), "Data module info…", None) {
                     cmds.push(Cmd::S1000dInfo);
                 }
-                if ui
-                    .add_enabled(has_doc, egui::Button::new("Rename file to CSDB name"))
-                    .clicked()
-                {
+                if item(ui, has_doc, None, "Rename file to CSDB name", None) {
                     cmds.push(Cmd::RenameToCsdb);
                 }
-                if ui.button("Project folder…").clicked() {
+                if item(ui, true, Some(icon::FOLDERS), "Project folder…", None) {
                     cmds.push(Cmd::ProjectFolder);
                 }
-                if ui.button("Check references").clicked() {
+                if item(ui, true, Some(icon::LINK), "Check references", None) {
                     cmds.push(Cmd::CheckReferences);
                 }
             });
             ui.menu_button("Review", |ui| self.review_menu(ui, has_doc, cmds));
             ui.menu_button("Help", |ui| {
-                if ui.button("Keyboard shortcuts\tF1").clicked() {
+                if item(
+                    ui,
+                    true,
+                    Some(icon::KEYBOARD),
+                    "Keyboard shortcuts",
+                    Some("F1"),
+                ) {
                     cmds.push(Cmd::Shortcuts);
                 }
-                if ui.button("Check for updates…").clicked() {
+                if item(
+                    ui,
+                    true,
+                    Some(icon::ARROWS_CLOCKWISE),
+                    "Check for updates…",
+                    None,
+                ) {
                     cmds.push(Cmd::CheckUpdates);
                 }
-                if ui.button("About Xylem").clicked() {
+                if item(ui, true, Some(icon::INFO), "About Xylem", None) {
                     cmds.push(Cmd::About);
                 }
             });
@@ -2048,16 +2147,15 @@ impl XylemApp {
     }
 
     fn review_menu(&mut self, ui: &mut egui::Ui, has_doc: bool, cmds: &mut Vec<Cmd>) {
+        use crate::ui::icon;
         let tracking = self
             .docs
             .get(self.active)
             .is_some_and(|d| d.editor.is_tracking());
         let mut on = tracking;
         if ui
-            .add_enabled(
-                has_doc,
-                egui::Checkbox::new(&mut on, "Track changes\tCtrl+Shift+T"),
-            )
+            .add_enabled(has_doc, egui::Checkbox::new(&mut on, "Track changes"))
+            .on_hover_text("Ctrl+Shift+T")
             .clicked()
         {
             cmds.push(Cmd::TrackChanges);
@@ -2067,182 +2165,432 @@ impl XylemApp {
             cmds.push(Cmd::ReviewPanel);
         }
         ui.separator();
-        let items = [
-            ("New comment…\tCtrl+Shift+M", Cmd::NewComment),
-            ("Accept change at caret", Cmd::ResolveAtCaret(true)),
-            ("Reject change at caret", Cmd::ResolveAtCaret(false)),
-            ("Accept all changes\tCtrl+Shift+A", Cmd::ResolveAll(true)),
-            ("Reject all changes\tCtrl+Shift+R", Cmd::ResolveAll(false)),
+        let items: [(Option<&str>, &str, Option<&str>, Cmd); 5] = [
+            (
+                Some(icon::CHAT_TEXT),
+                "New comment…",
+                Some("Ctrl+Shift+M"),
+                Cmd::NewComment,
+            ),
+            (
+                Some(icon::CHECK),
+                "Accept change at caret",
+                None,
+                Cmd::ResolveAtCaret(true),
+            ),
+            (
+                Some(icon::X),
+                "Reject change at caret",
+                None,
+                Cmd::ResolveAtCaret(false),
+            ),
+            (
+                None,
+                "Accept all changes",
+                Some("Ctrl+Shift+A"),
+                Cmd::ResolveAll(true),
+            ),
+            (
+                None,
+                "Reject all changes",
+                Some("Ctrl+Shift+R"),
+                Cmd::ResolveAll(false),
+            ),
         ];
-        for (i, (label, cmd)) in items.into_iter().enumerate() {
-            if i == 1 {
+        for (i, (glyph, label, sc, cmd)) in items.into_iter().enumerate() {
+            if i == 1 || i == 3 {
                 ui.separator();
             }
-            if ui.add_enabled(has_doc, egui::Button::new(label)).clicked() {
+            let r = ui
+                .add_enabled_ui(has_doc, |ui| crate::ui::menu_item(ui, glyph, label, sc))
+                .inner;
+            if r.clicked() {
                 cmds.push(cmd);
             }
         }
         ui.separator();
-        ui.label(RichText::new(format!("Author: {}", self.settings.author())).weak());
+        crate::ui::muted(ui, format!("Author: {}", self.settings.author()));
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
-        ui.horizontal_wrapped(|ui| {
-            let b = |ui: &mut egui::Ui, label: &str, tip: &str| {
-                ui.button(label).on_hover_text(tip).clicked()
-            };
-            if b(ui, "New", "New (Ctrl+N)") {
+        use crate::ui::{icon, icon_button, icon_toggle, toolbar_divider};
+        let has_doc = !self.docs.is_empty();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            if icon_button(ui, icon::FILE_PLUS, "New", Some("Ctrl+N")).clicked() {
                 cmds.push(Cmd::New);
             }
-            if b(ui, "Open", "Open (Ctrl+O)") {
+            if icon_button(ui, icon::FOLDER_OPEN, "Open", Some("Ctrl+O")).clicked() {
                 cmds.push(Cmd::Open);
             }
-            if b(ui, "Save", "Save (Ctrl+S)") {
-                cmds.push(Cmd::Save);
-            }
-            ui.separator();
-            if b(ui, "Undo", "Undo (Ctrl+Z)") {
-                cmds.push(Cmd::Undo);
-            }
-            if b(ui, "Redo", "Redo (Ctrl+Y)") {
-                cmds.push(Cmd::Redo);
-            }
-            ui.separator();
-            let view = self.docs.get(self.active).map(|d| d.view);
-            for (label, v, tip) in [
-                ("Tags", View::TagsOn, "Tags On view (F5)"),
-                ("Normal", View::Normal, "Normal view (F6)"),
-                ("Source", View::Source, "Source view (F8)"),
-            ] {
-                if ui
-                    .selectable_label(view == Some(v), label)
-                    .on_hover_text(tip)
-                    .clicked()
-                {
+            ui.add_enabled_ui(has_doc, |ui| {
+                if icon_button(ui, icon::FLOPPY_DISK, "Save", Some("Ctrl+S")).clicked() {
+                    cmds.push(Cmd::Save);
+                }
+            });
+            toolbar_divider(ui);
+            let (can_undo, can_redo) = self.docs.get(self.active).map_or((false, false), |d| {
+                (d.editor.can_undo(), d.editor.can_redo())
+            });
+            ui.add_enabled_ui(can_undo, |ui| {
+                if icon_button(ui, icon::ARROW_U_UP_LEFT, "Undo", Some("Ctrl+Z")).clicked() {
+                    cmds.push(Cmd::Undo);
+                }
+            });
+            ui.add_enabled_ui(can_redo, |ui| {
+                if icon_button(ui, icon::ARROW_U_UP_RIGHT, "Redo", Some("Ctrl+Y")).clicked() {
+                    cmds.push(Cmd::Redo);
+                }
+            });
+            toolbar_divider(ui);
+            if let Some(view) = self.docs.get(self.active).map(|d| d.view) {
+                let mut v = view;
+                ui.add_space(2.0);
+                if crate::ui::segmented(
+                    ui,
+                    &mut v,
+                    &[
+                        (View::TagsOn, "Tags on"),
+                        (View::Normal, "Normal"),
+                        (View::Source, "Source"),
+                    ],
+                ) {
                     cmds.push(Cmd::View(v));
                 }
+                ui.add_space(2.0);
+                toolbar_divider(ui);
             }
-            ui.separator();
-            if ui
-                .button(RichText::new("B").strong())
-                .on_hover_text("Bold (Ctrl+B)")
-                .clicked()
-            {
-                cmds.push(Cmd::Toggle("bold".into()));
-            }
-            if ui
-                .button(RichText::new("I").italics())
-                .on_hover_text("Italic (Ctrl+I)")
-                .clicked()
-            {
-                cmds.push(Cmd::Toggle("italic".into()));
-            }
-            if ui
-                .button(RichText::new("U").underline())
-                .on_hover_text("Underline (Ctrl+U)")
-                .clicked()
-            {
-                cmds.push(Cmd::Toggle("underline".into()));
-            }
-            // Package-defined insert buttons (lists, images, paragraphs…).
-            if let Some(ds) = self.docs.get(self.active) {
-                for entry in ds.package.effective_toolbar() {
-                    let label = entry.label.clone();
-                    match &entry.action {
-                        xylem_customize::Action::InsertElement(e) => {
-                            if ui
-                                .button(&label)
-                                .on_hover_text(format!("Insert <{e}>"))
-                                .clicked()
-                            {
-                                cmds.push(Cmd::InsertElement(e.clone()));
-                            }
-                        }
-                        xylem_customize::Action::Surround(e) => {
-                            if ui
-                                .button(&label)
-                                .on_hover_text(format!("Surround with <{e}>"))
-                                .clicked()
-                            {
-                                cmds.push(Cmd::Surround(e.clone()));
-                            }
-                        }
-                        xylem_customize::Action::Toggle(k)
-                            if !matches!(k.as_str(), "bold" | "italic" | "underline")
-                                && ui.button(&label).clicked() =>
-                        {
-                            cmds.push(Cmd::Toggle(k.clone()));
-                        }
-                        _ => {}
+            ui.add_enabled_ui(has_doc, |ui| {
+                for (glyph, tip, sc, kind) in [
+                    (icon::TEXT_B, "Bold", Some("Ctrl+B"), "bold"),
+                    (icon::TEXT_ITALIC, "Italic", Some("Ctrl+I"), "italic"),
+                    (
+                        icon::TEXT_UNDERLINE,
+                        "Underline",
+                        Some("Ctrl+U"),
+                        "underline",
+                    ),
+                ] {
+                    if icon_button(ui, glyph, tip, sc).clicked() {
+                        cmds.push(Cmd::Toggle(kind.into()));
                     }
                 }
-            }
-            ui.separator();
-            if b(ui, "Table", "Insert table") {
-                cmds.push(Cmd::InsertTable);
-            }
-            if b(ui, "Validate", "Validate (F7)") {
-                cmds.push(Cmd::Validate);
-            }
-            if b(ui, "Find", "Find / Replace (Ctrl+F)") {
-                cmds.push(Cmd::Find);
-            }
+                // Buttons the doctype package defines (lists, images,
+                // paragraphs…). Known kinds get an icon, the rest their label.
+                if let Some(ds) = self.docs.get(self.active) {
+                    let entries = ds.package.effective_toolbar();
+                    for entry in &entries {
+                        let (cmd, what) = match &entry.action {
+                            xylem_customize::Action::InsertElement(e) => {
+                                (Cmd::InsertElement(e.clone()), format!("Insert <{e}>"))
+                            }
+                            xylem_customize::Action::Surround(e) => {
+                                (Cmd::Surround(e.clone()), format!("Surround with <{e}>"))
+                            }
+                            xylem_customize::Action::Toggle(k)
+                                if !matches!(k.as_str(), "bold" | "italic" | "underline") =>
+                            {
+                                (Cmd::Toggle(k.clone()), entry.label.clone())
+                            }
+                            _ => continue,
+                        };
+                        let clicked = match toolbar_icon_for(&entry.label) {
+                            Some(glyph) => icon_button(ui, glyph, &entry.label, None)
+                                .on_hover_text(&what)
+                                .clicked(),
+                            None => {
+                                let r = ui
+                                    .add(
+                                        egui::Button::new(&entry.label)
+                                            .frame(false)
+                                            .min_size(egui::vec2(0.0, 28.0)),
+                                    )
+                                    .on_hover_text(&what);
+                                crate::script::track(&entry.label, &r);
+                                r.clicked()
+                            }
+                        };
+                        if clicked {
+                            cmds.push(cmd);
+                        }
+                    }
+                }
+                toolbar_divider(ui);
+                if icon_button(ui, icon::TABLE, "Insert table", None).clicked() {
+                    cmds.push(Cmd::InsertTable);
+                }
+                if icon_button(ui, icon::CHECK_CIRCLE, "Validate", Some("F7")).clicked() {
+                    cmds.push(Cmd::Validate);
+                }
+                if icon_button(
+                    ui,
+                    icon::MAGNIFYING_GLASS,
+                    "Find and replace",
+                    Some("Ctrl+F"),
+                )
+                .clicked()
+                {
+                    cmds.push(Cmd::Find);
+                }
+            });
+            // Panels and review on the right.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let review_open = self.review.open;
+                if icon_toggle(
+                    ui,
+                    review_open,
+                    icon::CHAT_CIRCLE_TEXT,
+                    "Review panel",
+                    None,
+                )
+                .clicked()
+                {
+                    cmds.push(Cmd::ReviewPanel);
+                }
+                let tracking = self
+                    .docs
+                    .get(self.active)
+                    .is_some_and(|d| d.editor.is_tracking());
+                ui.add_enabled_ui(has_doc, |ui| {
+                    if icon_toggle(
+                        ui,
+                        tracking,
+                        icon::GIT_DIFF,
+                        "Track changes",
+                        Some("Ctrl+Shift+T"),
+                    )
+                    .clicked()
+                    {
+                        cmds.push(Cmd::TrackChanges);
+                    }
+                });
+                toolbar_divider(ui);
+                let inspector = self.settings.show_elements || self.settings.show_attributes;
+                if icon_toggle(
+                    ui,
+                    inspector,
+                    icon::SIDEBAR,
+                    "Elements and attributes",
+                    None,
+                )
+                .clicked()
+                {
+                    let on = !inspector;
+                    self.settings.show_elements = on;
+                    self.settings.show_attributes = on;
+                }
+                if icon_toggle(
+                    ui,
+                    self.settings.show_structure,
+                    icon::TREE_STRUCTURE,
+                    "Structure and project",
+                    None,
+                )
+                .clicked()
+                {
+                    self.settings.show_structure = !self.settings.show_structure;
+                }
+            });
         });
     }
 
     fn tabs(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
-        ui.horizontal(|ui| {
-            for (i, d) in self.docs.iter().enumerate() {
-                let r = ui.selectable_label(i == self.active, d.title());
-                let r = match &d.path {
-                    Some(p) => r.on_hover_text(p.display().to_string()),
-                    None => r,
-                };
-                if r.clicked() {
-                    self.active = i;
-                }
-                if r.middle_clicked() {
-                    cmds.push(Cmd::Close(i));
-                }
-                if ui.small_button("x").on_hover_text("Close").clicked() {
-                    cmds.push(Cmd::Close(i));
-                }
-                ui.separator();
-            }
-        });
+        use crate::ui::{icon, palette};
+        let p = palette(ui.ctx());
+        egui::ScrollArea::horizontal()
+            .id_salt("doc-tabs")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    for (i, d) in self.docs.iter().enumerate() {
+                        let active = i == self.active;
+                        let title = d.title();
+                        let dirty = d.is_dirty();
+                        let font = egui::FontId::proportional(crate::ui::theme::size::BODY);
+                        let galley = ui.painter().layout_no_wrap(
+                            title.trim_end_matches(" •").to_string(),
+                            font,
+                            if active { p.text } else { p.text_muted },
+                        );
+                        let w = galley.size().x + 12.0 + 22.0 + 10.0;
+                        let (rect, resp) =
+                            ui.allocate_exact_size(egui::vec2(w, 32.0), egui::Sense::click());
+                        let hovered = resp.hovered();
+                        let close_rect = egui::Rect::from_center_size(
+                            egui::pos2(rect.right() - 16.0, rect.center().y),
+                            egui::vec2(20.0, 20.0),
+                        );
+                        let over_close = ui
+                            .ctx()
+                            .pointer_hover_pos()
+                            .is_some_and(|pos| close_rect.contains(pos));
+                        if active {
+                            ui.painter().rect_filled(
+                                rect.shrink2(egui::vec2(0.0, 2.0)),
+                                egui::CornerRadius {
+                                    nw: 6,
+                                    ne: 6,
+                                    sw: 0,
+                                    se: 0,
+                                },
+                                p.surface,
+                            );
+                            ui.painter().hline(
+                                rect.x_range(),
+                                rect.bottom() - 1.0,
+                                egui::Stroke::new(2.0_f32, p.accent),
+                            );
+                        } else if hovered {
+                            ui.painter().rect_filled(
+                                rect.shrink2(egui::vec2(0.0, 4.0)),
+                                egui::CornerRadius::same(6),
+                                p.hover,
+                            );
+                        }
+                        ui.painter().galley(
+                            egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0),
+                            galley,
+                            p.text,
+                        );
+                        // Unsaved documents show a dot where the close button
+                        // goes; hovering turns it into the close button.
+                        if over_close {
+                            ui.painter().rect_filled(
+                                close_rect,
+                                egui::CornerRadius::same(4),
+                                p.pressed,
+                            );
+                        }
+                        let glyph_color = if over_close { p.text } else { p.text_faint };
+                        if dirty && !(hovered || active && over_close) {
+                            ui.painter()
+                                .circle_filled(close_rect.center(), 3.5, p.accent);
+                        } else if hovered || active {
+                            ui.painter().text(
+                                close_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                icon::X,
+                                egui::FontId::proportional(13.0),
+                                glyph_color,
+                            );
+                        }
+                        let resp = match &d.path {
+                            Some(path) => resp.on_hover_text(path.display().to_string()),
+                            None => resp.on_hover_text("Not saved yet"),
+                        };
+                        crate::script::track(&title, &resp);
+                        if resp.clicked() {
+                            if over_close {
+                                cmds.push(Cmd::Close(i));
+                            } else {
+                                self.active = i;
+                            }
+                        }
+                        if resp.middle_clicked() {
+                            cmds.push(Cmd::Close(i));
+                        }
+                    }
+                });
+            });
     }
 
     fn welcome(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
+        use crate::ui::{icon, palette, theme::size, theme::space};
+        let p = palette(ui.ctx());
+        let width = 460.0_f32.min(ui.available_width() - 32.0);
         ui.vertical_centered(|ui| {
-            ui.add_space(60.0);
-            ui.heading(RichText::new("Xylem").size(34.0));
-            ui.label("Structured XML and S1000D authoring");
-            ui.add_space(20.0);
-            if ui.button("Open a document…").clicked() {
-                cmds.push(Cmd::Open);
-            }
-            if ui.button("New document…").clicked() {
-                cmds.push(Cmd::New);
-            }
-            if ui.button("New S1000D module…").clicked() {
-                cmds.push(Cmd::NewS1000d);
-            }
-            ui.add_space(16.0);
-            if !self.settings.recent_files.is_empty() {
-                ui.label(RichText::new("Recent").strong());
-                for p in self.settings.recent_files.iter().take(10) {
-                    if ui.link(p.display().to_string()).clicked() {
-                        cmds.push(Cmd::OpenPath(p.clone()));
+            ui.add_space((ui.available_height() * 0.14).clamp(24.0, 120.0));
+            ui.label(
+                RichText::new(icon::TREE_STRUCTURE)
+                    .size(40.0)
+                    .color(p.accent),
+            );
+            ui.add_space(space::S);
+            ui.label(
+                RichText::new("Xylem")
+                    .size(30.0)
+                    .family(crate::ui::theme::strong_family())
+                    .color(p.text),
+            );
+            ui.label(RichText::new("Structured XML and S1000D authoring").color(p.text_muted));
+            ui.add_space(space::XXL);
+        });
+        ui.vertical_centered(|ui| {
+            ui.set_max_width(width);
+            ui.horizontal(|ui| {
+                let actions: [(&str, &str, Cmd); 3] = [
+                    (icon::FOLDER_OPEN, "Open…", Cmd::Open),
+                    (icon::FILE_PLUS, "New document…", Cmd::New),
+                    (icon::CUBE, "New S1000D module…", Cmd::NewS1000d),
+                ];
+                let each = (width - 2.0 * space::M) / 3.0;
+                for (glyph, label, cmd) in actions {
+                    let r = ui.add_sized(
+                        [each, 64.0],
+                        egui::Button::new(RichText::new(format!("{glyph}\n{label}")).color(p.text))
+                            .fill(p.surface)
+                            .stroke(egui::Stroke::new(1.0_f32, p.border)),
+                    );
+                    crate::script::track(label, &r);
+                    if r.clicked() {
+                        cmds.push(cmd);
                     }
                 }
+            });
+            ui.add_space(space::XL);
+            if !self.settings.recent_files.is_empty() {
+                ui.horizontal(|ui| crate::ui::section(ui, "Recent"));
+                for path in self.settings.recent_files.iter().take(8) {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let dir = path
+                        .parent()
+                        .map(|d| d.display().to_string())
+                        .unwrap_or_default();
+                    let (rect, resp) =
+                        ui.allocate_exact_size(egui::vec2(width, 40.0), egui::Sense::click());
+                    crate::ui::row_background(ui, rect, false, resp.hovered());
+                    let painter = ui.painter();
+                    painter.text(
+                        rect.left_center() + egui::vec2(10.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        icon::FILE_TEXT,
+                        egui::FontId::proportional(18.0),
+                        p.text_muted,
+                    );
+                    painter.text(
+                        rect.left_top() + egui::vec2(38.0, 4.0),
+                        egui::Align2::LEFT_TOP,
+                        &name,
+                        egui::FontId::proportional(size::BODY),
+                        p.text,
+                    );
+                    painter.text(
+                        rect.left_top() + egui::vec2(38.0, 22.0),
+                        egui::Align2::LEFT_TOP,
+                        &dir,
+                        egui::FontId::proportional(size::SMALL),
+                        p.text_faint,
+                    );
+                    crate::script::track(&name, &resp);
+                    if resp.on_hover_text(path.display().to_string()).clicked() {
+                        cmds.push(Cmd::OpenPath(path.clone()));
+                    }
+                }
+                ui.add_space(space::XL);
             }
-            ui.add_space(16.0);
             let n = self.registry.packages().len();
             ui.label(
                 RichText::new(format!(
-                    "{n} doctype package(s) available. Drop files here to open them."
+                    "{n} doctype package{} available · drop files here to open them",
+                    if n == 1 { "" } else { "s" }
                 ))
-                .weak(),
+                .size(size::SMALL)
+                .color(p.text_faint),
             );
         });
     }
@@ -2548,9 +2896,10 @@ impl XylemApp {
             let mut review_acts = Vec::new();
             egui::SidePanel::right("review")
                 .resizable(true)
-                .default_width(280.0)
+                .default_width(300.0)
+                .frame(side_frame(ctx))
                 .show(ctx, |ui| {
-                    ui.heading("Review");
+                    crate::ui::section(ui, "Review");
                     if let Some(ds) = self.docs.get(self.active) {
                         crate::review::panel(ui, ds, &mut self.review, &mut review_acts);
                     }
@@ -2579,20 +2928,16 @@ impl XylemApp {
                 .resizable(true)
                 .default_width(width)
                 .min_width(min_width)
+                .frame(side_frame(ctx))
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        let heading = |t: &str| RichText::new(t).heading();
-                        ui.selectable_value(
-                            &mut self.left_tab,
-                            LeftTab::Structure,
-                            heading("Structure"),
-                        );
-                        ui.selectable_value(
-                            &mut self.left_tab,
-                            LeftTab::Project,
-                            heading("Project"),
-                        );
-                    });
+                    crate::ui::panel_tabs(
+                        ui,
+                        &mut self.left_tab,
+                        &[
+                            (LeftTab::Structure, "Structure"),
+                            (LeftTab::Project, "Project"),
+                        ],
+                    );
                     match self.left_tab {
                         LeftTab::Structure => {
                             if let Some(ds) = self.docs.get(self.active) {
@@ -2615,7 +2960,9 @@ impl XylemApp {
         if self.settings.show_elements || self.settings.show_attributes {
             egui::SidePanel::right("inspector")
                 .resizable(true)
-                .default_width(260.0)
+                .default_width(280.0)
+                .min_width(220.0)
+                .frame(side_frame(ctx))
                 .show(ctx, |ui| {
                     let Some(ds) = self.docs.get_mut(self.active) else {
                         return;
@@ -2626,7 +2973,7 @@ impl XylemApp {
                     let rules = DocRules::new(ds.grammar.as_deref(), &ds.package, &*styles, memo);
                     let h = ui.available_height();
                     if self.settings.show_elements {
-                        ui.heading("Elements");
+                        crate::ui::section(ui, "Elements");
                         egui::Frame::NONE.show(ui, |ui| {
                             ui.set_height(if self.settings.show_attributes {
                                 h * 0.48
@@ -2637,8 +2984,8 @@ impl XylemApp {
                         });
                     }
                     if self.settings.show_attributes {
-                        ui.separator();
-                        ui.heading("Attributes");
+                        crate::ui::divider(ui);
+                        crate::ui::section(ui, "Attributes");
                         panels::attributes(ui, ds, &mut self.panel, &mut acts);
                     }
                 });
@@ -2647,6 +2994,11 @@ impl XylemApp {
             egui::TopBottomPanel::bottom("issues")
                 .resizable(true)
                 .default_height(120.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(crate::ui::palette(ctx).panel)
+                        .inner_margin(egui::Margin::symmetric(12, 8)),
+                )
                 .show(ctx, |ui| {
                     let Some(ds) = self.docs.get(self.active) else {
                         return;
@@ -2656,9 +3008,37 @@ impl XylemApp {
                         .iter()
                         .filter(|i| i.severity == Severity::Error)
                         .count();
-                    ui.horizontal(|ui| {
-                        ui.strong(format!("Issues ({errs})"));
-                        ui.label(RichText::new(&ds.grammar_status).weak());
+                    let warns = ds.issues.len() - errs;
+                    crate::ui::section_header(ui, "Issues", |ui| {
+                        if errs == 0 && warns == 0 {
+                            crate::ui::badge(ui, "No problems", crate::ui::Tone::Success);
+                        } else {
+                            if warns > 0 {
+                                crate::ui::badge(
+                                    ui,
+                                    format!("{warns} other"),
+                                    crate::ui::Tone::Warning,
+                                );
+                            }
+                            if errs > 0 {
+                                crate::ui::badge(
+                                    ui,
+                                    format!("{errs} error{}", if errs == 1 { "" } else { "s" }),
+                                    crate::ui::Tone::Danger,
+                                );
+                            }
+                        }
+                        ui.add_space(8.0);
+                        let p = crate::ui::palette(ui.ctx());
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&ds.grammar_status)
+                                    .size(crate::ui::theme::size::SMALL)
+                                    .color(p.text_faint),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(&ds.grammar_status);
                     });
                     panels::issues(ui, ds, &mut acts);
                 });
@@ -2764,53 +3144,76 @@ impl XylemApp {
     }
 
     fn status_bar(&mut self, ctx: &egui::Context) {
+        use crate::ui::{icon, palette, theme::size};
         let mut acts = Vec::new();
         let words = self.docs.get_mut(self.active).map(|d| d.word_count());
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let Some(ds) = self.docs.get(self.active) else {
-                    ui.label("Ready");
-                    return;
-                };
-                panels::breadcrumb(ui, ds, &mut acts);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("{:.0}%", self.settings.zoom * 100.0));
-                    if ds.editor.is_tracking() {
-                        ui.separator();
-                        ui.colored_label(
-                            crate::review::author_color(
-                                &self.settings.author(),
-                                ui.visuals().dark_mode,
-                            ),
-                            "Tracking changes",
-                        );
-                    }
-                    if let Some(w) = words {
-                        ui.separator();
-                        ui.label(format!("{w} words"));
-                    }
-                    ui.separator();
-                    ui.label(&ds.package.doctype.name);
-                    if let Some(info) = &ds.s1000d {
-                        ui.separator();
-                        ui.label(format!("S1000D {}", info.issue));
-                    }
-                    ui.separator();
-                    let errs = ds
-                        .issues
-                        .iter()
-                        .filter(|i| i.severity == Severity::Error)
-                        .count();
-                    if ds.grammar.is_some() {
-                        if errs == 0 {
-                            ui.colored_label(Color32::from_rgb(60, 160, 80), "✔ valid");
-                        } else {
-                            ui.colored_label(Color32::from_rgb(220, 70, 70), format!("⛔ {errs}"));
+        let p = palette(ctx);
+        egui::TopBottomPanel::bottom("status")
+            .frame(
+                egui::Frame::new()
+                    .fill(p.chrome)
+                    .inner_margin(egui::Margin::symmetric(10, 3)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let Some(ds) = self.docs.get(self.active) else {
+                        crate::ui::muted(ui, "Ready");
+                        return;
+                    };
+                    panels::breadcrumb(ui, ds, &mut acts);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let seg = |ui: &mut egui::Ui, text: String| {
+                            ui.label(RichText::new(text).size(size::SMALL).color(p.text_muted))
+                        };
+                        let sep = |ui: &mut egui::Ui| {
+                            ui.label(RichText::new("·").color(p.text_faint));
+                        };
+                        seg(ui, format!("{:.0}%", self.settings.zoom * 100.0))
+                            .on_hover_text("Zoom (Ctrl++ / Ctrl+- / Ctrl+0)");
+                        if ds.editor.is_tracking() {
+                            sep(ui);
+                            crate::ui::badge(ui, "Tracking changes", crate::ui::Tone::Accent)
+                                .on_hover_text("Review > Track changes (Ctrl+Shift+T)");
                         }
-                    }
+                        if let Some(w) = words {
+                            sep(ui);
+                            seg(ui, format!("{w} words"));
+                        }
+                        sep(ui);
+                        seg(ui, ds.package.doctype.name.clone()).on_hover_text("Document type");
+                        if let Some(info) = &ds.s1000d {
+                            sep(ui);
+                            seg(ui, format!("S1000D {}", info.issue));
+                        }
+                        let errs = ds
+                            .issues
+                            .iter()
+                            .filter(|i| i.severity == Severity::Error)
+                            .count();
+                        if ds.grammar.is_some() {
+                            sep(ui);
+                            if errs == 0 {
+                                ui.label(
+                                    RichText::new(format!("{}  Valid", icon::CHECK_CIRCLE))
+                                        .size(size::SMALL)
+                                        .color(p.success),
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{}  {errs} error{}",
+                                        icon::WARNING_CIRCLE,
+                                        if errs == 1 { "" } else { "s" }
+                                    ))
+                                    .size(size::SMALL)
+                                    .color(p.danger),
+                                );
+                            }
+                        }
+                    });
                 });
             });
-        });
         let mut cmds = Vec::new();
         for a in acts {
             self.panel_action(a, &mut cmds);
@@ -3501,7 +3904,10 @@ impl XylemApp {
         }
         // Scripted steps.
         if let Some(script) = &mut self.script {
-            script.anchor = self.docs.get(self.active).and_then(|d| d.canvas.caret_screen);
+            script.anchor = self
+                .docs
+                .get(self.active)
+                .and_then(|d| d.canvas.caret_screen);
         }
         // A script repaints every frame; cap it near 30 fps so test runs
         // don't keep a CPU core and the GPU busy.
@@ -3938,25 +4344,77 @@ enum UpdateState {
     Failed(String),
 }
 
+/// The frame shared by the side panels.
+fn side_frame(ctx: &egui::Context) -> egui::Frame {
+    egui::Frame::new()
+        .fill(crate::ui::palette(ctx).panel)
+        .inner_margin(egui::Margin {
+            left: 12,
+            right: 10,
+            top: 10,
+            bottom: 8,
+        })
+}
+
+/// Icon for a toolbar button a doctype package defines, by its label.
+fn toolbar_icon_for(label: &str) -> Option<&'static str> {
+    use crate::ui::icon;
+    let l = label.to_ascii_lowercase();
+    Some(if l.contains("superscript") {
+        icon::TEXT_SUPERSCRIPT
+    } else if l.contains("subscript") {
+        icon::TEXT_SUBSCRIPT
+    } else if l.contains("numbered") || l.contains("ordered list") {
+        icon::LIST_NUMBERS
+    } else if l.contains("definition") {
+        icon::LIST_DASHES
+    } else if l.contains("list") {
+        icon::LIST_BULLETS
+    } else if l.contains("paragraph") || l == "para" {
+        icon::PARAGRAPH
+    } else if l.contains("image") || l.contains("graphic") || l.contains("figure") {
+        icon::IMAGE
+    } else if l.contains("table") {
+        icon::TABLE
+    } else if l.contains("link") || l.contains("reference") {
+        icon::LINK
+    } else {
+        return None;
+    })
+}
+
 fn table_menu(ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
-    for (label, c) in [
-        ("Insert table…", Cmd::InsertTable),
-        ("Insert row above", Cmd::TableRowAbove),
-        ("Insert row below", Cmd::TableRowBelow),
-        ("Insert column left", Cmd::TableColLeft),
-        ("Insert column right", Cmd::TableColRight),
-        ("Delete row", Cmd::TableDeleteRow),
-        ("Delete column", Cmd::TableDeleteColumn),
-        ("Move row up", Cmd::TableRowUp),
-        ("Move row down", Cmd::TableRowDown),
-        ("Merge cell right", Cmd::TableMergeRight),
-        ("Merge cell down", Cmd::TableMergeDown),
-        ("Split cell", Cmd::TableSplitCell),
-        ("Delete table", Cmd::TableDelete),
-    ] {
-        if ui.button(label).clicked() {
-            cmds.push(c);
-            ui.close();
+    use crate::ui::icon;
+    let groups: [&[(Option<&str>, &str, Cmd)]; 4] = [
+        &[(Some(icon::TABLE), "Insert table…", Cmd::InsertTable)],
+        &[
+            (Some(icon::ROWS), "Insert row above", Cmd::TableRowAbove),
+            (None, "Insert row below", Cmd::TableRowBelow),
+            (Some(icon::COLUMNS), "Insert column left", Cmd::TableColLeft),
+            (None, "Insert column right", Cmd::TableColRight),
+            (None, "Move row up", Cmd::TableRowUp),
+            (None, "Move row down", Cmd::TableRowDown),
+        ],
+        &[
+            (None, "Merge cell right", Cmd::TableMergeRight),
+            (None, "Merge cell down", Cmd::TableMergeDown),
+            (None, "Split cell", Cmd::TableSplitCell),
+        ],
+        &[
+            (Some(icon::TRASH), "Delete row", Cmd::TableDeleteRow),
+            (None, "Delete column", Cmd::TableDeleteColumn),
+            (None, "Delete table", Cmd::TableDelete),
+        ],
+    ];
+    for (i, group) in groups.iter().enumerate() {
+        if i > 0 {
+            ui.separator();
+        }
+        for (glyph, label, c) in group.iter() {
+            if crate::ui::menu_item(ui, *glyph, label, None).clicked() {
+                cmds.push(c.clone());
+                ui.close();
+            }
         }
     }
 }
@@ -4231,21 +4689,63 @@ impl eframe::App for XylemApp {
             .unwrap_or_else(|| "Xylem".into());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            self.menu_bar(ui, &mut cmds);
-            self.toolbar(ui, &mut cmds);
-        });
+        let pal = crate::ui::palette(ctx);
+        egui::TopBottomPanel::top("menu")
+            .frame(
+                egui::Frame::new()
+                    .fill(pal.chrome)
+                    .inner_margin(egui::Margin {
+                        left: 6,
+                        right: 6,
+                        top: 3,
+                        bottom: 0,
+                    }),
+            )
+            .show_separator_line(false)
+            .show(ctx, |ui| self.menu_bar(ui, &mut cmds));
+        egui::TopBottomPanel::top("toolbar")
+            .frame(
+                egui::Frame::new()
+                    .fill(pal.chrome)
+                    .inner_margin(egui::Margin::symmetric(8, 5)),
+            )
+            .show(ctx, |ui| self.toolbar(ui, &mut cmds));
         self.status_bar(ctx);
         self.panels(ctx, &mut cmds);
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if self.docs.is_empty() {
-                self.welcome(ui, &mut cmds);
-                return;
-            }
-            self.tabs(ui, &mut cmds);
-            ui.separator();
-            self.document_area(ui, &mut cmds);
-        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(pal.surface))
+            .show(ctx, |ui| {
+                if self.docs.is_empty() {
+                    self.welcome(ui, &mut cmds);
+                    return;
+                }
+                let strip = egui::Frame::new()
+                    .fill(pal.panel)
+                    .inner_margin(egui::Margin {
+                        left: 6,
+                        right: 6,
+                        top: 4,
+                        bottom: 0,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        self.tabs(ui, &mut cmds);
+                    });
+                let r = strip.response.rect;
+                ui.painter().hline(
+                    r.x_range(),
+                    r.bottom(),
+                    egui::Stroke::new(1.0_f32, pal.border),
+                );
+                egui::Frame::new()
+                    .inner_margin(egui::Margin {
+                        left: 10,
+                        right: 0,
+                        top: 2,
+                        bottom: 0,
+                    })
+                    .show(ui, |ui| self.document_area(ui, &mut cmds));
+            });
         self.show_context_menu(ctx, &mut cmds);
         self.show_palette(ctx, &mut cmds);
         self.show_shortcuts(ctx);
