@@ -241,3 +241,45 @@ fn offsets_point_at_each_node() {
     let text = doc.children(a)[0];
     assert!(xml[offs[text.index()]..].starts_with("text</a>"));
 }
+
+/// Changes `"old"` in the first text node holding it to `"new"`, so the
+/// node is written afresh.
+fn edit_text(doc: &mut Document, old: &str) {
+    let n = doc
+        .descendants(doc.root())
+        .find(|&n| doc.text(n).is_some_and(|t| t.contains(old)))
+        .unwrap();
+    let t = doc.text(n).unwrap().replace(old, "new");
+    doc.set_text(n, t);
+}
+
+#[test]
+fn a_carriage_return_reference_survives_an_edit() {
+    // LF line endings: `&#13;` is the only way a CR gets into the text, and
+    // written raw it would be read back as a line feed.
+    let mut doc = Document::from_str("<a>old&#13;\nline&#13;</a>\n").unwrap();
+    edit_text(&mut doc, "old");
+    assert_eq!(doc.to_xml(), "<a>new&#13;\nline&#13;</a>\n");
+}
+
+#[test]
+fn crlf_line_endings_stay_as_they_are_in_edited_text() {
+    let mut doc = Document::from_str("<a>\r\n  <b>old\r\nline</b>\r\n</a>\r\n").unwrap();
+    edit_text(&mut doc, "old");
+    assert_eq!(doc.to_xml(), "<a>\r\n  <b>new\r\nline</b>\r\n</a>\r\n");
+}
+
+#[test]
+fn a_lone_carriage_return_is_escaped_even_with_crlf_endings() {
+    let mut doc = Document::from_str("<a>old&#13;x</a>\r\n").unwrap();
+    edit_text(&mut doc, "old");
+    assert_eq!(doc.to_xml(), "<a>new&#13;x</a>\r\n");
+}
+
+#[test]
+fn a_carriage_return_in_an_attribute_is_escaped() {
+    let mut doc = Document::from_str("<a/>").unwrap();
+    let a = doc.document_element().unwrap();
+    doc.set_attr(a, "v", "x\ry");
+    assert_eq!(doc.to_xml(), "<a v=\"x&#13;y\"/>");
+}

@@ -408,7 +408,17 @@ impl Editor {
             {
                 let parent = self.doc.parent(n).unwrap();
                 let idx = self.doc.index_in_parent(n).unwrap();
+                let tracked =
+                    self.is_tracking() && !self.inside_own_insertion(Pos::new(parent, idx));
+                let xml = self.doc.node_to_xml(n);
                 self.doc.detach(n);
+                if tracked {
+                    // Kept in a deletion mark, so rejecting brings it back.
+                    let (author, time) = self.stamp();
+                    let m = self.add_deletion(parent, idx, &xml, &author, &time);
+                    let after = self.doc.index_in_parent(m).unwrap() + 1;
+                    return canonical(&self.doc, rules, Pos::new(parent, after));
+                }
                 return canonical(&self.doc, rules, Pos::new(parent, idx));
             }
         }
@@ -893,7 +903,11 @@ impl Editor {
             if self.doc.is_element(c) {
                 return Some(c);
             }
-            if !is_ignorable(&self.doc, rules, c) && !revision::is_mark(&self.doc, c) {
+            // With tracking on, revision marks are stepped over (moves and
+            // joins handle them); with it off they stop the search as before.
+            if !is_ignorable(&self.doc, rules, c)
+                && !(self.is_tracking() && revision::is_mark(&self.doc, c))
+            {
                 return None;
             }
             cur = self.doc.prev_sibling(c);
@@ -907,7 +921,11 @@ impl Editor {
             if self.doc.is_element(c) {
                 return Some(c);
             }
-            if !is_ignorable(&self.doc, rules, c) && !revision::is_mark(&self.doc, c) {
+            // With tracking on, revision marks are stepped over (moves and
+            // joins handle them); with it off they stop the search as before.
+            if !is_ignorable(&self.doc, rules, c)
+                && !(self.is_tracking() && revision::is_mark(&self.doc, c))
+            {
                 return None;
             }
             cur = self.doc.next_sibling(c);
@@ -957,6 +975,8 @@ impl Editor {
             return self.tracked_remove_element(rules, e);
         }
         let parent = self.doc.parent(e).unwrap();
+        // Half of an insertion or comment running on past the element stays.
+        self.keep_lone_marks(&mut vec![e]);
         let idx = self.doc.index_in_parent(e).unwrap();
         self.doc.detach(e);
         self.sel = Selection::caret(self.normalize_keep(rules, Pos::new(parent, idx)));
@@ -967,6 +987,19 @@ impl Editor {
     fn join(&mut self, rules: &dyn Rules, a: NodeId, b: NodeId) -> EditResult {
         self.check_writable(rules, a)?;
         self.check_writable(rules, b)?;
+        // A deletion between the two would end up outside whatever insertion
+        // it was in once `b`'s content moves up.
+        let mut cur = self.doc.next_sibling(a);
+        while let Some(c) = cur
+            && c != b
+        {
+            if revision::mark_kind(&self.doc, c) == Some(revision::MarkKind::Deletion) {
+                return Err(EditError::NotAllowed(
+                    "Accept or reject the tracked deletion between these paragraphs first.".into(),
+                ));
+            }
+            cur = self.doc.next_sibling(c);
+        }
         // Insertion marks between the two go to the join point, so they stay
         // in the same order relative to the content that follows.
         let between: Vec<NodeId> = {
@@ -983,10 +1016,49 @@ impl Editor {
                 }
                 cur = self.doc.next_sibling(c);
             }
+            // An insertion lying wholly between the two stays where it is.
+            let pairs: Vec<NodeId> = v
+                .iter()
+                .copied()
+                .filter(|&m| revision::partner(&self.doc, m).is_some_and(|p| v.contains(&p)))
+                .collect();
+            v.retain(|m| !pairs.contains(m));
             v
         };
-        for m in between {
-            self.doc.append_child(a, m);
+        // `b`'s content moves in front of these marks. A start whose end is
+        // in `b` has to come along to stay in front of that end (with any
+        // end before it, to keep the order); an end and start by the same
+        // author there simply become one insertion. Anything else stays: an
+        // end alone closes an insertion `a` was in, and a start whose end
+        // lies past `b` still opens one there.
+        use revision::MarkKind::{InsertionEnd, InsertionStart};
+        let ends_in_b = |doc: &Document, m: NodeId| {
+            revision::partner(doc, m).is_some_and(|p| doc.is_ancestor_or_self(b, p))
+        };
+        let kinds: Vec<_> = between
+            .iter()
+            .map(|&m| revision::mark_kind(&self.doc, m))
+            .collect();
+        let start_into_b = between
+            .iter()
+            .zip(&kinds)
+            .any(|(&m, k)| *k == Some(InsertionStart) && ends_in_b(&self.doc, m));
+        match kinds.as_slice() {
+            _ if !start_into_b => {}
+            [Some(InsertionEnd), Some(InsertionStart)]
+                if revision::mark_author(&self.doc, between[0]).is_some()
+                    && revision::mark_author(&self.doc, between[0])
+                        == revision::mark_author(&self.doc, between[1]) =>
+            {
+                for m in between {
+                    self.doc.detach(m);
+                }
+            }
+            _ => {
+                for m in between {
+                    self.doc.append_child(a, m);
+                }
+            }
         }
         // Joining across a break the author inserted (their own split, or
         // an element they added) just takes it out again.
@@ -995,11 +1067,18 @@ impl Editor {
         }
         let caret_idx = self.doc.children(a).len();
         let kids = self.doc.children(b).to_vec();
+        let moved = kids.len();
         let outer = self.doc.parent(b);
         for k in kids {
             self.doc.append_child(a, k);
         }
         self.doc.detach(b);
+        // `b` was the author's own insertion but its content now lies outside
+        // it: it is still inserted.
+        if self.is_tracking() && moved > 0 && !self.inside_own_insertion(Pos::new(a, caret_idx)) {
+            let (author, time) = self.stamp();
+            self.wrap_tracked(a, caret_idx, caret_idx + moved, &author, &time);
+        }
         // An element the author inserted leaves its now empty marks.
         if let Some(o) = outer {
             self.tidy_marks(o, None);
@@ -1124,8 +1203,12 @@ impl Editor {
     /// the right one, so rejecting it joins the parts again. Inside the
     /// author's own insertion the break simply becomes part of it.
     pub fn split_element(&mut self, rules: &dyn Rules, target: NodeId, p: Pos) -> NodeId {
-        let tracked = self.is_tracking() && !self.inside_own_insertion(p);
-        let p = if self.is_tracking() && !tracked {
+        // Inside someone else's split, away from both of its parts, the new
+        // break becomes part of theirs.
+        let passing = revision::enclosing_insertion(&self.doc, p)
+            .is_some_and(|s| self.passes_through(s, container(&self.doc, p)));
+        let tracked = self.is_tracking() && !self.inside_own_insertion(p) && !passing;
+        let p = if (self.is_tracking() && !tracked) || passing {
             p
         } else {
             self.break_insertion_at(p)
@@ -1622,6 +1705,9 @@ impl Editor {
                 ed.sel = Selection::caret(first_editable(&ed.doc, rules, el));
                 return Ok(());
             }
+            // Half of a tracked split can't change places with its other half.
+            ed.check_no_split_through(el)?;
+            ed.check_no_split_through(sib)?;
             // Swap the two elements so the whitespace between them stays put.
             let (a, b) = if up { (sib, el) } else { (el, sib) };
             let ia = ed.doc.index_in_parent(a).unwrap();

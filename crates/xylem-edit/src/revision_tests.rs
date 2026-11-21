@@ -584,15 +584,16 @@ fn a_tracked_join_keeps_the_second_paragraph() {
 }
 
 #[test]
-fn a_tracked_join_around_someone_elses_insertion() {
+fn joining_across_someone_elses_insertion_is_refused() {
+    // Joining would fold their pending insertion into yours.
     let src = format!("<doc><p>ab</p><p>c{ANN_INS}x{END}d</p></doc>");
     let mut e = tracked(&src);
     e.set_caret(at(&e, "c", 0));
-    e.delete_backward(&R).unwrap();
-    assert_balanced(&e);
-    let (rejected, accepted) = reject_and_accept(&e);
-    assert_eq!(rejected, "<doc><p>ab</p><p>cd</p></doc>");
-    assert_eq!(accepted, "<doc><p>abcxd</p></doc>");
+    assert!(matches!(
+        e.delete_backward(&R),
+        Err(EditError::NotAllowed(_))
+    ));
+    assert_eq!(xml(&e), src);
 }
 
 #[test]
@@ -790,8 +791,9 @@ fn deleting_your_own_inserted_element_leaves_no_trace() {
 }
 
 #[test]
-fn removing_an_empty_element_is_not_recorded() {
-    let mut e = tracked("<doc><section><p>One</p><p></p></section></doc>");
+fn removing_an_empty_element_from_the_file_is_recorded() {
+    let src = "<doc><section><p>One</p><p></p></section></doc>";
+    let mut e = tracked(src);
     let empty = e
         .doc
         .descendants(e.doc.root())
@@ -799,7 +801,32 @@ fn removing_an_empty_element_is_not_recorded() {
         .nth(1)
         .unwrap();
     e.delete_element(&R, empty).unwrap();
-    assert_eq!(xml(&e), "<doc><section><p>One</p></section></doc>");
+    assert_eq!(
+        xml(&e),
+        format!(
+            "<doc><section><p>One</p>{}</section></doc>",
+            del("&lt;p&gt;&lt;/p&gt;")
+        )
+    );
+    e.resolve_all(&R, false).unwrap();
+    assert_eq!(xml(&e), src);
+}
+
+#[test]
+fn the_empty_paragraph_left_by_your_own_split_goes_without_a_trace() {
+    let mut e = tracked("<doc><p>One</p></doc>");
+    e.set_caret(at(&e, "One", 3));
+    e.enter(&R).unwrap();
+    let second = e
+        .doc
+        .descendants(e.doc.root())
+        .filter(|&n| e.doc.name(n) == Some("p"))
+        .nth(1)
+        .unwrap();
+    e.delete_element(&R, second).unwrap();
+    assert_balanced(&e);
+    e.resolve_all(&R, false).unwrap();
+    assert_eq!(xml(&e), "<doc><p>One</p></doc>");
 }
 
 #[test]

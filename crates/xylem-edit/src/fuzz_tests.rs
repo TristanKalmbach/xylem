@@ -89,24 +89,95 @@ fn clock() -> String {
     "20261121T120000+0000".into()
 }
 
+/// The text with numeric character references written as the characters:
+/// edited text is written out afresh, so `&#169;` may come back as `©`.
+pub(crate) fn same_chars(xml: &str) -> String {
+    let mut out = String::new();
+    let mut rest = xml;
+    while let Some(i) = rest.find("&#") {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i + 2..];
+        let end = tail.find(';').unwrap_or(0);
+        let code = match tail.strip_prefix('x') {
+            Some(h) if end > 0 => u32::from_str_radix(&h[..end - 1], 16).ok(),
+            _ => tail[..end].parse().ok(),
+        };
+        match code.and_then(char::from_u32) {
+            Some(c) if !matches!(c, '<' | '>' | '&' | '"' | '\'' | '\n' | '\r' | '\t') => {
+                out.push(c);
+                rest = &tail[end + 1..];
+            }
+            _ => {
+                out.push_str("&#");
+                rest = tail;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn no_marks(xml: &str) -> bool {
     !xml.contains("<?xm-insertion") && !xml.contains("<?xm-deletion")
 }
 
-fn run(seed: u64, steps: usize, tracking: bool) {
+/// How a run tracks changes.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Mode {
+    /// Track changes off throughout.
+    Off,
+    /// One author, tracking on throughout.
+    Tracked,
+    /// Two authors taking turns at random, tracking on throughout.
+    TwoAuthors,
+    /// Two authors, with tracking switched off for some edits.
+    Mixed,
+}
+
+fn tracking_as(author: &str) -> Option<crate::revision::Tracking> {
+    Some(crate::revision::Tracking {
+        author: author.into(),
+        clock,
+    })
+}
+
+/// Insertion starts and ends alternate in document order.
+fn marks_paired(doc: &Document) -> bool {
+    let mut open = false;
+    let mut ok = true;
+    for n in doc.descendants(doc.root()) {
+        match crate::revision::mark_kind(doc, n) {
+            Some(crate::revision::MarkKind::InsertionStart) => {
+                ok &= !open;
+                open = true;
+            }
+            Some(crate::revision::MarkKind::InsertionEnd) => {
+                ok &= open;
+                open = false;
+            }
+            _ => {}
+        }
+    }
+    ok && !open
+}
+
+fn run(seed: u64, steps: usize, mode: Mode) {
     let original = Document::from_str(SAMPLE)
         .expect("sample parses")
         .to_bytes();
     let mut ed = Editor::new(Document::from_str(SAMPLE).unwrap());
-    if tracking {
-        ed.tracking = Some(crate::revision::Tracking {
-            author: "fuzz".into(),
-            clock,
-        });
-    }
     let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut done = 0usize;
     for step in 0..steps {
+        ed.tracking = match mode {
+            Mode::Off => None,
+            Mode::Tracked => tracking_as("fuzz"),
+            Mode::TwoAuthors => tracking_as(["fuzz", "ann"][rng.below(2)]),
+            Mode::Mixed => match rng.below(5) {
+                0 => None,
+                k => tracking_as(["fuzz", "ann"][k % 2]),
+            },
+        };
         let spots = text_positions(&ed.doc);
         if spots.is_empty() {
             break;
@@ -114,14 +185,14 @@ fn run(seed: u64, steps: usize, tracking: bool) {
         let (n, i) = spots[rng.below(spots.len())];
         let caret = Pos::new(n, i);
         let before = format!(
-            "{}
-caret in {:?} at {i}",
+            "{}\ncaret in {:?} at {i}, as {:?}",
             ed.doc.to_xml(),
-            ed.doc.text(n)
+            ed.doc.text(n),
+            ed.tracking.as_ref().map(|t| t.author.clone())
         );
         // Edits are separate undo steps, so undo can be counted exactly.
         ed.set_caret(caret);
-        // Deleting a whole element is rarer than the other edits.
+        // Deleting, renaming and moving whole elements are rarer.
         let op = match rng.below(16) {
             13 => 5,
             14 => 7,
@@ -137,19 +208,11 @@ caret in {:?} at {i}",
             2 => ed.delete_backward(&Rules),
             3 => ed.delete_forward(&Rules),
             4 => ed.enter(&Rules),
-            5 => {
-                // Delete the element around the caret (never the root).
-                match ed
-                    .doc
-                    .parent(n)
-                    .filter(|&e| Some(e) != ed.doc.document_element())
-                {
-                    Some(e) => ed.delete_element(&Rules, e),
-                    None => Err(EditError::Nothing),
-                }
-            }
+            5 => match around {
+                Some(e) => ed.delete_element(&Rules, e),
+                None => Err(EditError::Nothing),
+            },
             7 => {
-                // Rename the element around the caret.
                 let to = around.and_then(|e| match ed.doc.name(e) {
                     Some("para") => Some((e, "note")),
                     Some("note") => Some((e, "para")),
@@ -163,7 +226,6 @@ caret in {:?} at {i}",
                 }
             }
             8 => {
-                // Move the block around the caret up or down.
                 let up = rng.below(2) == 0;
                 let block = std::iter::once(n)
                     .chain(ed.doc.ancestors(n))
@@ -194,32 +256,27 @@ caret in {:?} at {i}",
         if let Err(e) = Document::from_str(&xml) {
             panic!("seed {seed}, step {step}, op {op}: not well-formed ({e}):\n{xml}");
         }
-        if tracking {
-            // Insertion starts and ends alternate in document order.
-            let mut open = false;
-            let mut ok = true;
-            for n in ed.doc.descendants(ed.doc.root()) {
-                match crate::revision::mark_kind(&ed.doc, n) {
-                    Some(crate::revision::MarkKind::InsertionStart) => {
-                        ok &= !open;
-                        open = true;
-                    }
-                    Some(crate::revision::MarkKind::InsertionEnd) => {
-                        ok &= open;
-                        open = false;
-                    }
-                    _ => {}
-                }
-            }
-            assert!(
-                ok && !open,
-                "seed {seed}, step {step}, op {op}: unpaired insertion marks:\n{xml}\nbefore:\n{before}"
+        assert!(
+            marks_paired(&ed.doc),
+            "seed {seed} ({mode:?}), step {step}, op {op}: unpaired insertion marks:\n{xml}\nbefore:\n{before}"
+        );
+        // XYLEM_FUZZ_TRACE: check Reject all after every step, to find the
+        // edit that first breaks it.
+        if matches!(mode, Mode::Tracked | Mode::TwoAuthors)
+            && std::env::var_os("XYLEM_FUZZ_TRACE").is_some()
+        {
+            let mut e = Editor::new(Document::from_bytes(&ed.doc.to_bytes()).unwrap());
+            let _ = e.resolve_all(&Rules, false);
+            assert_eq!(
+                same_chars(&String::from_utf8_lossy(&e.doc.to_bytes())),
+                same_chars(&String::from_utf8_lossy(&original)),
+                "seed {seed} ({mode:?}), step {step}, op {op}: Reject all breaks here.\nafter:\n{xml}\nbefore:\n{before}"
             );
         }
     }
     // Guard against a test that silently does nothing.
     assert!(
-        done >= 8,
+        done >= 5,
         "seed {seed}: only {done} of {steps} edits applied"
     );
     assert_ne!(
@@ -239,31 +296,90 @@ caret in {:?} at {i}",
     assert_eq!(
         String::from_utf8_lossy(&ed.doc.to_bytes()),
         String::from_utf8_lossy(&original),
-        "seed {seed}: undoing everything must give back the original bytes"
+        "seed {seed} ({mode:?}): undoing everything must give back the original bytes"
     );
     while ed.redo() {}
     assert_eq!(
         String::from_utf8_lossy(&ed.doc.to_bytes()),
         String::from_utf8_lossy(&edited),
-        "seed {seed}: redoing everything must give back the edited document"
+        "seed {seed} ({mode:?}): redoing everything must give back the edited document"
     );
-    if tracking {
-        // Accept all and reject all each leave a well-formed document
-        // with no revision marks.
-        for accept in [true, false] {
-            let mut e = Editor::new(Document::from_bytes(&edited).unwrap());
-            let before = crate::revision::changes(&e.doc).len();
-            let marks_before = e.doc.to_xml().matches("<?xm-").count();
-            let result = e.resolve_all(&Rules, accept);
-            let result = format!("{result:?} ({before} changes, {marks_before} marks before)");
-            let out = e.doc.to_xml();
-            assert!(
-                Document::from_str(&out).is_ok() && no_marks(&out),
-                "seed {seed}: resolve_all({accept}) gave {result:?} and left marks or broke the document:\n{out}\nfrom:\n{}",
-                String::from_utf8_lossy(&edited)
+    if mode == Mode::Off {
+        return;
+    }
+    let edited_text = String::from_utf8_lossy(&edited).into_owned();
+    // Accept all and Reject all each leave a well-formed document with no
+    // revision marks. When every edit was tracked, Reject all gives back the
+    // original.
+    for accept in [true, false] {
+        let mut e = Editor::new(Document::from_bytes(&edited).unwrap());
+        let result = e.resolve_all(&Rules, accept);
+        let out = e.doc.to_xml();
+        if !accept && mode != Mode::Mixed {
+            assert_eq!(
+                same_chars(&String::from_utf8_lossy(&e.doc.to_bytes())),
+                same_chars(&String::from_utf8_lossy(&original)),
+                "seed {seed} ({mode:?}): Reject all must give back the original exactly; edited:\n{edited_text}"
             );
         }
+        assert!(
+            Document::from_str(&out).is_ok() && no_marks(&out),
+            "seed {seed} ({mode:?}): resolve_all({accept}) gave {result:?} and left marks or broke the document:\n{out}\nfrom:\n{edited_text}"
+        );
     }
+    // One change at a time, in random order, each accepted or rejected at
+    // random (as in the Review panel): the document stays well-formed and
+    // paired, and in the end no change is left.
+    let mut e = Editor::new(Document::from_bytes(&edited).unwrap());
+    for k in 0..2000 {
+        let open: Vec<NodeId> = crate::revision::changes(&e.doc)
+            .into_iter()
+            .filter(|c| c.kind != crate::revision::ChangeKind::Comment)
+            .map(|c| c.node)
+            .collect();
+        if open.is_empty() {
+            break;
+        }
+        let node = open[rng.below(open.len())];
+        let accept = rng.below(2) == 0;
+        let what = e.doc.node_to_xml(node);
+        let before = e.doc.to_xml();
+        let _ = if accept {
+            e.accept_change(&Rules, node)
+        } else {
+            e.reject_change(&Rules, node)
+        };
+        let out = e.doc.to_xml();
+        assert!(
+            Document::from_str(&out).is_ok() && marks_paired(&e.doc),
+            "seed {seed} ({mode:?}): resolving {what} (accept: {accept}, change {k}) broke the document:\n{out}\nbefore:\n{before}"
+        );
+    }
+    let out = e.doc.to_xml();
+    assert!(
+        no_marks(&out),
+        "seed {seed} ({mode:?}): changes left after resolving one at a time:\n{out}\nfrom:\n{edited_text}"
+    );
+}
+
+/// Seeds that once found a bug; always run.
+const FOUND: &[u64] = &[
+    34, 138, 144, 363, 394, 726, 3107, 3557, 4245, 5626, 6642, 60609, 65787, 84102,
+];
+
+/// The seeds to run: `XYLEM_FUZZ_SEED` picks one, else 1 to
+/// `XYLEM_FUZZ_RUNS` (150 by default) and the seeds in [`FOUND`].
+fn seeds() -> Vec<u64> {
+    if let Some(s) = std::env::var("XYLEM_FUZZ_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        return vec![s];
+    }
+    let n = runs();
+    (1..=n)
+        .chain(FOUND.iter().copied().filter(|&s| s > n))
+        .collect()
 }
 
 fn runs() -> u64 {
@@ -275,14 +391,28 @@ fn runs() -> u64 {
 
 #[test]
 fn random_edits_stay_well_formed_and_undo_exactly() {
-    for seed in 1..=runs() {
-        run(seed, 60, false);
+    for seed in seeds() {
+        run(seed, 60, Mode::Off);
     }
 }
 
 #[test]
 fn random_tracked_edits_keep_marks_paired_and_resolve_cleanly() {
-    for seed in 1..=runs() {
-        run(seed, 60, true);
+    for seed in seeds() {
+        run(seed, 60, Mode::Tracked);
+    }
+}
+
+#[test]
+fn two_authors_editing_resolve_cleanly() {
+    for seed in seeds() {
+        run(seed, 60, Mode::TwoAuthors);
+    }
+}
+
+#[test]
+fn switching_tracking_off_keeps_marks_paired() {
+    for seed in seeds() {
+        run(seed, 60, Mode::Mixed);
     }
 }

@@ -63,7 +63,9 @@ the Elements panel, Ctrl+Space, a table or a template) gets insertion marks
 around it, so rejecting it removes it. Deleting an element replaces it with
 a deletion mark that holds its markup, so rejecting puts it back exactly,
 including any changes it held. Deleting an element you inserted yourself, or
-an empty one (such as the blank paragraph Enter leaves), simply removes it.
+the empty paragraph left behind when you split one at its end, simply removes
+it. An empty element that was in the file (`<companyName/>`, say) is recorded
+like any other.
 
 Changes to the structure are tracked with the same marks:
 
@@ -79,13 +81,39 @@ Changes to the structure are tracked with the same marks:
 - **Moving** an element up or down leaves a deletion mark where it was and
   marks it inserted where it went. Moving an element you inserted just
   moves it.
-- An element that holds someone's tracked insertions can't be renamed or
-  moved while tracking, because insertions can't nest. Xylem asks you to
-  accept or reject those changes first.
+- Typing over an `xm-replace_text` placeholder keeps the placeholder in a
+  deletion mark, so rejecting brings it back.
+
+Some edits are refused while tracking, because the markup can't record them
+without losing something. Xylem says why and asks you to accept or reject
+the changes involved first:
+
+- renaming or moving an element that holds tracked insertions (insertions
+  can't nest);
+- joining a paragraph that holds another author's pending insertions (they
+  would be folded into yours);
+- joining a paragraph that is one half of a tracked split;
+- joining two paragraphs with a tracked deletion between them.
+
+Deleting one half of a tracked split is allowed: its content is marked
+deleted and the element stays, so the split can still be rejected. With
+tracking off, the halves of a tracked split can't be moved past each other.
+
+Anything you add between the two halves of someone else's pending split
+(a paragraph inserted there, say) becomes part of their insertion, so that
+rejecting their split still joins the halves.
+
+Join, rename and move each show as two changes in the Review panel, a
+deletion and an insertion. Accept or reject both together: accepting one
+and rejecting the other leaves the text twice or not at all.
+
+The split, join, rename and move encodings (an insertion that runs across
+an element boundary, whole elements inside a deletion mark) are Xylem's own
+use of the XMetaL marks and have not been checked against XMetaL itself.
 
 Renaming the root element, surrounding and removing tags, attribute
-changes, table operations and pasting whole blocks between paragraphs are
-still ordinary edits with tracking on.
+changes, table operations other than moving rows, and pasting whole blocks
+between paragraphs are still ordinary edits with tracking on.
 
 Accepting or rejecting a change is one undo step, and so is Accept all or
 Reject all.

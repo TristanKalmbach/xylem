@@ -100,8 +100,8 @@ XMetaL itself.
 | Edit and delete comments in the Review panel | verified | |
 | Review author in Preferences (login name by default) | verified | Set in Preferences and seen in the saved marks. |
 | Untouched marks saved byte for byte | verified | |
-| Inserting and deleting elements tracked | verified | An inserted paragraph shows as an insertion and a deleted list item as a deletion; Reject all gave back the original file byte for byte. 240,000 random edits (half tracked) resolve cleanly both ways. |
-| Splitting, joining, renaming and moving elements tracked | tested | Unit tests for each, and 40,000 random edit runs (rename and move included, half tracked) that check marks stay paired and that Accept all and Reject all both resolve cleanly. Elements holding tracked insertions can't be moved or renamed while tracking. Surround, remove tags, attributes and table edits stay untracked. |
+| Inserting and deleting elements tracked | verified | An inserted paragraph shows as an insertion and a deleted list item as a deletion; Reject all gave back the original file byte for byte. Empty elements that were in the file are recorded too. |
+| Splitting, joining, renaming and moving elements tracked | verified | In the app, Reject all gave back the sample byte for byte after a split, a join, a table-row move and a rename. Unit tests for each. Edits that the marks can't record without loss are refused with a message (see docs/track-changes.md). Surround, remove tags, attributes and other table edits stay untracked. |
 | Time stamps in local time | verified | Local time with the UTC offset (`-0500`). |
 
 ## Validation and tools
@@ -121,8 +121,9 @@ XMetaL itself.
 | Two people opening the same file | verified | A hidden `.~lock.<name>#` file next to the document names who has it open; others are offered a read-only copy. |
 | Previous versions kept on save | verified | The last ten versions per document, in the config folder; File › Previous versions opens one read-only. |
 | Log file and crash reports | verified | `logs/xylem.log` in the config folder (rotated); a panic writes a crash report there and the next start says so. Help › Open log folder. |
-| Byte-for-byte round trip on real files | tested | Every well-formed XML file in a corpus folder (`XYLEM_XML_CORPUS`) saves back unchanged, and a one-text edit leaves the rest alone. Run on 264 files including a 33k-element manual. |
-| Random editing keeps documents well-formed, undo is exact | tested | 180,000 seeded random edits (typing, deleting, Enter, replacing selections) with a well-formedness check after each, then full undo and redo. |
+| Byte-for-byte round trip on real files | tested | Every well-formed XML file in a corpus folder (`XYLEM_XML_CORPUS`) saves back unchanged, and a one-text edit leaves the rest alone. Run on 830 files (configuration, translations, generated reference XML, UI layouts); not yet on an authored content export. |
+| Random editing keeps documents well-formed, undo is exact | tested | Seeded random edits (typing, deleting, Enter, joining, replacing selections, deleting, renaming and moving elements): 100,000 runs of 60 edits in each of four modes (tracking off; one author; two authors; tracking switched on and off). After every edit the document is well-formed and insertion marks pair up; at the end undo and redo are exact, Reject all gives back the original (when every edit was tracked), and resolving changes one at a time in random order leaves none. |
+| Tracked edits on real files resolve exactly | tested | `corpus_edits` makes random tracked edits on every file in `XYLEM_XML_CORPUS` and checks that Reject all and Undo all give back the file. 705 files, 27,600 edits: no content changed. Text that was edited and then rejected can come back with characters written differently (`&#174;` as `®`); the content is the same. |
 | Reopen the previous session | verified | |
 
 ## Customisation

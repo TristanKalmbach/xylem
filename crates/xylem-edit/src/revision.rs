@@ -637,6 +637,15 @@ impl Editor {
         {
             return;
         }
+        // Theirs runs from one element into another (a split) and this point
+        // is in neither: ending and restarting it here would leave two
+        // pieces that each cross only one boundary, and rejecting could no
+        // longer join the parts. What is added there stays part of theirs.
+        if let Some(theirs) = enclosing
+            && self.passes_through(theirs, parent)
+        {
+            return;
+        }
         if let Some(theirs) = enclosing {
             let reopen = self.doc.create_node(self.doc.kind(theirs).clone());
             self.doc.insert_child(parent, end, reopen);
@@ -668,19 +677,33 @@ impl Editor {
     /// the empty paragraph Enter leaves behind), is simply removed.
     pub(crate) fn tracked_remove_element(&mut self, rules: &dyn Rules, el: NodeId) -> EditResult {
         let parent = self.doc.parent(el).ok_or(EditError::Nothing)?;
-        // Half of an insertion that runs on past the element (a split)
+        let idx = self.doc.index_in_parent(el).unwrap();
+        let (author, time) = self.stamp();
+        // Wholly the author's own insertion (the second half of their own
+        // split starts with an insertion end, and the rest is original).
+        let own =
+            self.inside_own_insertion(Pos::new(parent, idx)) && !self.holds_insertion_marks(el);
+        // What is left of a split (an empty paragraph holding only the end
+        // of the insertion): nothing in it, not even text marked deleted.
+        // An empty element that was in the file is recorded like any other.
+        let empty = self.holds_insertion_marks(el)
+            && self.doc.element_children(el).next().is_none()
+            && self.doc.descendants(el).all(|n| {
+                mark_kind(&self.doc, n) != Some(MarkKind::Deletion)
+                    && self.doc.text(n).is_none_or(str::is_empty)
+            });
+        if !(own || empty) && self.split_through(el) {
+            // Half of a split paragraph: its content is deleted and the
+            // element kept, so the split itself can still be rejected.
+            let len = self.doc.children(el).len();
+            let caret = self.tracked_delete_range(rules, Pos::new(el, 0), Pos::new(el, len))?;
+            self.sel = Selection::caret(caret);
+            return Ok(());
+        }
+        // Half of an insertion or comment that runs on past the element
         // stays in the document, in front of it.
         self.keep_lone_marks(&mut vec![el]);
         let idx = self.doc.index_in_parent(el).unwrap();
-        let (author, time) = self.stamp();
-        let own = enclosing_insertion(&self.doc, Pos::new(parent, idx))
-            .is_some_and(|s| self.is_own(s, &author));
-        let empty = self.doc.element_children(el).next().is_none()
-            && self
-                .doc
-                .descendants(el)
-                .filter_map(|n| self.doc.text(n))
-                .all(|t| t.trim().is_empty());
         if own || empty {
             self.doc.detach(el);
             self.sel = Selection::caret(self.normalize_keep(rules, Pos::new(parent, idx)));
@@ -692,6 +715,16 @@ impl Editor {
         let after = self.doc.index_in_parent(mark).unwrap() + 1;
         self.sel = Selection::caret(self.normalize_keep(rules, Pos::new(parent, after)));
         Ok(())
+    }
+
+    /// True when the insertion starting at `start` runs from one element
+    /// into another (a split) and `parent` is neither of them: it only passes
+    /// through. It can't be ended and restarted there, or rejecting could no
+    /// longer join the parts.
+    pub(crate) fn passes_through(&self, start: NodeId, parent: NodeId) -> bool {
+        let sp = self.doc.parent(start);
+        let ep = partner(&self.doc, start).and_then(|e| self.doc.parent(e));
+        sp != ep && Some(parent) != sp && Some(parent) != ep
     }
 
     /// True when `p` lies inside an insertion by the current author.
@@ -717,7 +750,21 @@ impl Editor {
     /// a deletion mark and the content moved into `a` is marked inserted, so
     /// rejecting both gives back the two blocks exactly.
     pub(crate) fn tracked_join(&mut self, rules: &dyn Rules, a: NodeId, b: NodeId) -> EditResult {
+        self.check_no_split_through(b)?;
         let (author, time) = self.stamp();
+        // The moved content becomes one insertion of this author's; someone
+        // else's pending insertions in it would be folded in.
+        let theirs = self.doc.descendants(b).any(|d| {
+            matches!(
+                mark_kind(&self.doc, d),
+                Some(MarkKind::InsertionStart | MarkKind::InsertionEnd)
+            ) && mark_author(&self.doc, d).as_deref() != Some(author.as_str())
+        });
+        if theirs {
+            return Err(EditError::NotAllowed(
+                "Accept or reject the other tracked changes in this paragraph first.".into(),
+            ));
+        }
         let parent = self.doc.parent(b).ok_or(EditError::Nothing)?;
         let idx = self.doc.index_in_parent(b).unwrap();
         let xml = self.doc.node_to_xml(b);
@@ -728,47 +775,37 @@ impl Editor {
         let end = self.doc.children(a).len();
         self.doc.detach(b);
         self.add_deletion(parent, idx, &xml, &author, &time);
-        self.wrap_moved(a, start, end, &author, &time);
+        // The moved content is marked inserted as a whole. Insertions it held
+        // would nest inside, so their marks go from this copy; the deletion
+        // mark keeps them for rejecting.
+        let mut end = end;
+        {
+            let moved: Vec<NodeId> = self.doc.children(a)[start..end].to_vec();
+            for n in moved {
+                let marks: Vec<NodeId> = std::iter::once(n)
+                    .chain(self.doc.descendants(n))
+                    .filter(|&d| {
+                        matches!(
+                            mark_kind(&self.doc, d),
+                            Some(MarkKind::InsertionStart | MarkKind::InsertionEnd)
+                        )
+                    })
+                    .collect();
+                for m in marks {
+                    if self.doc.parent(m) == Some(a) {
+                        end -= 1;
+                    }
+                    self.doc.detach(m);
+                }
+            }
+        }
+        if end > start {
+            self.wrap_tracked(a, start, end, &author, &time);
+        }
         let caret = canonical_left(&self.doc, rules, Pos::new(a, start));
         let caret = self.tidy_keep(rules, a, caret);
         self.sel = Selection::caret(self.normalize_keep(rules, caret));
         Ok(())
-    }
-
-    /// Marks `parent[start..end]` inserted, around any insertion marks in it
-    /// (insertions cannot nest): runs without marks are wrapped, and
-    /// elements holding marks are wrapped inside.
-    fn wrap_moved(&mut self, parent: NodeId, start: usize, end: usize, author: &str, time: &str) {
-        let nodes: Vec<NodeId> = self.doc.children(parent)[start..end].to_vec();
-        let holds_marks = |doc: &Document, n: NodeId| {
-            doc.descendants(n).any(|d| {
-                matches!(
-                    mark_kind(doc, d),
-                    Some(MarkKind::InsertionStart | MarkKind::InsertionEnd)
-                )
-            })
-        };
-        let mut run: Vec<NodeId> = Vec::new();
-        let flush = |ed: &mut Self, run: &mut Vec<NodeId>| {
-            if let (Some(&f), Some(&l)) = (run.first(), run.last()) {
-                let s = ed.doc.index_in_parent(f).unwrap();
-                let e = ed.doc.index_in_parent(l).unwrap() + 1;
-                ed.wrap_tracked(parent, s, e, author, time);
-            }
-            run.clear();
-        };
-        for n in nodes {
-            if !holds_marks(&self.doc, n) {
-                run.push(n);
-                continue;
-            }
-            flush(self, &mut run);
-            if self.doc.is_element(n) {
-                let len = self.doc.children(n).len();
-                self.wrap_moved(n, 0, len, author, time);
-            }
-        }
-        flush(self, &mut run);
     }
 
     /// Renames `el` with tracking on: the old element is kept in a deletion
@@ -776,11 +813,11 @@ impl Editor {
     pub(crate) fn tracked_rename(&mut self, el: NodeId, name: &str) -> EditResult {
         let parent = self.doc.parent(el).ok_or(EditError::Nothing)?;
         let idx = self.doc.index_in_parent(el).unwrap();
+        self.check_no_insertions_inside(el)?;
         if self.inside_own_insertion(Pos::new(parent, idx)) {
             self.doc.rename(el, name);
             return Ok(());
         }
-        self.check_no_insertions_inside(el)?;
         let (author, time) = self.stamp();
         let xml = self.doc.node_to_xml(el);
         self.doc.rename(el, name);
@@ -827,13 +864,7 @@ impl Editor {
     /// Insertions cannot nest, so an element holding tracked insertions
     /// cannot itself be marked inserted (moved or renamed).
     fn check_no_insertions_inside(&self, el: NodeId) -> EditResult {
-        let inside = self.doc.descendants(el).any(|d| {
-            matches!(
-                mark_kind(&self.doc, d),
-                Some(MarkKind::InsertionStart | MarkKind::InsertionEnd)
-            )
-        });
-        if inside {
+        if self.holds_insertion_marks(el) {
             return Err(EditError::NotAllowed(
                 "Accept or reject the tracked changes inside this element first.".into(),
             ));
@@ -841,9 +872,41 @@ impl Editor {
         Ok(())
     }
 
+    /// True when `el` holds one half of a tracked insertion whose other half
+    /// is outside it.
+    pub(crate) fn split_through(&self, el: NodeId) -> bool {
+        self.doc.descendants(el).any(|d| {
+            matches!(
+                mark_kind(&self.doc, d),
+                Some(MarkKind::InsertionStart | MarkKind::InsertionEnd)
+            ) && !partner(&self.doc, d).is_some_and(|p| self.doc.is_ancestor_or_self(el, p))
+        })
+    }
+
+    fn holds_insertion_marks(&self, el: NodeId) -> bool {
+        self.doc.descendants(el).any(|d| {
+            matches!(
+                mark_kind(&self.doc, d),
+                Some(MarkKind::InsertionStart | MarkKind::InsertionEnd)
+            )
+        })
+    }
+
+    /// An element holding one half of a tracked insertion whose other half
+    /// is outside it (a split paragraph) cannot be kept in a deletion mark:
+    /// rejecting would bring back half an insertion.
+    pub(crate) fn check_no_split_through(&self, el: NodeId) -> EditResult {
+        if self.split_through(el) {
+            return Err(EditError::NotAllowed(
+                "This paragraph was split with track changes on. Accept or reject the split first."
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// After rejecting an insertion that ran from inside `left` to inside
-    /// `right` (a tracked split): joins the split elements again, level by
-    /// level from the top, while they have the same names.
+    /// `right` (a tracked split, say): joins the two sides again.
     fn rejoin(&mut self, left: NodeId, right: NodeId) {
         let top = common_ancestor(&self.doc, left, right);
         let path = |doc: &Document, n: NodeId| {
@@ -855,17 +918,24 @@ impl Editor {
             v
         };
         let (l, r) = (path(&self.doc, left), path(&self.doc, right));
-        if l.len() != r.len() {
-            return;
-        }
-        for (&x, &y) in l.iter().zip(&r) {
-            if !self.doc.is_element(x) || self.doc.name(x) != self.doc.name(y) {
+        // The insertion held the end tags on the left and the start tags on
+        // the right. Taking them out joins the two sides level by level from
+        // the top (a split is joined again); extra levels on the right lose
+        // their tags and keep their content.
+        let pairs = l.len().min(r.len());
+        for (&x, &y) in l.iter().zip(&r).take(pairs) {
+            if !self.doc.is_element(x) || !self.doc.is_element(y) {
                 return;
             }
             for k in self.doc.children(y).to_vec() {
                 self.doc.append_child(x, k);
             }
             self.doc.detach(y);
+        }
+        for &y in &r[pairs..] {
+            if self.doc.is_element(y) {
+                self.doc.unwrap_node(y);
+            }
         }
     }
 
@@ -931,7 +1001,7 @@ impl Editor {
 
     /// Records deleted XML at `parent[idx]`, extending a neighbouring
     /// deletion mark by the same author when there is one.
-    fn add_deletion(
+    pub(crate) fn add_deletion(
         &mut self,
         parent: NodeId,
         idx: usize,
@@ -1046,6 +1116,7 @@ impl Editor {
         if has_own
             && let Some(s) = enclosing_insertion(&self.doc, Pos::new(parent, idx))
             && self.is_own(s, author)
+            && !(self.doc.is_element(d) && self.holds_insertion_marks(d))
         {
             self.doc.detach(d);
             touched.push(parent);
@@ -1351,7 +1422,11 @@ impl Editor {
             }
             return Ok(());
         }
-        self.delete_range(rules, Pos::new(ps, is + 1), Pos::new(pe, ie))
+        // The marks go first: tidying after the deletion joins insertions
+        // by the same author that touch, and must not take these along.
+        self.doc.detach(s);
+        self.doc.detach(e);
+        self.delete_range(rules, Pos::new(ps, is), Pos::new(pe, ie))
             .map(|_| ())
     }
 

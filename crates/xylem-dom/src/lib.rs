@@ -121,6 +121,10 @@ pub struct Document {
     pub(crate) nodes: Vec<Node>,
     root: NodeId,
     pub encoding: Encoding,
+    /// The source used CR LF line endings. Text written afresh then keeps
+    /// them; in a document with LF endings a carriage return in text can
+    /// only have come from `&#13;`, and is written that way again.
+    pub(crate) crlf: bool,
     /// Incremented on every mutation; cheap change detection for views.
     revision: u64,
     /// Incremented on every change except text edits (styles depend only on
@@ -178,6 +182,7 @@ impl Document {
             nodes: vec![root],
             root: NodeId(0),
             encoding: Encoding::Utf8,
+            crlf: false,
             revision: base,
             structure_revision: base,
             journal: None,
@@ -190,6 +195,7 @@ impl Document {
         let (text, enc) = decode(bytes);
         let mut doc = parse(&text)?;
         doc.encoding = enc;
+        doc.crlf = text.contains("\r\n");
         Ok(doc)
     }
 
@@ -197,7 +203,9 @@ impl Document {
     /// [`std::str::FromStr`], i.e. `text.parse::<Document>()`.)
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(text: &str) -> Result<Self, ParseError> {
-        parse(text)
+        let mut doc = parse(text)?;
+        doc.crlf = text.contains("\r\n");
+        Ok(doc)
     }
 
     pub fn revision(&self) -> u64 {
@@ -781,6 +789,7 @@ impl Document {
             nodes,
             root: self.root,
             encoding: self.encoding,
+            crlf: self.crlf,
             revision: self.revision,
             structure_revision: self.structure_revision,
             journal: None,
@@ -893,11 +902,20 @@ fn splice_text_raw(
 }
 
 pub fn escape_text(s: &str, out: &mut String) {
-    for ch in s.chars() {
+    escape_text_lines(s, out, true);
+}
+
+/// Escapes text content. A carriage return is written as `&#13;` (an XML
+/// reader would otherwise turn it into a line feed), except as part of a CR
+/// LF line ending when `crlf` says the document uses those.
+pub fn escape_text_lines(s: &str, out: &mut String, crlf: bool) {
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
         match ch {
             '<' => out.push_str("&lt;"),
             '&' => out.push_str("&amp;"),
             '>' => out.push_str("&gt;"),
+            '\r' if !(crlf && chars.peek() == Some(&'\n')) => out.push_str("&#13;"),
             _ => out.push(ch),
         }
     }
@@ -910,6 +928,7 @@ pub fn escape_attr(s: &str, out: &mut String) {
             '&' => out.push_str("&amp;"),
             '"' => out.push_str("&quot;"),
             '\n' => out.push_str("&#10;"),
+            '\r' => out.push_str("&#13;"),
             '\t' => out.push_str("&#9;"),
             _ => out.push(ch),
         }

@@ -1,4 +1,4 @@
-use crate::{Document, NodeId, NodeKind, escape_attr, escape_text};
+use crate::{Document, NodeId, NodeKind, escape_attr, escape_text_lines};
 
 pub(crate) fn write_node(doc: &Document, id: NodeId, out: &mut String) {
     write_tracked(doc, id, out, &mut None);
@@ -73,14 +73,14 @@ pub(crate) fn write_tracked(
                 out.push_str(raw);
                 return;
             }
-            write_leaf(kind, out);
+            write_leaf(kind, out, doc.crlf);
         }
     }
 }
 
-fn write_leaf(kind: &NodeKind, out: &mut String) {
+fn write_leaf(kind: &NodeKind, out: &mut String, crlf: bool) {
     match kind {
-        NodeKind::Text(t) => escape_text(t, out),
+        NodeKind::Text(t) => escape_text_lines(t, out, crlf),
         NodeKind::CData(t) => {
             out.push_str("<![CDATA[");
             out.push_str(t);
@@ -194,7 +194,7 @@ fn pretty_rec(doc: &Document, id: NodeId, depth: usize, out: &mut String) {
         }
         k => {
             out.push_str(&indent);
-            write_leaf(k, out);
+            write_leaf(k, out, doc.crlf);
         }
     }
 }
@@ -223,6 +223,6 @@ fn write_fresh(doc: &Document, id: NodeId, out: &mut String) {
             out.push_str(&e.name);
             out.push('>');
         }
-        k => write_leaf(k, out),
+        k => write_leaf(k, out, doc.crlf),
     }
 }
