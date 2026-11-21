@@ -111,7 +111,7 @@ The app has a scripted end-to-end harness for UI testing:
 XYLEM_SCRIPT="click 500 280;;type Hello;;key Enter;;shot out.png;;save out.xml;;quit" xylem file.xml
 ```
 
-The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `shot PATH`, `save PATH` and `quit`.
+The available steps are `wait N`, `type T`, `paste T`, `drop FILE`, `ctrlclick X Y`, `key NAME [ctrl] [shift] [alt]`, `click X Y`, `dblclick X Y`, `rclick X Y`, `pick PATH` (the answer to the next file dialog), `shot PATH`, `save PATH` and `quit`. `scripts/e2e-smoke.sh` runs the end-to-end cases; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 See [PARITY.md](PARITY.md) for the XMAX feature checklist.
 

@@ -1,9 +1,14 @@
 [package]
 name = "xylem-app"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 description = "Xylem: a structured XML and S1000D editor"
+keywords = ["xml", "editor", "s1000d", "xmetal", "gui"]
+categories = ["text-editors", "gui"]
+readme = "../../README.md"
 
 [[bin]]
 name = "xylem"

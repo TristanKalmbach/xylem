@@ -90,6 +90,6 @@ there. Help › Check for updates installs it, and it takes effect on the next
 start. `xylem --update` does the same without opening the editor, for
 scripts. An older version in the folder is never installed over a newer one.
 
-Bump `version` in `crates/xylem-app/Cargo.toml` before building a release,
+Bump `version` under `[workspace.package]` in the top-level `Cargo.toml` before building a release,
 since that is what the check compares. Each platform needs its own update
 folder, because the executables differ.

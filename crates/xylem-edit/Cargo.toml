@@ -1,8 +1,14 @@
 [package]
 name = "xylem-edit"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Structure-aware XML editing engine: caret model, editing commands, tables and undo"
+keywords = ["xml", "editor", "structured-editing", "cals"]
+categories = ["text-editors"]
+readme = "../../README.md"
 
 [dependencies]
 xylem-dom = { workspace = true }

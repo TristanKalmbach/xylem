@@ -1,7 +1,13 @@
 [package]
 name = "xylem-dom"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Lossless, editable XML document model that writes untouched markup back byte for byte"
+keywords = ["xml", "dom", "parser", "lossless", "editor"]
+categories = ["parser-implementations", "text-editors"]
+readme = "../../README.md"
 
 [dependencies]

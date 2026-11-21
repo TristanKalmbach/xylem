@@ -1,9 +1,14 @@
 [package]
 name = "xylem-s1000d"
-version = "0.1.0"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 description = "S1000D support (issues 2.0 to 6.0) for the Xylem XML editor"
+keywords = ["s1000d", "xml", "csdb", "technical-publications"]
+categories = ["parser-implementations"]
+readme = "../../README.md"
 
 [dependencies]
 xylem-dom = { workspace = true }
