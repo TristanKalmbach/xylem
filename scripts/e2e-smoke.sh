@@ -112,17 +112,29 @@ XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes \
     XYLEM_SCRIPT="key T ctrl shift;;caretend Inspect the hydraulic lines;;type  Then bleed them.;;key Enter;;type More;;save $native/tracked-typing.xml;;quit" \
     timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
 check tracked-typing-start "$out/tracked-typing.xml" 'lines<?xm-insertion_mark_start author="'
-check tracked-typing-end "$out/tracked-typing.xml" ' Then bleed them.<?xm-insertion_mark_end?></para>'
+# Enter inside your own insertion makes the break part of it.
+check tracked-typing-end "$out/tracked-typing.xml" ' Then bleed them.</para>'
 check tracked-after-enter "$out/tracked-typing.xml" 'More<?xm-insertion_mark_end?>.</para>'
 starts=$(grep -o 'xm-insertion_mark_start' "$out/tracked-typing.xml" | wc -l)
 ends=$(grep -o 'xm-insertion_mark_end' "$out/tracked-typing.xml" | wc -l)
-if [ "$starts" -eq 2 ] && [ "$ends" -eq 2 ]; then echo "ok    tracked-marks-paired"; else echo "FAIL  tracked-marks-paired"; fail=1; fi
+if [ "$starts" -eq 1 ] && [ "$ends" -eq 1 ]; then echo "ok    tracked-marks-paired"; else echo "FAIL  tracked-marks-paired"; fail=1; fi
 XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes \
     XYLEM_SCRIPT="key T ctrl shift;;caretend Inspect the hydraulic lines;;key Backspace;;key Backspace;;key Backspace;;key Backspace;;key Backspace;;type hoses;;save $native/tracked-mid.xml;;key A ctrl shift;;wait 3;;save $native/accept-all.xml;;quit" \
     timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
 check tracked-deletion "$out/tracked-mid.xml" 'data="lines"?><?xm-insertion_mark_start author="'
 check tracked-replacement "$out/tracked-mid.xml" 'hoses<?xm-insertion_mark_end?>.</para>'
 check accept-all "$out/accept-all.xml" '<para>Inspect the hydraulic hoses.</para>'
+# Splitting, joining and moving are tracked: Reject all gives back the file
+# byte for byte.
+same() { # name, file
+    if cmp -s "$2" samples/manual-sample.xml; then echo "ok    $1"; else echo "FAIL  $1"; fail=1; fi
+}
+for case in "split|caret lines.;;key Enter" "join|caret Torque values;;key Backspace" "move|caret Pump seals;;cmd TableRowUp"; do
+    name=${case%%|*}
+    XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes         XYLEM_SCRIPT="key T ctrl shift;;${case#*|};;save $native/tracked-$name.xml;;cmd ResolveAll reject;;wait 3;;save $native/rejected-$name.xml;;quit"         timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
+    check "tracked-$name" "$out/tracked-$name.xml" '<?xm-insertion_mark_start author="'
+    same "reject-$name" "$out/rejected-$name.xml"
+done
 # Saving keeps the previous version, and the lock file goes when the
 # document is closed.
 rm -rf "$out/safe" && mkdir -p "$out/safe/docs" && cp samples/manual-sample.xml "$out/safe/docs/s.xml"

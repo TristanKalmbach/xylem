@@ -19,6 +19,7 @@ impl Rules for R {
 const T: &str = "20261121T101500+0000";
 const INS: &str = r#"<?xm-insertion_mark_start author="me" time="20261121T101500+0000"?>"#;
 const END: &str = "<?xm-insertion_mark_end?>";
+const ANN_INS: &str = r#"<?xm-insertion_mark_start author="ann" time="1"?>"#;
 
 fn fixed_clock() -> String {
     T.to_string()
@@ -488,25 +489,28 @@ fn listing_reports_every_change_in_order() {
 }
 
 #[test]
-fn enter_after_tracked_typing_keeps_each_paragraph_paired() {
+fn enter_inside_your_own_insertion_makes_the_break_part_of_it() {
     let mut e = tracked("<doc><p>ab</p></doc>");
     e.set_caret(at(&e, "ab", 2));
     type_str(&mut e, "x");
     e.enter(&R).unwrap();
     type_str(&mut e, "y");
     assert_balanced(&e);
-    assert_eq!(
-        xml(&e),
-        format!("<doc><p>ab{INS}x{END}</p><p>{INS}y{END}</p></doc>")
-    );
-    // The new text is still the author's own: Backspace just removes it.
+    assert_eq!(xml(&e), format!("<doc><p>ab{INS}x</p><p>y{END}</p></doc>"));
+    // The new text is still the author's own: Backspace just removes it,
+    // and once more takes the break out again.
     e.delete_backward(&R).unwrap();
-    assert_eq!(xml(&e), format!("<doc><p>ab{INS}x{END}</p><p/></doc>"));
+    assert_eq!(xml(&e), format!("<doc><p>ab{INS}x</p><p>{END}</p></doc>"));
+    e.delete_backward(&R).unwrap();
+    assert_eq!(xml(&e), format!("<doc><p>ab{INS}x{END}</p></doc>"));
     assert_balanced(&e);
+    // Rejecting the lot gives back the original.
+    e.resolve_all(&R, false).unwrap();
+    assert_eq!(xml(&e), "<doc><p>ab</p></doc>");
 }
 
 #[test]
-fn splitting_inside_an_insertion_ends_and_restarts_it() {
+fn splitting_inside_an_insertion() {
     let src = format!("<doc><p>a{INS}xy{END}b</p></doc>");
     for tracking in [true, false] {
         let mut e = tracked(&src);
@@ -515,14 +519,120 @@ fn splitting_inside_an_insertion_ends_and_restarts_it() {
         }
         e.set_caret(at(&e, "xy", 1));
         e.enter(&R).unwrap();
-        assert_eq!(
-            xml(&e),
+        let want = if tracking {
+            // The author's own insertion now includes the break.
+            format!("<doc><p>a{INS}x</p><p>y{END}b</p></doc>")
+        } else {
+            // Untracked: each paragraph keeps a complete pair.
             format!("<doc><p>a{INS}x{END}</p><p>{INS}y{END}b</p></doc>")
-        );
+        };
+        assert_eq!(xml(&e), want);
         assert_balanced(&e);
         assert!(e.undo());
         assert_eq!(xml(&e), src);
     }
+}
+
+fn reject_and_accept(e: &Editor) -> (String, String) {
+    let mut r = Editor::new(Document::from_bytes(&e.doc.to_bytes()).unwrap());
+    r.resolve_all(&R, false).unwrap();
+    let mut a = Editor::new(Document::from_bytes(&e.doc.to_bytes()).unwrap());
+    a.resolve_all(&R, true).unwrap();
+    (xml(&r), xml(&a))
+}
+
+#[test]
+fn a_tracked_split_is_an_inserted_break() {
+    let src = "<doc><p id=\"p1\">ab<b>cd</b>ef</p></doc>";
+    let mut e = tracked(src);
+    e.set_caret(at(&e, "cd", 1));
+    e.enter(&R).unwrap();
+    assert_balanced(&e);
+    assert_eq!(
+        xml(&e),
+        format!("<doc><p id=\"p1\">ab<b>c{INS}</b></p><p><b>{END}d</b>ef</p></doc>")
+    );
+    let (rejected, accepted) = reject_and_accept(&e);
+    assert_eq!(rejected, src, "rejecting the split joins the paragraphs");
+    assert_eq!(
+        accepted,
+        "<doc><p id=\"p1\">ab<b>c</b></p><p><b>d</b>ef</p></doc>"
+    );
+    // Backspace at the start of the new paragraph takes the break out.
+    e.set_caret(at(&e, "d", 0));
+    e.delete_backward(&R).unwrap();
+    assert_eq!(xml(&e), src);
+}
+
+#[test]
+fn a_tracked_join_keeps_the_second_paragraph() {
+    let src = "<doc><p>ab</p><p>c<i>d</i></p></doc>";
+    let mut e = tracked(src);
+    e.set_caret(at(&e, "c", 0));
+    e.delete_backward(&R).unwrap();
+    assert_balanced(&e);
+    assert_eq!(
+        xml(&e),
+        format!(
+            "<doc><p>ab{INS}c<i>d</i>{END}</p>{}</doc>",
+            del("&lt;p&gt;c&lt;i&gt;d&lt;/i&gt;&lt;/p&gt;")
+        )
+    );
+    let (rejected, accepted) = reject_and_accept(&e);
+    assert_eq!(rejected, src);
+    assert_eq!(accepted, "<doc><p>abc<i>d</i></p></doc>");
+}
+
+#[test]
+fn a_tracked_join_around_someone_elses_insertion() {
+    let src = format!("<doc><p>ab</p><p>c{ANN_INS}x{END}d</p></doc>");
+    let mut e = tracked(&src);
+    e.set_caret(at(&e, "c", 0));
+    e.delete_backward(&R).unwrap();
+    assert_balanced(&e);
+    let (rejected, accepted) = reject_and_accept(&e);
+    assert_eq!(rejected, "<doc><p>ab</p><p>cd</p></doc>");
+    assert_eq!(accepted, "<doc><p>abcxd</p></doc>");
+}
+
+#[test]
+fn renaming_and_moving_are_tracked() {
+    let src = "<doc><p>one</p><note>two</note><p>three</p></doc>";
+    let mut e = tracked(src);
+    let note = e
+        .doc
+        .descendants(e.doc.root())
+        .find(|&n| e.doc.name(n) == Some("note"))
+        .unwrap();
+    e.rename_element(&R, note, "warning").unwrap();
+    assert_balanced(&e);
+    let (rejected, accepted) = reject_and_accept(&e);
+    assert_eq!(rejected, src);
+    assert_eq!(
+        accepted,
+        "<doc><p>one</p><warning>two</warning><p>three</p></doc>"
+    );
+
+    let mut e = tracked(src);
+    let note = e
+        .doc
+        .descendants(e.doc.root())
+        .find(|&n| e.doc.name(n) == Some("note"))
+        .unwrap();
+    e.move_element(&R, note, true).unwrap();
+    assert_balanced(&e);
+    let (rejected, accepted) = reject_and_accept(&e);
+    assert_eq!(rejected, src);
+    assert_eq!(
+        accepted,
+        "<doc><note>two</note><p>one</p><p>three</p></doc>"
+    );
+    // Moving it again (it is now the author's own insertion) just moves it.
+    e.move_element(&R, note, false).unwrap();
+    assert_balanced(&e);
+    let (rejected, accepted) = reject_and_accept(&e);
+    assert_eq!(rejected, src);
+    assert_eq!(accepted, src);
 }
 
 #[test]

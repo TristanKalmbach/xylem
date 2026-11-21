@@ -679,14 +679,26 @@ impl Editor {
             return self.delete_selection(rules);
         }
         let kind = EditKind::Typing;
-        self.transact_kind(kind, |ed| {
+        self.transact_kind(kind, |ed| ed.backspace(rules))
+            .or_else(|e| {
+                if e == EditError::Nothing {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })
+    }
+
+    fn backspace(&mut self, rules: &dyn Rules) -> EditResult {
+        let ed = self;
+        {
             let p = ed.caret();
             match token_before(&ed.doc, rules, p) {
                 Some(Token::Char(n, off, len)) => ed.delete_char(rules, n, off, len, false),
                 // Deletion and comment marks are not text: step over them.
                 Some(Token::Atom(n)) if revision::is_mark(&ed.doc, n) => {
                     ed.sel = Selection::caret(pos_before_token(&ed.doc, rules, Token::Atom(n)));
-                    ed.delete_backward_inner(rules)
+                    ed.backspace(rules)
                 }
                 Some(Token::Atom(n)) => {
                     ed.check_writable(rules, n)?;
@@ -719,6 +731,18 @@ impl Editor {
                     {
                         return ed.join(rules, prev, e);
                     }
+                    // At the start of an inline element that itself starts
+                    // its parent: carry on outwards (to join the paragraph).
+                    if !rules.is_block(&ed.doc, e)
+                        && let (Some(par), Some(i)) = (ed.doc.parent(e), ed.doc.index_in_parent(e))
+                        && matches!(
+                            token_before(&ed.doc, rules, Pos::new(par, i)),
+                            Some(Token::Start(_))
+                        )
+                    {
+                        ed.sel = Selection::caret(Pos::new(par, i));
+                        return ed.backspace(rules);
+                    }
                     // Move out of the element.
                     let np = prev_pos(&ed.doc, rules, p, false);
                     ed.sel = Selection::caret(np);
@@ -726,14 +750,7 @@ impl Editor {
                 }
                 None => Err(EditError::Nothing),
             }
-        })
-        .or_else(|e| {
-            if e == EditError::Nothing {
-                Ok(())
-            } else {
-                Err(e)
-            }
-        })
+        }
     }
 
     /// Deletes one character, as a tracked deletion when tracking is on.
@@ -876,7 +893,7 @@ impl Editor {
             if self.doc.is_element(c) {
                 return Some(c);
             }
-            if !is_ignorable(&self.doc, rules, c) {
+            if !is_ignorable(&self.doc, rules, c) && !revision::is_mark(&self.doc, c) {
                 return None;
             }
             cur = self.doc.prev_sibling(c);
@@ -890,7 +907,7 @@ impl Editor {
             if self.doc.is_element(c) {
                 return Some(c);
             }
-            if !is_ignorable(&self.doc, rules, c) {
+            if !is_ignorable(&self.doc, rules, c) && !revision::is_mark(&self.doc, c) {
                 return None;
             }
             cur = self.doc.next_sibling(c);
@@ -950,13 +967,71 @@ impl Editor {
     fn join(&mut self, rules: &dyn Rules, a: NodeId, b: NodeId) -> EditResult {
         self.check_writable(rules, a)?;
         self.check_writable(rules, b)?;
+        // Insertion marks between the two go to the join point, so they stay
+        // in the same order relative to the content that follows.
+        let between: Vec<NodeId> = {
+            let mut v = Vec::new();
+            let mut cur = self.doc.next_sibling(a);
+            while let Some(c) = cur
+                && c != b
+            {
+                if matches!(
+                    revision::mark_kind(&self.doc, c),
+                    Some(revision::MarkKind::InsertionStart | revision::MarkKind::InsertionEnd)
+                ) {
+                    v.push(c);
+                }
+                cur = self.doc.next_sibling(c);
+            }
+            v
+        };
+        for m in between {
+            self.doc.append_child(a, m);
+        }
+        // Joining across a break the author inserted (their own split, or
+        // an element they added) just takes it out again.
+        if self.is_tracking() && !self.inside_own_insertion(Pos::new(b, 0)) {
+            return self.tracked_join(rules, a, b);
+        }
         let caret_idx = self.doc.children(a).len();
         let kids = self.doc.children(b).to_vec();
+        let outer = self.doc.parent(b);
         for k in kids {
             self.doc.append_child(a, k);
         }
         self.doc.detach(b);
-        self.sel = Selection::caret(self.normalize_keep(rules, Pos::new(a, caret_idx)));
+        // An element the author inserted leaves its now empty marks.
+        if let Some(o) = outer {
+            self.tidy_marks(o, None);
+        }
+        // Undoing a tracked split: inline elements it divided are whole
+        // again, and the halves of the insertion meet and drop out.
+        let (mut parent, mut seam) = (a, caret_idx);
+        while seam > 0 {
+            let kids = self.doc.children(parent);
+            let (Some(&l), Some(&r)) = (kids.get(seam - 1), kids.get(seam)) else {
+                break;
+            };
+            let breaks = self.doc.is_element(l)
+                && self.doc.name(l) == self.doc.name(r)
+                && self.doc.children(l).last().is_some_and(|&m| {
+                    revision::mark_kind(&self.doc, m) == Some(revision::MarkKind::InsertionStart)
+                })
+                && self.doc.children(r).first().is_some_and(|&m| {
+                    revision::mark_kind(&self.doc, m) == Some(revision::MarkKind::InsertionEnd)
+                });
+            if !breaks {
+                break;
+            }
+            let n = self.doc.children(l).len();
+            for k in self.doc.children(r).to_vec() {
+                self.doc.append_child(l, k);
+            }
+            self.doc.detach(r);
+            (parent, seam) = (l, n);
+        }
+        let caret = self.tidy_keep(rules, parent, Pos::new(parent, seam));
+        self.sel = Selection::caret(self.normalize_keep(rules, caret));
         Ok(())
     }
 
@@ -1021,6 +1096,9 @@ impl Editor {
                 let idx = ed.doc.index_in_parent(target).unwrap() + 1;
                 if rules.can_insert(&ed.doc, parent, idx, &next) {
                     let n = ed.insert_new_element(rules, parent, idx, &next, None)?;
+                    if ed.is_tracking() {
+                        ed.track_inserted_element(n);
+                    }
                     ed.sel = Selection::caret(first_editable(&ed.doc, rules, n));
                     return Ok(());
                 }
@@ -1040,8 +1118,18 @@ impl Editor {
     }
 
     /// Splits `target` (an ancestor of `p`) at `p`; returns the new right part.
+    ///
+    /// With tracking on, the break itself is a tracked insertion: an
+    /// insertion starts at the end of the left part and ends at the start of
+    /// the right one, so rejecting it joins the parts again. Inside the
+    /// author's own insertion the break simply becomes part of it.
     pub fn split_element(&mut self, rules: &dyn Rules, target: NodeId, p: Pos) -> NodeId {
-        let p = self.break_insertion_at(p);
+        let tracked = self.is_tracking() && !self.inside_own_insertion(p);
+        let p = if self.is_tracking() && !tracked {
+            p
+        } else {
+            self.break_insertion_at(p)
+        };
         let mut b = self.split_at_boundary(p);
         let inner = b.node;
         let mut inner_copy = None;
@@ -1063,6 +1151,9 @@ impl Editor {
             self.doc.insert_child(parent, idx, copy);
             inner_copy.get_or_insert(copy);
             if cur == target {
+                if tracked && let Some(c) = inner_copy {
+                    self.track_break(inner, c);
+                }
                 // Splitting at either end of an insertion leaves an empty
                 // pair on one side.
                 self.tidy_marks(inner, None);
@@ -1335,6 +1426,9 @@ impl Editor {
     pub fn rename_element(&mut self, rules: &dyn Rules, el: NodeId, name: &str) -> EditResult {
         self.transact(|ed| {
             ed.check_writable(rules, el)?;
+            if ed.is_tracking() && Some(el) != ed.doc.document_element() {
+                return ed.tracked_rename(el, name);
+            }
             ed.doc.rename(el, name);
             Ok(())
         })
@@ -1523,6 +1617,11 @@ impl Editor {
         self.transact(|ed| {
             let parent = ed.doc.parent(el).unwrap();
             ed.check_writable(rules, parent)?;
+            if ed.is_tracking() {
+                ed.tracked_move(el, sib, up)?;
+                ed.sel = Selection::caret(first_editable(&ed.doc, rules, el));
+                return Ok(());
+            }
             // Swap the two elements so the whitespace between them stays put.
             let (a, b) = if up { (sib, el) } else { (el, sib) };
             let ia = ed.doc.index_in_parent(a).unwrap();

@@ -1,5 +1,5 @@
-//! Randomised editing: long runs of typing, deleting, splitting and
-//! selection replacement at random places, checking after every step that
+//! Randomised editing: long runs of typing, deleting, splitting, renaming,
+//! moving and selection replacement at random places, checking after every step that
 //! the document is still well-formed, and at the end that undo restores the
 //! original bytes exactly and redo brings the edits back.
 //!
@@ -113,13 +113,25 @@ fn run(seed: u64, steps: usize, tracking: bool) {
         }
         let (n, i) = spots[rng.below(spots.len())];
         let caret = Pos::new(n, i);
+        let before = format!(
+            "{}
+caret in {:?} at {i}",
+            ed.doc.to_xml(),
+            ed.doc.text(n)
+        );
         // Edits are separate undo steps, so undo can be counted exactly.
         ed.set_caret(caret);
         // Deleting a whole element is rarer than the other edits.
-        let op = match rng.below(14) {
+        let op = match rng.below(16) {
             13 => 5,
+            14 => 7,
+            15 => 8,
             k => [0, 1, 2, 3, 4, 6][k % 6],
         };
+        let around = ed
+            .doc
+            .parent(n)
+            .filter(|&e| Some(e) != ed.doc.document_element());
         let result = match op {
             0 | 1 => ed.insert_text(&Rules, WORDS[rng.below(WORDS.len())]),
             2 => ed.delete_backward(&Rules),
@@ -133,6 +145,31 @@ fn run(seed: u64, steps: usize, tracking: bool) {
                     .filter(|&e| Some(e) != ed.doc.document_element())
                 {
                     Some(e) => ed.delete_element(&Rules, e),
+                    None => Err(EditError::Nothing),
+                }
+            }
+            7 => {
+                // Rename the element around the caret.
+                let to = around.and_then(|e| match ed.doc.name(e) {
+                    Some("para") => Some((e, "note")),
+                    Some("note") => Some((e, "para")),
+                    Some("b") => Some((e, "i")),
+                    Some("i") => Some((e, "b")),
+                    _ => None,
+                });
+                match to {
+                    Some((e, name)) => ed.rename_element(&Rules, e, name),
+                    None => Err(EditError::Nothing),
+                }
+            }
+            8 => {
+                // Move the block around the caret up or down.
+                let up = rng.below(2) == 0;
+                let block = std::iter::once(n)
+                    .chain(ed.doc.ancestors(n))
+                    .find(|&e| ed.doc.is_element(e) && crate::Rules::is_block(&Rules, &ed.doc, e));
+                match block {
+                    Some(b) => ed.move_element(&Rules, b, up),
                     None => Err(EditError::Nothing),
                 }
             }
@@ -158,11 +195,25 @@ fn run(seed: u64, steps: usize, tracking: bool) {
             panic!("seed {seed}, step {step}, op {op}: not well-formed ({e}):\n{xml}");
         }
         if tracking {
-            let starts = xml.matches("<?xm-insertion_mark_start").count();
-            let ends = xml.matches("<?xm-insertion_mark_end").count();
-            assert_eq!(
-                starts, ends,
-                "seed {seed}, step {step}, op {op}: unpaired insertion marks:\n{xml}"
+            // Insertion starts and ends alternate in document order.
+            let mut open = false;
+            let mut ok = true;
+            for n in ed.doc.descendants(ed.doc.root()) {
+                match crate::revision::mark_kind(&ed.doc, n) {
+                    Some(crate::revision::MarkKind::InsertionStart) => {
+                        ok &= !open;
+                        open = true;
+                    }
+                    Some(crate::revision::MarkKind::InsertionEnd) => {
+                        ok &= open;
+                        open = false;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(
+                ok && !open,
+                "seed {seed}, step {step}, op {op}: unpaired insertion marks:\n{xml}\nbefore:\n{before}"
             );
         }
     }
@@ -208,7 +259,8 @@ fn run(seed: u64, steps: usize, tracking: bool) {
             let out = e.doc.to_xml();
             assert!(
                 Document::from_str(&out).is_ok() && no_marks(&out),
-                "seed {seed}: resolve_all({accept}) gave {result:?} and left marks or broke the document:\n{out}"
+                "seed {seed}: resolve_all({accept}) gave {result:?} and left marks or broke the document:\n{out}\nfrom:\n{}",
+                String::from_utf8_lossy(&edited)
             );
         }
     }

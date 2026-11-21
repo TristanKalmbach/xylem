@@ -90,7 +90,7 @@ XMetaL itself.
 | Selection replace records deletion then insertion | verified | |
 | Find and replace (including Replace all) tracked | verified | |
 | Delete key, paste and spelling fixes tracked | tested | |
-| Enter inside an insertion ends it and restarts it in the new paragraph | verified | Splits stay untracked; each paragraph keeps a complete pair. |
+| Enter inside your own insertion | tested | The paragraph break becomes part of the insertion; Reject all joins the paragraphs again. |
 | Select all and Backspace with tracking on | verified | Rows, list items and colspecs stay; Reject all restores the file byte for byte. |
 | Deleting your own inserted text just removes it | tested | |
 | Deleted inline markup restored on reject | tested | |
@@ -101,7 +101,7 @@ XMetaL itself.
 | Review author in Preferences (login name by default) | verified | Set in Preferences and seen in the saved marks. |
 | Untouched marks saved byte for byte | verified | |
 | Inserting and deleting elements tracked | verified | An inserted paragraph shows as an insertion and a deleted list item as a deletion; Reject all gave back the original file byte for byte. 240,000 random edits (half tracked) resolve cleanly both ways. |
-| Splitting, joining, renaming and moving elements tracked | not done | These stay ordinary edits with tracking on. |
+| Splitting, joining, renaming and moving elements tracked | tested | Unit tests for each, and 40,000 random edit runs (rename and move included, half tracked) that check marks stay paired and that Accept all and Reject all both resolve cleanly. Elements holding tracked insertions can't be moved or renamed while tracking. Surround, remove tags, attributes and table edits stay untracked. |
 | Time stamps in local time | verified | Local time with the UTC offset (`-0500`). |
 
 ## Validation and tools

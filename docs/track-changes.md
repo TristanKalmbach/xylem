@@ -53,8 +53,8 @@ When tracking is on:
   list items, table rows or column specifications) nothing is deleted, so
   selecting everything and pressing Backspace marks all the text deleted
   and leaves the structure as it was.
-- Pressing Enter inside an insertion ends it at the split and starts it
-  again in the new paragraph, so each paragraph keeps a complete pair.
+- Pressing Enter inside your own insertion makes the new paragraph break
+  part of it.
 - Typing inside someone else's insertion splits it: theirs ends, yours
   follows, and theirs resumes after it.
 
@@ -65,13 +65,27 @@ a deletion mark that holds its markup, so rejecting puts it back exactly,
 including any changes it held. Deleting an element you inserted yourself, or
 an empty one (such as the blank paragraph Enter leaves), simply removes it.
 
-These still happen as ordinary edits with tracking on:
+Changes to the structure are tracked with the same marks:
 
-- splitting and joining paragraphs (Enter, and Backspace at the start of a
-  paragraph);
-- renaming, moving, surrounding and removing tags from elements;
-- attribute changes and table operations;
-- pasting whole blocks between paragraphs.
+- **Splitting** a paragraph (Enter) records the break as an insertion that
+  starts at the end of the first part and ends at the start of the second.
+  Rejecting it joins the two again; Backspace at the start of the second
+  part takes your own break out.
+- **Joining** two paragraphs (Backspace or Delete at the boundary) keeps the
+  second paragraph in a deletion mark and marks the text that moved into the
+  first as inserted. Rejecting both gives back the two paragraphs exactly.
+- **Renaming** an element keeps the old one in a deletion mark in front of
+  it and marks the renamed one inserted.
+- **Moving** an element up or down leaves a deletion mark where it was and
+  marks it inserted where it went. Moving an element you inserted just
+  moves it.
+- An element that holds someone's tracked insertions can't be renamed or
+  moved while tracking, because insertions can't nest. Xylem asks you to
+  accept or reject those changes first.
+
+Renaming the root element, surrounding and removing tags, attribute
+changes, table operations and pasting whole blocks between paragraphs are
+still ordinary edits with tracking on.
 
 Accepting or rejecting a change is one undo step, and so is Accept all or
 Reject all.
