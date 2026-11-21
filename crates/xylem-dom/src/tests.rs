@@ -118,12 +118,20 @@ fn subtree_stamps_follow_changes() {
     let a = doc.element_children(r).next().unwrap();
     let b = doc.element_children(r).nth(1).unwrap();
     let t = doc.element_children(a).next().unwrap();
-    let (sa, sb, sr) = (doc.subtree_stamp(a), doc.subtree_stamp(b), doc.subtree_stamp(r));
+    let (sa, sb, sr) = (
+        doc.subtree_stamp(a),
+        doc.subtree_stamp(b),
+        doc.subtree_stamp(r),
+    );
     let text = doc.children(t)[0];
     doc.set_text(text, "changed");
     assert!(doc.subtree_stamp(a) > sa);
     assert!(doc.subtree_stamp(r) > sr);
-    assert_eq!(doc.subtree_stamp(b), sb, "untouched sibling keeps its stamp");
+    assert_eq!(
+        doc.subtree_stamp(b),
+        sb,
+        "untouched sibling keeps its stamp"
+    );
     doc.set_attr(b, "k", "v");
     assert!(doc.subtree_stamp(b) > sb);
 }

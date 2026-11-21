@@ -12,7 +12,6 @@ use std::time::Instant;
 
 use xylem_style::{StyleEngine, Stylesheet};
 
-
 fn collect_css(dir: &Path, in_customizations: bool, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;

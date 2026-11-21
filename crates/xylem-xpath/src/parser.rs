@@ -9,10 +9,18 @@ const MAX_DEPTH: usize = 64;
 pub(crate) fn parse(src: &str) -> Result<Expr, XPathError> {
     let tokens = tokenize(src)?;
     let end = src.chars().count();
-    let mut p = Parser { tokens, idx: 0, end, depth: 0 };
+    let mut p = Parser {
+        tokens,
+        idx: 0,
+        end,
+        depth: 0,
+    };
     let expr = p.or_expr()?;
     if let Some(t) = p.tokens.get(p.idx) {
-        return Err(XPathError::syntax(t.pos, format!("unexpected token {:?}", t.token)));
+        return Err(XPathError::syntax(
+            t.pos,
+            format!("unexpected token {:?}", t.token),
+        ));
     }
     Ok(expr)
 }
@@ -51,13 +59,20 @@ impl Parser {
     }
 
     fn expect(&mut self, token: &Token, what: &str) -> Result<(), XPathError> {
-        if self.eat(token) { Ok(()) } else { Err(XPathError::syntax(self.pos(), format!("expected {what}"))) }
+        if self.eat(token) {
+            Ok(())
+        } else {
+            Err(XPathError::syntax(self.pos(), format!("expected {what}")))
+        }
     }
 
     fn enter(&mut self) -> Result<(), XPathError> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
-            return Err(XPathError::syntax(self.pos(), "expression is nested too deeply"));
+            return Err(XPathError::syntax(
+                self.pos(),
+                "expression is nested too deeply",
+            ));
         }
         Ok(())
     }
@@ -181,24 +196,38 @@ impl Parser {
                 if self.starts_step() {
                     self.relative_steps(&mut steps)?;
                 }
-                Ok(Expr::Path(PathExpr { start: PathStart::Root, steps }))
+                Ok(Expr::Path(PathExpr {
+                    start: PathStart::Root,
+                    steps,
+                }))
             }
             Some(Token::DoubleSlash) => {
                 self.idx += 1;
                 let mut steps = Vec::new();
                 self.descendant_step(&mut steps)?;
                 self.continue_steps(&mut steps)?;
-                Ok(Expr::Path(PathExpr { start: PathStart::Root, steps }))
+                Ok(Expr::Path(PathExpr {
+                    start: PathStart::Root,
+                    steps,
+                }))
             }
             Some(
-                Token::Variable(_) | Token::LParen | Token::Literal(_) | Token::Number(_) | Token::FunctionName(_),
+                Token::Variable(_)
+                | Token::LParen
+                | Token::Literal(_)
+                | Token::Number(_)
+                | Token::FunctionName(_),
             ) => {
                 let primary = self.primary()?;
                 let mut predicates = Vec::new();
                 while self.peek() == Some(&Token::LBracket) {
                     predicates.push(self.predicate()?);
                 }
-                let base = if predicates.is_empty() { primary } else { Expr::Filter(Box::new(primary), predicates) };
+                let base = if predicates.is_empty() {
+                    primary
+                } else {
+                    Expr::Filter(Box::new(primary), predicates)
+                };
                 let mut steps = Vec::new();
                 match self.peek() {
                     Some(Token::Slash) => {
@@ -212,18 +241,27 @@ impl Parser {
                     }
                     _ => return Ok(base),
                 }
-                Ok(Expr::Path(PathExpr { start: PathStart::Expr(Box::new(base)), steps }))
+                Ok(Expr::Path(PathExpr {
+                    start: PathStart::Expr(Box::new(base)),
+                    steps,
+                }))
             }
             _ if self.starts_step() => {
                 let mut steps = Vec::new();
                 self.relative_steps(&mut steps)?;
-                Ok(Expr::Path(PathExpr { start: PathStart::Context, steps }))
+                Ok(Expr::Path(PathExpr {
+                    start: PathStart::Context,
+                    steps,
+                }))
             }
             Some(t) => {
                 let msg = format!("unexpected token {t:?}");
                 Err(XPathError::syntax(self.pos(), msg))
             }
-            None => Err(XPathError::syntax(self.pos(), "unexpected end of expression")),
+            None => Err(XPathError::syntax(
+                self.pos(),
+                "unexpected end of expression",
+            )),
         }
     }
 
@@ -254,9 +292,17 @@ impl Parser {
     fn descendant_step(&mut self, steps: &mut Vec<Step>) -> Result<(), XPathError> {
         let step = self.step()?;
         if step.axis == Axis::Child && step.predicates.is_empty() {
-            steps.push(Step { axis: Axis::Descendant, test: step.test, predicates: step.predicates });
+            steps.push(Step {
+                axis: Axis::Descendant,
+                test: step.test,
+                predicates: step.predicates,
+            });
         } else {
-            steps.push(Step { axis: Axis::DescendantOrSelf, test: NodeTest::Node, predicates: Vec::new() });
+            steps.push(Step {
+                axis: Axis::DescendantOrSelf,
+                test: NodeTest::Node,
+                predicates: Vec::new(),
+            });
             steps.push(step);
         }
         Ok(())
@@ -267,11 +313,19 @@ impl Parser {
         match self.peek() {
             Some(Token::Dot) => {
                 self.idx += 1;
-                return Ok(Step { axis: Axis::Current, test: NodeTest::Node, predicates: Vec::new() });
+                return Ok(Step {
+                    axis: Axis::Current,
+                    test: NodeTest::Node,
+                    predicates: Vec::new(),
+                });
             }
             Some(Token::DotDot) => {
                 self.idx += 1;
-                return Ok(Step { axis: Axis::Parent, test: NodeTest::Node, predicates: Vec::new() });
+                return Ok(Step {
+                    axis: Axis::Parent,
+                    test: NodeTest::Node,
+                    predicates: Vec::new(),
+                });
             }
             _ => {}
         }
@@ -294,7 +348,11 @@ impl Parser {
         while self.peek() == Some(&Token::LBracket) {
             predicates.push(self.predicate()?);
         }
-        Ok(Step { axis, test, predicates })
+        Ok(Step {
+            axis,
+            test,
+            predicates,
+        })
     }
 
     fn node_test(&mut self) -> Result<NodeTest, XPathError> {

@@ -85,7 +85,11 @@ impl Issue {
 
     /// The markup family of this issue.
     pub fn markup(self) -> Markup {
-        if self.is_legacy() { Markup::Legacy } else { Markup::Modern }
+        if self.is_legacy() {
+            Markup::Legacy
+        } else {
+            Markup::Modern
+        }
     }
 
     /// The directory token in the official schema URLs (`S1000D_4-1`).
@@ -213,7 +217,9 @@ impl SchemaKind {
             SchemaKind::Update,
             SchemaKind::ScormContentPackage,
         ];
-        KINDS.into_iter().find(|k| k.stem().eq_ignore_ascii_case(stem))
+        KINDS
+            .into_iter()
+            .find(|k| k.stem().eq_ignore_ascii_case(stem))
     }
 
     /// A friendly name for menus and status lines.
@@ -367,16 +373,28 @@ mod tests {
 
     #[test]
     fn kinds() {
-        assert_eq!(SchemaKind::from_stem("AppliCCrossRefTable"), Some(SchemaKind::ApplicCrossRefTable));
+        assert_eq!(
+            SchemaKind::from_stem("AppliCCrossRefTable"),
+            Some(SchemaKind::ApplicCrossRefTable)
+        );
         assert_eq!(SchemaKind::from_stem("nope"), None);
         assert_eq!(SchemaKind::Descript.display_name(), "Descriptive");
-        assert_eq!(available_kinds(Issue::V3_0), [SchemaKind::Descript, SchemaKind::Proced]);
+        assert_eq!(
+            available_kinds(Issue::V3_0),
+            [SchemaKind::Descript, SchemaKind::Proced]
+        );
         assert_eq!(available_kinds(Issue::V4_1).len(), 7);
         assert_eq!(
             SchemaKind::from_content_element("illustratedPartsCatalog", Markup::Modern),
             Some(SchemaKind::Ipd)
         );
-        assert_eq!(SchemaKind::from_content_element("descript", Markup::Legacy), Some(SchemaKind::Descript));
-        assert_eq!(SchemaKind::from_content_element("descript", Markup::Modern), None);
+        assert_eq!(
+            SchemaKind::from_content_element("descript", Markup::Legacy),
+            Some(SchemaKind::Descript)
+        );
+        assert_eq!(
+            SchemaKind::from_content_element("descript", Markup::Modern),
+            None
+        );
     }
 }

@@ -33,12 +33,16 @@ pub struct PmRef {
 
 /// Finds every `dmRef` (modern) and `refdm` (legacy) in document order.
 pub fn find_dm_refs(doc: &Document) -> Vec<DmRef> {
-    doc.descendants(doc.root()).filter_map(|n| read_dm_ref(doc, n)).collect()
+    doc.descendants(doc.root())
+        .filter_map(|n| read_dm_ref(doc, n))
+        .collect()
 }
 
 /// Finds every `pmRef` in document order.
 pub fn find_pm_refs(doc: &Document) -> Vec<PmRef> {
-    doc.descendants(doc.root()).filter_map(|n| read_pm_ref(doc, n)).collect()
+    doc.descendants(doc.root())
+        .filter_map(|n| read_pm_ref(doc, n))
+        .collect()
 }
 
 fn read_dm_ref(doc: &Document, node: NodeId) -> Option<DmRef> {
@@ -50,14 +54,17 @@ fn read_dm_ref(doc: &Document, node: NodeId) -> Option<DmRef> {
                 dmc: Dmc::from_dm_code_element(doc, child(doc, ident, "dmCode")?)?,
                 issue_info: child(doc, ident, "issueInfo")
                     .and_then(|e| IssueInfo::from_element(doc, e, Markup::Modern)),
-                language: child(doc, ident, "language").and_then(|e| Language::from_element(doc, e)),
+                language: child(doc, ident, "language")
+                    .and_then(|e| Language::from_element(doc, e)),
             })
         }
         "refdm" => Some(DmRef {
             node,
             dmc: Dmc::from_legacy_container(doc, node)?,
-            issue_info: descendant(doc, node, "issno").and_then(|e| IssueInfo::from_element(doc, e, Markup::Legacy)),
-            language: descendant(doc, node, "language").and_then(|e| Language::from_element(doc, e)),
+            issue_info: descendant(doc, node, "issno")
+                .and_then(|e| IssueInfo::from_element(doc, e, Markup::Legacy)),
+            language: descendant(doc, node, "language")
+                .and_then(|e| Language::from_element(doc, e)),
         }),
         _ => None,
     }
@@ -71,7 +78,8 @@ fn read_pm_ref(doc: &Document, node: NodeId) -> Option<PmRef> {
     Some(PmRef {
         node,
         pmc: Pmc::from_pm_code_element(doc, child(doc, ident, "pmCode")?)?,
-        issue_info: child(doc, ident, "issueInfo").and_then(|e| IssueInfo::from_element(doc, e, Markup::Modern)),
+        issue_info: child(doc, ident, "issueInfo")
+            .and_then(|e| IssueInfo::from_element(doc, e, Markup::Modern)),
         language: child(doc, ident, "language").and_then(|e| Language::from_element(doc, e)),
     })
 }
@@ -86,7 +94,11 @@ impl DmRef {
     /// File name pattern for the referenced module. The issue and language are
     /// included when the reference states them and are wildcards otherwise.
     pub fn filename_pattern(&self) -> String {
-        pattern_for(&self.dmc.to_string(), self.issue_info.as_ref(), self.language.as_ref())
+        pattern_for(
+            &self.dmc.to_string(),
+            self.issue_info.as_ref(),
+            self.language.as_ref(),
+        )
     }
 
     /// Like [`DmRef::filename_pattern`] but accepting any issue, to find the latest one.
@@ -107,7 +119,11 @@ impl DmRef {
 
 impl PmRef {
     pub fn filename_pattern(&self) -> String {
-        pattern_for(&self.pmc.to_string(), self.issue_info.as_ref(), self.language.as_ref())
+        pattern_for(
+            &self.pmc.to_string(),
+            self.issue_info.as_ref(),
+            self.language.as_ref(),
+        )
     }
 
     pub fn latest_filename_pattern(&self) -> String {
@@ -149,9 +165,14 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
 
 /// Sort key from the `_001-02_` part of a CSDB file name.
 fn issue_sort_key(path: &Path) -> (u32, u32, String) {
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
     let issue = name.split('_').nth(1).and_then(IssueInfo::parse);
-    let number = |s: Option<&IssueInfo>, f: fn(&IssueInfo) -> &str| s.and_then(|i| f(i).parse().ok()).unwrap_or(0);
+    let number = |s: Option<&IssueInfo>, f: fn(&IssueInfo) -> &str| {
+        s.and_then(|i| f(i).parse().ok()).unwrap_or(0)
+    };
     (
         number(issue.as_ref(), |i| i.issue_number.as_str()),
         number(issue.as_ref(), |i| i.in_work.as_str()),
@@ -212,7 +233,10 @@ pub fn find_icn_refs(doc: &Document) -> Vec<IcnRef> {
     let entities = entity_declarations(doc);
     let mut refs = Vec::new();
     for node in doc.descendants(doc.root()) {
-        for (attr, kind) in [("infoEntityIdent", IcnRefKind::InfoEntityIdent), ("boardno", IcnRefKind::BoardNo)] {
+        for (attr, kind) in [
+            ("infoEntityIdent", IcnRefKind::InfoEntityIdent),
+            ("boardno", IcnRefKind::BoardNo),
+        ] {
             if let Some(icn) = doc.attr(node, attr) {
                 let decl = entities.iter().find(|e| e.name == icn);
                 refs.push(IcnRef {
@@ -230,7 +254,10 @@ pub fn find_icn_refs(doc: &Document) -> Vec<IcnRef> {
 
 /// Parses the general entity declarations of the document's internal DTD subset.
 pub fn entity_declarations(doc: &Document) -> Vec<EntityDecl> {
-    doc.doctype().and_then(|d| d.internal_subset.as_deref()).map(parse_entity_declarations).unwrap_or_default()
+    doc.doctype()
+        .and_then(|d| d.internal_subset.as_deref())
+        .map(parse_entity_declarations)
+        .unwrap_or_default()
 }
 
 /// Parses `<!ENTITY name SYSTEM "file" NDATA notation>` style declarations (parameter entities are skipped).
@@ -243,7 +270,9 @@ pub fn parse_entity_declarations(subset: &str) -> Vec<EntityDecl> {
             rest = body.find("-->").map_or("", |e| &body[e + 3..]);
             continue;
         }
-        let Some((decl, after)) = split_declaration(rest) else { break };
+        let Some((decl, after)) = split_declaration(rest) else {
+            break;
+        };
         rest = after;
         if let Some(body) = decl.strip_prefix("<!ENTITY")
             && let Some(d) = parse_entity(body)
@@ -310,11 +339,18 @@ fn tokenize_declaration(s: &str) -> Vec<Tok<'_>> {
 fn parse_entity(body: &str) -> Option<EntityDecl> {
     let toks = tokenize_declaration(body);
     let mut it = toks.iter();
-    let Tok::Word(name) = it.next()? else { return None };
+    let Tok::Word(name) = it.next()? else {
+        return None;
+    };
     if *name == "%" {
         return None;
     }
-    let mut decl = EntityDecl { name: (*name).to_string(), public_id: None, system_id: None, notation: None };
+    let mut decl = EntityDecl {
+        name: (*name).to_string(),
+        public_id: None,
+        system_id: None,
+        notation: None,
+    };
     match it.next()? {
         Tok::Word("SYSTEM") => {
             if let Some(Tok::Quoted(s)) = it.next() {

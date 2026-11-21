@@ -89,7 +89,10 @@ fn violations_for(rule_id: &str, v: &[BrexViolation]) -> Vec<BrexViolation> {
 fn parses_modern_brex() {
     let brex = Brex::from_document(&parse(BREX_XML));
     assert_eq!(brex.rules.len(), 9);
-    assert_eq!(brex.dmc.as_ref().unwrap().to_string(), "DMC-TEST-A-00-00-00-00A-022A-D");
+    assert_eq!(
+        brex.dmc.as_ref().unwrap().to_string(),
+        "DMC-TEST-A-00-00-00-00A-022A-D"
+    );
 
     let font = &brex.rules[0];
     assert_eq!(font.id, "no-font");
@@ -98,7 +101,10 @@ fn parses_modern_brex() {
     assert_eq!(font.use_text, "The font element must not be used.");
     assert!(font.values.is_empty());
 
-    assert_eq!(brex.rules[1].id, "rule-2", "rules without id are numbered by position");
+    assert_eq!(
+        brex.rules[1].id, "rule-2",
+        "rules without id are numbered by position"
+    );
     assert_eq!(brex.rules[1].flag, AllowedFlag::Required);
 
     let sec = &brex.rules[3];
@@ -115,10 +121,18 @@ fn parses_modern_brex() {
 #[test]
 fn parses_sns_and_notation_rules() {
     let brex = Brex::from_document(&parse(BREX_XML));
-    let sns: Vec<_> = brex.sns_rules.iter().map(|r| (r.code.as_str(), r.title.as_str(), r.level.as_str())).collect();
+    let sns: Vec<_> = brex
+        .sns_rules
+        .iter()
+        .map(|r| (r.code.as_str(), r.title.as_str(), r.level.as_str()))
+        .collect();
     assert_eq!(
         sns,
-        [("D", "Vehicle", "snsSystem"), ("D-0", "General", "snsSubSystem"), ("D-0-1", "Frame", "snsSubSubSystem")]
+        [
+            ("D", "Vehicle", "snsSystem"),
+            ("D-0", "General", "snsSubSystem"),
+            ("D-0-1", "Frame", "snsSubSubSystem")
+        ]
     );
     assert_eq!(brex.notation_rules.len(), 2);
     assert_eq!(brex.notation_rules[0].name, "cgm");
@@ -163,18 +177,28 @@ fn clean_document_has_no_violations_except_unevaluable_rules() {
 #[test]
 fn prohibited_objects_are_flagged() {
     let brex = Brex::from_document(&parse(BREX_XML));
-    let doc = parse(r#"<dmodule><content><description><font/><levelledPara><title/><warning/><font/></levelledPara></description></content></dmodule>"#);
+    let doc = parse(
+        r#"<dmodule><content><description><font/><levelledPara><title/><warning/><font/></levelledPara></description></content></dmodule>"#,
+    );
     let v = violations_for("no-font", &check_brex(&doc, &brex));
     assert_eq!(v.len(), 2);
-    assert!(v.iter().all(|x| x.severity == Severity::Error && x.node.is_some()));
+    assert!(
+        v.iter()
+            .all(|x| x.severity == Severity::Error && x.node.is_some())
+    );
     assert_eq!(doc.name(v[0].node.unwrap()), Some("font"));
-    assert!(v[0].message.starts_with("The font element must not be used."));
+    assert!(
+        v[0].message
+            .starts_with("The font element must not be used.")
+    );
 }
 
 #[test]
 fn required_objects_must_exist() {
     let brex = Brex::from_document(&parse(BREX_XML));
-    let doc = parse(r#"<dmodule><content><description><levelledPara/></description></content></dmodule>"#);
+    let doc = parse(
+        r#"<dmodule><content><description><levelledPara/></description></content></dmodule>"#,
+    );
     let all = check_brex(&doc, &brex);
     let title = violations_for("rule-2", &all);
     assert_eq!(title.len(), 1);
@@ -196,14 +220,26 @@ fn value_sets_are_enforced_on_attributes() {
     let sec = violations_for("sec", &all);
     assert_eq!(sec.len(), 1);
     assert_eq!(doc.name(sec[0].node.unwrap()), Some("levelledPara"));
-    assert!(sec[0].message.contains("securityClassification"), "{}", sec[0].message);
+    assert!(
+        sec[0].message.contains("securityClassification"),
+        "{}",
+        sec[0].message
+    );
     assert!(sec[0].message.contains("value '06'"), "{}", sec[0].message);
 
-    assert_eq!(violations_for("level", &all).len(), 2, "5 and 0 are outside 1~3|7");
+    assert_eq!(
+        violations_for("level", &all).len(),
+        2,
+        "5 and 0 are outside 1~3|7"
+    );
     let ident = violations_for("ident", &all);
     assert_eq!(ident.len(), 1);
     assert!(ident[0].message.contains("Bad_Id"));
-    assert_eq!(violations_for("letters", &all).len(), 1, "only 'd' is outside a~c");
+    assert_eq!(
+        violations_for("letters", &all).len(),
+        1,
+        "only 'd' is outside a~c"
+    );
 
     let emph = violations_for("emph", &all);
     assert_eq!(emph.len(), 1, "only the prohibited value is reported");
@@ -230,27 +266,47 @@ fn invalid_rules_are_reported_as_warnings() {
 
 #[test]
 fn value_matching_forms() {
-    let single = ObjectValue { form: ValueForm::Single, allowed: "A | B|C".into(), description: String::new() };
+    let single = ObjectValue {
+        form: ValueForm::Single,
+        allowed: "A | B|C".into(),
+        description: String::new(),
+    };
     assert!(single.allows("B"));
     assert!(single.allows(" C "));
     assert!(!single.allows("D"));
 
-    let numeric = ObjectValue { form: ValueForm::Range, allowed: "001~010|100".into(), description: String::new() };
+    let numeric = ObjectValue {
+        form: ValueForm::Range,
+        allowed: "001~010|100".into(),
+        description: String::new(),
+    };
     assert!(numeric.allows("5"), "ranges compare numerically");
     assert!(numeric.allows("010"));
     assert!(!numeric.allows("011"));
     assert!(numeric.allows("100"));
     assert!(!numeric.allows("x"));
 
-    let letters = ObjectValue { form: ValueForm::Range, allowed: "a~c".into(), description: String::new() };
+    let letters = ObjectValue {
+        form: ValueForm::Range,
+        allowed: "a~c".into(),
+        description: String::new(),
+    };
     assert!(letters.allows("b"));
     assert!(!letters.allows("d"));
 
-    let pattern = ObjectValue { form: ValueForm::Pattern, allowed: "[A-Z]{2}[0-9]{2}|none".into(), description: String::new() };
+    let pattern = ObjectValue {
+        form: ValueForm::Pattern,
+        allowed: "[A-Z]{2}[0-9]{2}|none".into(),
+        description: String::new(),
+    };
     assert!(pattern.allows("AB12"));
     assert!(pattern.allows("none"));
     assert!(!pattern.allows("AB123"));
-    let broken = ObjectValue { form: ValueForm::Pattern, allowed: "(".into(), description: String::new() };
+    let broken = ObjectValue {
+        form: ValueForm::Pattern,
+        allowed: "(".into(),
+        description: String::new(),
+    };
     assert!(!broken.allows("x"));
     assert!(broken.matcher().is_err());
 }
@@ -272,9 +328,13 @@ fn loads_from_a_file() {
     let loaded = Brex::load(&path);
     let _ = std::fs::remove_file(&path);
     assert_eq!(loaded.unwrap().rules.len(), 9);
-    assert!(matches!(Brex::load(path.with_extension("missing")), Err(S1000dError::Io(_))));
+    assert!(matches!(
+        Brex::load(path.with_extension("missing")),
+        Err(S1000dError::Io(_))
+    ));
 
-    let bad = std::env::temp_dir().join(format!("xylem-s1000d-brex-bad-{}.xml", std::process::id()));
+    let bad =
+        std::env::temp_dir().join(format!("xylem-s1000d-brex-bad-{}.xml", std::process::id()));
     std::fs::write(&bad, "<unclosed>").unwrap();
     let err = Brex::load(&bad);
     let _ = std::fs::remove_file(&bad);

@@ -11,16 +11,31 @@ fn modern_dm_refs() {
     let refs = find_dm_refs(&doc);
     // The BREX reference in dmStatus comes first, then the inline reference.
     assert_eq!(refs.len(), 2);
-    assert_eq!(refs[0].dmc.to_string(), "DMC-S1000D-E-04-10-0301-00A-022A-D");
+    assert_eq!(
+        refs[0].dmc.to_string(),
+        "DMC-S1000D-E-04-10-0301-00A-022A-D"
+    );
     assert_eq!(refs[0].issue_info, None);
     let inline = &refs[1];
-    assert_eq!(inline.dmc.to_string(), "DMC-S1000DBIKE-AAA-D00-00-00-00AA-040A-D");
+    assert_eq!(
+        inline.dmc.to_string(),
+        "DMC-S1000DBIKE-AAA-D00-00-00-00AA-040A-D"
+    );
     assert_eq!(inline.issue_info.as_ref().unwrap().to_string(), "002-00");
     assert_eq!(inline.language.as_ref().unwrap().to_string(), "en-US");
     assert_eq!(doc.name(inline.node), Some("dmRef"));
-    assert_eq!(inline.filename_pattern(), "DMC-S1000DBIKE-AAA-D00-00-00-00AA-040A-D_002-00_en-US.XML");
-    assert_eq!(inline.latest_filename_pattern(), "DMC-S1000DBIKE-AAA-D00-00-00-00AA-040A-D_*_en-US.XML");
-    assert_eq!(refs[0].filename_pattern(), "DMC-S1000D-E-04-10-0301-00A-022A-D_*_*.XML");
+    assert_eq!(
+        inline.filename_pattern(),
+        "DMC-S1000DBIKE-AAA-D00-00-00-00AA-040A-D_002-00_en-US.XML"
+    );
+    assert_eq!(
+        inline.latest_filename_pattern(),
+        "DMC-S1000DBIKE-AAA-D00-00-00-00AA-040A-D_*_en-US.XML"
+    );
+    assert_eq!(
+        refs[0].filename_pattern(),
+        "DMC-S1000D-E-04-10-0301-00A-022A-D_*_*.XML"
+    );
 }
 
 #[test]
@@ -30,7 +45,10 @@ fn legacy_dm_refs() {
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].dmc.to_string(), "DMC-BIKE-A-12-00-00-00A-520A-A");
     assert_eq!(refs[0].issue_info.as_ref().unwrap().to_string(), "001-00");
-    assert_eq!(refs[0].filename_pattern(), "DMC-BIKE-A-12-00-00-00A-520A-A_001-00_*.XML");
+    assert_eq!(
+        refs[0].filename_pattern(),
+        "DMC-BIKE-A-12-00-00-00A-520A-A_001-00_*.XML"
+    );
 }
 
 #[test]
@@ -39,7 +57,10 @@ fn pm_refs() {
     let refs = find_pm_refs(&doc);
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].pmc.to_string(), "PMC-S1000DBIKE-C0419-00001-00");
-    assert_eq!(refs[0].filename_pattern(), "PMC-S1000DBIKE-C0419-00001-00_*_*.XML");
+    assert_eq!(
+        refs[0].filename_pattern(),
+        "PMC-S1000DBIKE-C0419-00001-00_*_*.XML"
+    );
 }
 
 #[test]
@@ -89,7 +110,10 @@ fn resolves_latest_issue_in_folder() {
     let inline = find_dm_refs(&doc).remove(1);
 
     let latest = inline.find_latest_in_dir(&tmp.0).unwrap().unwrap();
-    assert!(latest.ends_with(format!("{code}_010-01_en-US.XML")), "{latest:?}");
+    assert!(
+        latest.ends_with(format!("{code}_010-01_en-US.XML")),
+        "{latest:?}"
+    );
 
     // The reference names issue 002 exactly.
     let exact = inline.find_in_dir(&tmp.0).unwrap();
@@ -101,7 +125,11 @@ fn resolves_latest_issue_in_folder() {
     any_language.issue_info = None;
     let all = any_language.find_in_dir(&tmp.0).unwrap();
     assert_eq!(all.len(), 5);
-    assert!(all.last().unwrap().ends_with(format!("{code}_011-00_fr-CA.XML")));
+    assert!(
+        all.last()
+            .unwrap()
+            .ends_with(format!("{code}_011-00_fr-CA.XML"))
+    );
 
     let mut missing = inline;
     missing.dmc.info_code = "999".into();
@@ -114,7 +142,10 @@ fn icn_refs_modern_and_legacy() {
     let modern = parse(MODERN_DESCRIPT);
     let icns = find_icn_refs(&modern);
     assert_eq!(icns.len(), 1);
-    assert_eq!(icns[0].icn, "ICN-S1000DBIKE-AAA-DA10000-0-U8025-00100-A-04-1");
+    assert_eq!(
+        icns[0].icn,
+        "ICN-S1000DBIKE-AAA-DA10000-0-U8025-00100-A-04-1"
+    );
     assert_eq!(icns[0].kind, IcnRefKind::InfoEntityIdent);
     assert_eq!(icns[0].file, None);
 

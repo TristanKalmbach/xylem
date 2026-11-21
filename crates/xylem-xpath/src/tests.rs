@@ -60,7 +60,11 @@ fn xmax_style_queries() {
     let chapter = sel(&d, "/doc/chapter[1]")[0].node().unwrap();
     let from_chapter = select(&d, chapter, "descendant::para[@id='y']").unwrap();
     assert_eq!(from_chapter.len(), 1);
-    assert!(select(&d, chapter, "descendant::title[.='Two']").unwrap().is_empty());
+    assert!(
+        select(&d, chapter, "descendant::title[.='Two']")
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -68,16 +72,43 @@ fn abbreviations_and_axes() {
     let d = doc();
     assert_eq!(sel(&d, "//para").len(), 3);
     assert_eq!(sel(&d, "/doc/chapter/para[last()]").len(), 1);
-    assert_eq!(string_value(&d, sel(&d, "/doc/chapter/para[last()]")[0]), "Third");
+    assert_eq!(
+        string_value(&d, sel(&d, "/doc/chapter/para[last()]")[0]),
+        "Third"
+    );
     assert_eq!(string_value(&d, sel(&d, "//para[2]")[0]), "Second");
     assert_eq!(names(&d, &sel(&d, "//b/..")), ["para"]);
-    assert_eq!(names(&d, &sel(&d, "//b/ancestor::*")), ["doc", "chapter", "para"]);
-    assert_eq!(names(&d, &sel(&d, "//b/ancestor-or-self::*")), ["doc", "chapter", "para", "b"]);
-    assert_eq!(names(&d, &sel(&d, "/doc/chapter[1]/title/following-sibling::para")), ["para", "para", "para"]);
-    assert_eq!(names(&d, &sel(&d, "//para[@id='y']/preceding-sibling::*")), ["title", "para"]);
-    assert_eq!(string_value(&d, sel(&d, "//para[@id='y']/preceding-sibling::*[1]")[0]), "Hello big world");
-    assert_eq!(names(&d, &sel(&d, "//title[.='One']/following::title")), ["title"]);
-    assert_eq!(names(&d, &sel(&d, "//title[.='Two']/preceding::title")), ["title"]);
+    assert_eq!(
+        names(&d, &sel(&d, "//b/ancestor::*")),
+        ["doc", "chapter", "para"]
+    );
+    assert_eq!(
+        names(&d, &sel(&d, "//b/ancestor-or-self::*")),
+        ["doc", "chapter", "para", "b"]
+    );
+    assert_eq!(
+        names(
+            &d,
+            &sel(&d, "/doc/chapter[1]/title/following-sibling::para")
+        ),
+        ["para", "para", "para"]
+    );
+    assert_eq!(
+        names(&d, &sel(&d, "//para[@id='y']/preceding-sibling::*")),
+        ["title", "para"]
+    );
+    assert_eq!(
+        string_value(&d, sel(&d, "//para[@id='y']/preceding-sibling::*[1]")[0]),
+        "Hello big world"
+    );
+    assert_eq!(
+        names(&d, &sel(&d, "//title[.='One']/following::title")),
+        ["title"]
+    );
+    assert_eq!(
+        names(&d, &sel(&d, "//title[.='Two']/preceding::title")),
+        ["title"]
+    );
     assert_eq!(sel(&d, "//nums/n/self::n").len(), 4);
     assert_eq!(sel(&d, "//n[position() mod 2 = 0]").len(), 2);
     assert_eq!(sel(&d, "/doc/descendant-or-self::*").len(), 16);
@@ -103,7 +134,11 @@ fn attribute_nodes() {
     assert!(ids.iter().all(|n| n.is_attr()));
     assert_eq!(string_value(&d, ids[0]), "c1");
     assert_eq!(sel(&d, "//chapter/@*").len(), 5);
-    assert_eq!(sel(&d, "//@xmlns:s").len(), 0, "namespace declarations are not attributes");
+    assert_eq!(
+        sel(&d, "//@xmlns:s").len(),
+        0,
+        "namespace declarations are not attributes"
+    );
     assert_eq!(text(&d, "//para[@id='y']/@id"), "y");
     assert_eq!(names(&d, &sel(&d, "//para/@id/..")), ["para", "para"]);
     assert_eq!(sel(&d, "//@id/parent::chapter").len(), 2);
@@ -124,18 +159,28 @@ fn node_tests() {
     assert_eq!(sel(&d, "//s:*").len(), 2);
     assert_eq!(sel(&d, "//item").len(), 0);
     assert_eq!(sel(&d, "/doc/*").len(), 3);
-    assert_eq!(num(&d, "count(/doc/node())"), num(&d, "count(/doc/*) + count(/doc/text()) + count(/doc/processing-instruction())"));
+    assert_eq!(
+        num(&d, "count(/doc/node())"),
+        num(
+            &d,
+            "count(/doc/*) + count(/doc/text()) + count(/doc/processing-instruction())"
+        )
+    );
 }
 
 #[test]
 fn namespace_context() {
-    let d = Document::from_str(r#"<r xmlns:a="urn:x"><a:i/><b:i xmlns:b="urn:x"/><a:j/></r>"#).unwrap();
+    let d =
+        Document::from_str(r#"<r xmlns:a="urn:x"><a:i/><b:i xmlns:b="urn:x"/><a:j/></r>"#).unwrap();
     let mut ctx = Context::new();
     ctx.set_namespace("q", "urn:x");
     let xp = compile("//q:i").unwrap();
     let hits = xp.select_with(&d, XNode::Node(d.root()), &ctx).unwrap();
     assert_eq!(hits.len(), 2);
-    let wild = compile("//q:*").unwrap().select_with(&d, XNode::Node(d.root()), &ctx).unwrap();
+    let wild = compile("//q:*")
+        .unwrap()
+        .select_with(&d, XNode::Node(d.root()), &ctx)
+        .unwrap();
     assert_eq!(wild.len(), 3);
     // Without a mapping, prefixes are compared literally.
     assert_eq!(sel(&d, "//a:i").len(), 1);
@@ -148,7 +193,10 @@ fn namespace_context() {
 fn unions_are_ordered_and_deduplicated() {
     let d = doc();
     let hits = sel(&d, "//title | //para | //title | //n");
-    assert_eq!(names(&d, &hits), ["title", "para", "para", "para", "title", "n", "n", "n", "n"]);
+    assert_eq!(
+        names(&d, &hits),
+        ["title", "para", "para", "para", "title", "n", "n", "n", "n"]
+    );
     let mut order: Vec<_> = hits.clone();
     order.sort_by(|a, b| d.cmp_order(a.owner(), b.owner()));
     assert_eq!(order, hits);
@@ -166,7 +214,10 @@ fn arithmetic_and_comparison() {
     assert_eq!(num(&d, "5 - -2"), 7.0);
     assert!(num(&d, "1 div 0").is_infinite());
     assert!(num(&d, "0 div 0").is_nan());
-    assert!(boolean(&d, "1 < 2 and 2 <= 2 and 3 > 2 and 3 >= 3 and 1 != 2"));
+    assert!(boolean(
+        &d,
+        "1 < 2 and 2 <= 2 and 3 > 2 and 3 >= 3 and 1 != 2"
+    ));
     assert!(boolean(&d, "'a' = 'a'"));
     assert!(boolean(&d, "'1' = 1"));
     assert!(boolean(&d, "true() = 'x'"));
@@ -191,7 +242,10 @@ fn node_set_comparison_semantics() {
     assert!(boolean(&d, "'Two' = //title"));
     assert!(boolean(&d, "//title = //chapter/title"));
     assert!(!boolean(&d, "//nope = 'x'"));
-    assert!(!boolean(&d, "//nope != 'x'"), "empty node-sets never compare true");
+    assert!(
+        !boolean(&d, "//nope != 'x'"),
+        "empty node-sets never compare true"
+    );
     assert!(boolean(&d, "//n = true()"));
     assert!(boolean(&d, "//nope = false()"));
     assert!(boolean(&d, "//n[1] < //n[2]"));
@@ -254,14 +308,22 @@ fn number_and_boolean_functions() {
 fn name_functions_use_context_node() {
     let d = doc();
     let title = sel(&d, "//title")[0].node().unwrap();
-    let ev = |expr: &str| compile(expr).unwrap().evaluate(&d, XNode::Node(title)).unwrap();
+    let ev = |expr: &str| {
+        compile(expr)
+            .unwrap()
+            .evaluate(&d, XNode::Node(title))
+            .unwrap()
+    };
     assert_eq!(ev("name()").to_string_value(&d), "title");
     assert_eq!(ev("local-name(..)").to_string_value(&d), "chapter");
     assert_eq!(ev("string()").to_string_value(&d), "One");
     assert_eq!(ev("string-length()").to_string_value(&d), "3");
     assert_eq!(ev("name(../@id)").to_string_value(&d), "id");
     assert_eq!(ev("name(/)").to_string_value(&d), "");
-    assert_eq!(ev("name(//processing-instruction())").to_string_value(&d), "Ref_Label");
+    assert_eq!(
+        ev("name(//processing-instruction())").to_string_value(&d),
+        "Ref_Label"
+    );
 }
 
 #[test]
@@ -303,7 +365,10 @@ fn double_slash_semantics() {
     // `//para[1]` is every para that is the first para child of its parent.
     let d2 = Document::from_str("<r><s><p>1</p><p>2</p></s><s><p>3</p></s></r>").unwrap();
     assert_eq!(select(&d2, d2.root(), "//p[1]").unwrap().len(), 2);
-    assert_eq!(select(&d2, d2.root(), "/descendant::p[1]").unwrap().len(), 1);
+    assert_eq!(
+        select(&d2, d2.root(), "/descendant::p[1]").unwrap().len(),
+        1
+    );
     assert_eq!(select(&d2, d2.root(), "//s//p").unwrap().len(), 3);
     assert_eq!(select(&d2, d2.root(), "//s/p[last()]").unwrap().len(), 2);
     assert_eq!(select(&d2, d2.root(), "//p/text()").unwrap().len(), 3);
@@ -319,16 +384,24 @@ fn variables_and_custom_functions() {
     let paras = sel(&d, "//para");
     ctx.set_variable("paras", paras.clone());
     ctx.register_function("shout", |_, args| {
-        let s = args.first().ok_or_else(|| XPathError::custom("shout() needs an argument"))?;
-        Ok(Value::String(format!("{}!", match s {
-            Value::String(s) => s.clone(),
-            _ => String::new(),
-        })))
+        let s = args
+            .first()
+            .ok_or_else(|| XPathError::custom("shout() needs an argument"))?;
+        Ok(Value::String(format!(
+            "{}!",
+            match s {
+                Value::String(s) => s.clone(),
+                _ => String::new(),
+            }
+        )))
     });
     ctx.register_function("pos", |fc, _| Ok(Value::Number(fc.position as f64)));
     let root = XNode::Node(d.root());
     let run = |e: &str| compile(e).unwrap().evaluate_with(&d, root, &ctx);
-    assert_eq!(run("//para[@id=$id]").unwrap().as_node_set().unwrap().len(), 1);
+    assert_eq!(
+        run("//para[@id=$id]").unwrap().as_node_set().unwrap().len(),
+        1
+    );
     assert_eq!(run("count($paras)").unwrap(), Value::Number(3.0));
     assert_eq!(run("$limit + 1").unwrap(), Value::Number(3.0));
     assert_eq!(run("shout('hey')").unwrap(), Value::String("hey!".into()));
@@ -348,7 +421,10 @@ fn nodes_come_back_in_document_order_for_large_documents() {
     assert!(d.node_count() > 20_000);
     let hits = sel(&d, "//b | //a | //c");
     assert_eq!(hits.len(), 5000 * 5);
-    assert!(hits.windows(2).all(|w| d.cmp_order(w[0].owner(), w[1].owner()).is_lt()));
+    assert!(
+        hits.windows(2)
+            .all(|w| d.cmp_order(w[0].owner(), w[1].owner()).is_lt())
+    );
     assert_eq!(sel(&d, "//a[@i='4999']").len(), 1);
     assert_eq!(sel(&d, "//b/ancestor::a").len(), 5000);
     assert_eq!(sel(&d, "//c/preceding-sibling::b").len(), 10_000);
@@ -359,7 +435,17 @@ fn nodes_come_back_in_document_order_for_large_documents() {
 
 #[test]
 fn syntax_errors_carry_positions() {
-    for (expr, pos) in [("a[", 2), ("a/", 2), ("1 +", 3), ("a b", 2), ("child::", 7), ("@", 1), ("'x", 0), ("$", 1), ("a ! b", 2)] {
+    for (expr, pos) in [
+        ("a[", 2),
+        ("a/", 2),
+        ("1 +", 3),
+        ("a b", 2),
+        ("child::", 7),
+        ("@", 1),
+        ("'x", 0),
+        ("$", 1),
+        ("a ! b", 2),
+    ] {
         let err = compile(expr).expect_err(expr);
         assert_eq!(err.position(), Some(pos), "{expr}: {err}");
     }
@@ -367,7 +453,10 @@ fn syntax_errors_carry_positions() {
     assert!(compile("a | ").is_err());
     assert!(compile("foo(").is_err());
     assert!(compile("").is_err());
-    assert!(compile(&"(".repeat(1000)).is_err(), "deep nesting is rejected, not a stack overflow");
+    assert!(
+        compile(&"(".repeat(1000)).is_err(),
+        "deep nesting is rejected, not a stack overflow"
+    );
 }
 
 #[test]
@@ -392,16 +481,51 @@ fn lexer_disambiguation() {
     assert_eq!(sel(&d, "/doc/*").len(), 3);
     assert_eq!(num(&d, "count(/doc/*) * 2"), 6.0);
     let e = Document::from_str("<div><and/><or/><mod/><div/></div>").unwrap();
-    assert_eq!(select(&e, e.root(), "/div/and | /div/or | /div/mod | /div/div").unwrap().len(), 4);
-    assert_eq!(select(&e, e.root(), "/div/*[self::and or self::or]").unwrap().len(), 2);
-    assert_eq!(evaluate(&e, e.root(), "count(/div/*) div 2").unwrap(), Value::Number(2.0));
+    assert_eq!(
+        select(&e, e.root(), "/div/and | /div/or | /div/mod | /div/div")
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(
+        select(&e, e.root(), "/div/*[self::and or self::or]")
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        evaluate(&e, e.root(), "count(/div/*) div 2").unwrap(),
+        Value::Number(2.0)
+    );
     // Hyphenated names versus subtraction.
     let h = Document::from_str("<r><a-b>5</a-b><a>3</a><b>1</b></r>").unwrap();
     assert_eq!(evaluate(&h, h.root(), "/r/a-b").unwrap().to_number(&h), 5.0);
-    assert_eq!(evaluate(&h, h.root(), "/r/a - /r/b").unwrap().to_number(&h), 2.0);
-    assert_eq!(evaluate(&h, h.root(), "number(/r/a)-number(/r/b)").unwrap().to_number(&h), 2.0);
-    assert_eq!(evaluate(&h, h.root(), "/r/node()").unwrap().as_node_set().unwrap().len(), 3);
-    assert_eq!(evaluate(&h, h.root(), "  / r / a  ").unwrap().as_node_set().unwrap().len(), 1);
+    assert_eq!(
+        evaluate(&h, h.root(), "/r/a - /r/b").unwrap().to_number(&h),
+        2.0
+    );
+    assert_eq!(
+        evaluate(&h, h.root(), "number(/r/a)-number(/r/b)")
+            .unwrap()
+            .to_number(&h),
+        2.0
+    );
+    assert_eq!(
+        evaluate(&h, h.root(), "/r/node()")
+            .unwrap()
+            .as_node_set()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(
+        evaluate(&h, h.root(), "  / r / a  ")
+            .unwrap()
+            .as_node_set()
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -410,8 +534,14 @@ fn compiled_expression_is_reusable() {
     assert_eq!(xp.source(), "count(//para)");
     let a = Document::from_str("<r><para/></r>").unwrap();
     let b = Document::from_str("<r><para/><para/></r>").unwrap();
-    assert_eq!(xp.evaluate(&a, XNode::Node(a.root())).unwrap(), Value::Number(1.0));
-    assert_eq!(xp.evaluate(&b, XNode::Node(b.root())).unwrap(), Value::Number(2.0));
+    assert_eq!(
+        xp.evaluate(&a, XNode::Node(a.root())).unwrap(),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        xp.evaluate(&b, XNode::Node(b.root())).unwrap(),
+        Value::Number(2.0)
+    );
 }
 
 #[test]

@@ -124,7 +124,11 @@ impl DocState {
             let n = doc
                 .descendants(doc.root())
                 .filter_map(|n| doc.text(n))
-                .map(|t| t.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).count())
+                .map(|t| {
+                    t.split_whitespace()
+                        .filter(|w| w.chars().any(char::is_alphanumeric))
+                        .count()
+                })
                 .sum();
             self.words = (rev, n);
         }
@@ -157,10 +161,10 @@ impl DocState {
             let doc = &self.editor.doc;
             let mut map = HashMap::new();
             for n in doc.descendants(doc.root()) {
-                if doc.is_element(n) {
-                    if let Some(src) = self.image_src(n) {
-                        map.insert(n, src);
-                    }
+                if doc.is_element(n)
+                    && let Some(src) = self.image_src(n)
+                {
+                    map.insert(n, src);
                 }
             }
             self.images = (rev, Rc::new(map));
@@ -262,7 +266,15 @@ impl DocState {
                     for (n, css) in &self.inline_styles {
                         engine.set_inline_style(*n, css);
                     }
-                    Rc::new(CssStyles::compute(&self.editor.doc, engine, self.package.resolved_files().style.as_deref().and_then(Path::parent)))
+                    Rc::new(CssStyles::compute(
+                        &self.editor.doc,
+                        engine,
+                        self.package
+                            .resolved_files()
+                            .style
+                            .as_deref()
+                            .and_then(Path::parent),
+                    ))
                 }
                 None => Rc::new(DefaultStyles::compute(&self.editor.doc)),
             };

@@ -128,7 +128,16 @@ fn hash_sty(s: &Sty, h: &mut impl std::hash::Hasher) {
     use std::hash::Hash;
     std::mem::discriminant(&s.display).hash(h);
     s.font_size.to_bits().hash(h);
-    (s.bold, s.italic, s.underline, s.line_through, s.monospace, s.serif, s.has_rule).hash(h);
+    (
+        s.bold,
+        s.italic,
+        s.underline,
+        s.line_through,
+        s.monospace,
+        s.serif,
+        s.has_rule,
+    )
+        .hash(h);
     s.color.map(|c| c.to_array()).hash(h);
     s.background.map(|c| c.to_array()).hash(h);
     s.background_inline.map(|c| c.to_array()).hash(h);
@@ -277,7 +286,11 @@ fn convert(c: &xylem_style::ComputedStyle) -> Sty {
 
 impl CssStyles {
     /// `css_dir` resolves `url(...)` references in generated content.
-    pub fn compute(doc: &Document, engine: &xylem_style::StyleEngine, css_dir: Option<&std::path::Path>) -> Self {
+    pub fn compute(
+        doc: &Document,
+        engine: &xylem_style::StyleEngine,
+        css_dir: Option<&std::path::Path>,
+    ) -> Self {
         let map = engine.compute(doc);
         let mut styles = vec![None; doc.node_count()];
         let mut before = std::collections::HashMap::new();
@@ -311,7 +324,9 @@ impl CssStyles {
                 );
             }
             for (after, g) in [(false, map.before(n)), (true, map.after(n))] {
-                let Some(src) = g.and_then(|g| g.image.as_deref()) else { continue };
+                let Some(src) = g.and_then(|g| g.image.as_deref()) else {
+                    continue;
+                };
                 let path = match css_dir {
                     Some(dir) => dir.join(src),
                     None => std::path::PathBuf::from(src),

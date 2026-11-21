@@ -95,7 +95,11 @@ impl Canvas {
 
     /// Collapses or expands `el` in the document view.
     pub fn set_collapsed(&mut self, el: NodeId, collapsed: bool) {
-        let changed = if collapsed { self.collapsed.insert(el) } else { self.collapsed.remove(&el) };
+        let changed = if collapsed {
+            self.collapsed.insert(el)
+        } else {
+            self.collapsed.remove(&el)
+        };
         if changed {
             self.collapsed_rev += 1;
         }
@@ -155,10 +159,11 @@ impl Canvas {
 
     /// Location of the caret (focus) in the layout.
     pub fn caret_loc(&self, ed: &Editor, rules: &dyn Rules) -> Option<Loc> {
-        if let Some((p, loc)) = self.caret_hint {
-            if p == ed.sel.focus && loc.para < self.layout.paras.len() {
-                return Some(loc);
-            }
+        if let Some((p, loc)) = self.caret_hint
+            && p == ed.sel.focus
+            && loc.para < self.layout.paras.len()
+        {
+            return Some(loc);
         }
         self.layout.locate(&ed.doc, rules, ed.sel.focus)
     }
@@ -173,7 +178,11 @@ impl Canvas {
         let width = ui.available_width().max(200.0);
         // Content the caret moved into must be visible.
         if !self.collapsed.is_empty() && ed.doc.contains(ed.sel.focus.node) {
-            let hidden: Vec<NodeId> = ed.doc.ancestors(ed.sel.focus.node).filter(|a| self.collapsed.contains(a)).collect();
+            let hidden: Vec<NodeId> = ed
+                .doc
+                .ancestors(ed.sel.focus.node)
+                .filter(|a| self.collapsed.contains(a))
+                .collect();
             for a in hidden {
                 if a != ed.sel.focus.node {
                     self.set_collapsed(a, false);
@@ -573,7 +582,14 @@ impl Canvas {
                         // beyond leading start-tag or trailing end-tag chips.
                         let is_chrome = |c: usize| {
                             para.segs.iter().any(|sg| {
-                                sg.chars.contains(&c) && matches!(sg.kind, SegKind::StartTag(_) | SegKind::EndTag(_) | SegKind::EmptyTag(_) | SegKind::Generated(_))
+                                sg.chars.contains(&c)
+                                    && matches!(
+                                        sg.kind,
+                                        SegKind::StartTag(_)
+                                            | SegKind::EndTag(_)
+                                            | SegKind::EmptyTag(_)
+                                            | SegKind::Generated(_)
+                                    )
                             })
                         };
                         let ch = if key == Key::Home {
@@ -775,15 +791,31 @@ impl Canvas {
             }
             painter.galley(p.anchor + off, p.galley.clone(), Color32::GRAY);
             for (range, path) in p.icons.iter() {
-                let Some(r) = self.layout.range_rects(pi, range.start, range.end).into_iter().next() else { continue };
-                let tex = self.icons.entry(path.clone()).or_insert_with(|| load_icon(ui.ctx(), path)).clone();
+                let Some(r) = self
+                    .layout
+                    .range_rects(pi, range.start, range.end)
+                    .into_iter()
+                    .next()
+                else {
+                    continue;
+                };
+                let tex = self
+                    .icons
+                    .entry(path.clone())
+                    .or_insert_with(|| load_icon(ui.ctx(), path))
+                    .clone();
                 if let Some(tex) = tex {
                     // Fit the image into the reserved box, keeping its aspect.
                     let r = r.translate(off).shrink(1.0);
                     let [w, h] = tex.size().map(|v| v as f32);
                     let scale = (r.width() / w).min(r.height() / h);
                     let dst = Rect::from_center_size(r.center(), vec2(w * scale, h * scale));
-                    painter.image(tex.id(), dst, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    painter.image(
+                        tex.id(),
+                        dst,
+                        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
                 }
             }
         }
@@ -821,7 +853,9 @@ impl Canvas {
             }
         }
         // Caret.
-        self.caret_screen = self.caret_loc(ed, cx.rules).map(|loc| self.layout.caret_rect(loc).translate(off));
+        self.caret_screen = self
+            .caret_loc(ed, cx.rules)
+            .map(|loc| self.layout.caret_rect(loc).translate(off));
         if self.has_focus
             && let Some(loc) = self.caret_loc(ed, cx.rules)
         {
@@ -837,6 +871,7 @@ impl Canvas {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn paint_text_range(
         &self,
         painter: &egui::Painter,

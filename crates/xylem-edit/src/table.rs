@@ -241,11 +241,11 @@ impl Editor {
         let ctx = self.table_here()?;
         self.transact(|ed| {
             let parent = ed.doc.parent(ctx.row).unwrap();
-            let mut idx = ed.doc.index_in_parent(ctx.row).unwrap() + usize::from(below);
+            let at = ed.doc.index_in_parent(ctx.row).unwrap() + usize::from(below);
             let row_name = ed.doc.name(ctx.row).unwrap().to_string();
             let cells = cell_columns(&ed.doc, ctx.model, ctx.group, ctx.row);
             let mut first_new = None;
-            for _ in 0..n.max(1) {
+            for k in 0..n.max(1) {
                 let r = ed.doc.create_element(row_name.clone());
                 for &(c, _, _) in &cells {
                     let cell = ed.doc.create_element(ed.doc.name(c).unwrap().to_string());
@@ -259,8 +259,7 @@ impl Editor {
                     }
                     ed.doc.append_child(r, cell);
                 }
-                ed.doc.insert_child(parent, idx, r);
-                idx += 1;
+                ed.doc.insert_child(parent, at + k, r);
                 first_new.get_or_insert(r);
             }
             let first_cell = ed.doc.element_children(first_new.unwrap()).next().unwrap();

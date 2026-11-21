@@ -24,7 +24,9 @@ pub fn write(key: String, original: Option<&Path>, doc: &Document) {
         log::warn!("autosave: {e}");
         return;
     }
-    let meta = original.map(|p| p.display().to_string()).unwrap_or_default();
+    let meta = original
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
     let _ = std::fs::write(dir.join(format!("{key}.path")), meta);
 }
 
@@ -77,7 +79,9 @@ impl Recovered {
 /// Autosaved documents left behind by a previous session.
 pub fn find() -> Vec<Recovered> {
     let Some(dir) = dir() else { return Vec::new() };
-    let Ok(entries) = std::fs::read_dir(&dir) else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     for e in entries.flatten() {
         let file = e.path();
@@ -90,7 +94,11 @@ pub fn find() -> Vec<Recovered> {
             .filter(|s| !s.is_empty())
             .map(PathBuf::from);
         let saved_at = e.metadata().and_then(|m| m.modified()).ok();
-        out.push(Recovered { file, original, saved_at });
+        out.push(Recovered {
+            file,
+            original,
+            saved_at,
+        });
     }
     out
 }
@@ -114,7 +122,10 @@ mod tests {
         write("k1".into(), Some(Path::new("/docs/manual.xml")), &doc);
         let found = find();
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].original.as_deref(), Some(Path::new("/docs/manual.xml")));
+        assert_eq!(
+            found[0].original.as_deref(),
+            Some(Path::new("/docs/manual.xml"))
+        );
         assert!(found[0].describe().starts_with("manual.xml"));
         assert_eq!(found[0].load().unwrap().to_xml(), "<a>unsaved</a>");
         discard("k1".into());

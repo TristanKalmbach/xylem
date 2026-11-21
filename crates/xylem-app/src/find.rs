@@ -134,7 +134,11 @@ impl FindState {
         let n = self.matches.len();
         let mut i = self.next_from_caret(ds, forward)?;
         if Some(i) == self.current && n > 0 {
-            i = if forward { (i + 1) % n } else { (i + n - 1) % n };
+            i = if forward {
+                (i + 1) % n
+            } else {
+                (i + n - 1) % n
+            };
         }
         self.current = Some(i);
         let m = self.matches[i].clone();

@@ -21,7 +21,8 @@ pub struct FunctionContext<'a> {
 }
 
 /// Signature of a user-supplied function.
-pub type CustomFunction = dyn Fn(&FunctionContext<'_>, &[Value]) -> Result<Value, XPathError> + Send + Sync;
+pub type CustomFunction =
+    dyn Fn(&FunctionContext<'_>, &[Value]) -> Result<Value, XPathError> + Send + Sync;
 
 /// Variables, namespace prefixes and custom functions available to an expression.
 #[derive(Clone, Default)]
@@ -46,7 +47,11 @@ impl Context {
     ///
     /// Without a mapping, `prefix:name` is compared literally against the
     /// qualified name as written in the document.
-    pub fn set_namespace(&mut self, prefix: impl Into<String>, uri: impl Into<String>) -> &mut Self {
+    pub fn set_namespace(
+        &mut self,
+        prefix: impl Into<String>,
+        uri: impl Into<String>,
+    ) -> &mut Self {
         self.namespaces.insert(prefix.into(), uri.into());
         self
     }

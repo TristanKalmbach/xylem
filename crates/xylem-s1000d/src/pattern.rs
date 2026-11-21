@@ -64,7 +64,10 @@ impl Class {
 
 impl Pattern {
     pub fn new(source: &str) -> Result<Pattern, String> {
-        let mut parser = Parser { chars: source.chars().collect(), pos: 0 };
+        let mut parser = Parser {
+            chars: source.chars().collect(),
+            pos: 0,
+        };
         let alt = parser.alternation()?;
         if parser.pos < parser.chars.len() {
             return Err(format!("unmatched ')' at position {}", parser.pos));
@@ -131,9 +134,10 @@ impl Parser {
         let c = self.peek().ok_or("dangling '\\'")?;
         self.pos += 1;
         Ok(match c {
-            'd' | 'D' | 'w' | 'W' | 's' | 'S' => {
-                Atom::Class(Class { negated: false, items: vec![ClassItem::Shorthand(c)] })
-            }
+            'd' | 'D' | 'w' | 'W' | 's' | 'S' => Atom::Class(Class {
+                negated: false,
+                items: vec![ClassItem::Shorthand(c)],
+            }),
             'n' => Atom::Char('\n'),
             't' => Atom::Char('\t'),
             'r' => Atom::Char('\r'),
@@ -203,7 +207,10 @@ impl Parser {
                 Ok((0, Some(1)))
             }
             Some('{') => {
-                let close = self.chars[self.pos..].iter().position(|&c| c == '}').ok_or("missing '}'")?;
+                let close = self.chars[self.pos..]
+                    .iter()
+                    .position(|&c| c == '}')
+                    .ok_or("missing '}'")?;
                 let body: String = self.chars[self.pos + 1..self.pos + close].iter().collect();
                 self.pos += close + 1;
                 let bad = || format!("invalid quantifier {{{body}}}");
@@ -212,10 +219,13 @@ impl Parser {
                         let n = body.trim().parse().map_err(|_| bad())?;
                         (n, Some(n))
                     }
-                    Some((lo, hi)) if hi.trim().is_empty() => (lo.trim().parse().map_err(|_| bad())?, None),
-                    Some((lo, hi)) => {
-                        (lo.trim().parse().map_err(|_| bad())?, Some(hi.trim().parse().map_err(|_| bad())?))
+                    Some((lo, hi)) if hi.trim().is_empty() => {
+                        (lo.trim().parse().map_err(|_| bad())?, None)
                     }
+                    Some((lo, hi)) => (
+                        lo.trim().parse().map_err(|_| bad())?,
+                        Some(hi.trim().parse().map_err(|_| bad())?),
+                    ),
                 };
                 if max.is_some_and(|m| m < min) {
                     return Err(bad());
@@ -236,7 +246,9 @@ fn match_alt(alt: &Alt, s: &[char], pos: usize, k: Continuation<'_>) -> bool {
 fn match_seq(seq: &[Piece], s: &[char], pos: usize, k: Continuation<'_>) -> bool {
     match seq.split_first() {
         None => k(pos),
-        Some((piece, rest)) => match_piece(piece, 0, s, pos, &mut |p| match_seq(rest, s, p, &mut *k)),
+        Some((piece, rest)) => {
+            match_piece(piece, 0, s, pos, &mut |p| match_seq(rest, s, p, &mut *k))
+        }
     }
 }
 
@@ -271,7 +283,9 @@ mod tests {
     use super::*;
 
     fn m(pattern: &str, text: &str) -> bool {
-        Pattern::new(pattern).unwrap_or_else(|e| panic!("{pattern}: {e}")).is_match(text)
+        Pattern::new(pattern)
+            .unwrap_or_else(|e| panic!("{pattern}: {e}"))
+            .is_match(text)
     }
 
     #[test]

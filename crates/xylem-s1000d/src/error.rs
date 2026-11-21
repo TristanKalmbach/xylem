@@ -25,7 +25,11 @@ impl fmt::Display for S1000dError {
             S1000dError::Io(e) => write!(f, "I/O error: {e}"),
             S1000dError::Xml(e) => write!(f, "XML error: {e}"),
             S1000dError::Unsupported { issue, kind } => {
-                write!(f, "no {} template for S1000D issue {issue}", kind.display_name())
+                write!(
+                    f,
+                    "no {} template for S1000D issue {issue}",
+                    kind.display_name()
+                )
             }
         }
     }

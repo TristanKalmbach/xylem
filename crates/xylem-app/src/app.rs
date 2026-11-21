@@ -220,7 +220,13 @@ impl XylemApp {
         if !scripted {
             app.recovery = crate::autosave::find();
             if app.pending_open.is_empty() && app.settings.restore_session {
-                app.pending_open = app.settings.last_session.iter().filter(|p| p.is_file()).cloned().collect();
+                app.pending_open = app
+                    .settings
+                    .last_session
+                    .iter()
+                    .filter(|p| p.is_file())
+                    .cloned()
+                    .collect();
             }
         }
         app
@@ -473,7 +479,10 @@ impl XylemApp {
         }
     }
 
-    fn with_editor_result<T>(&mut self, f: impl FnOnce(&mut xylem_edit::Editor, &dyn Rules) -> Result<T, EditError>) -> Option<Result<T, EditError>> {
+    fn with_editor_result<T>(
+        &mut self,
+        f: impl FnOnce(&mut xylem_edit::Editor, &dyn Rules) -> Result<T, EditError>,
+    ) -> Option<Result<T, EditError>> {
         let ds = self.docs.get_mut(self.active)?;
         if ds.read_only || ds.view == View::Source {
             return None;
@@ -755,12 +764,22 @@ impl XylemApp {
                 self.with_editor(|ed, r| ed.table_move_row(r, false));
             }
             Cmd::PrettyPrint => {
-                let Some(ds) = self.docs.get(self.active) else { return };
+                let Some(ds) = self.docs.get(self.active) else {
+                    return;
+                };
                 let pp = ds.package.pretty_print.clone();
                 let indent = pp.indent_amount.unwrap_or(2) as usize;
                 // Elements that the customization lists without "indent content".
-                let flat = move |name: &str| pp.elements.get(name).is_some_and(|e| !e.indent_content && (e.newline_before_start_tag || e.newline_before_end_tag));
-                let opts = xylem_edit::format::FormatOptions { indent, flat: &flat };
+                let flat = move |name: &str| {
+                    pp.elements.get(name).is_some_and(|e| {
+                        !e.indent_content
+                            && (e.newline_before_start_tag || e.newline_before_end_tag)
+                    })
+                };
+                let opts = xylem_edit::format::FormatOptions {
+                    indent,
+                    flat: &flat,
+                };
                 if self.with_editor(|ed, r| ed.reformat(r, &opts)).is_some() {
                     self.toast("Formatted the document (one undo step).", false);
                 }
@@ -796,7 +815,9 @@ impl XylemApp {
                         if on {
                             // Keep the caret outside the hidden content.
                             let doc = &ds.editor.doc;
-                            if let (Some(parent), Some(i)) = (doc.parent(el), doc.index_in_parent(el)) {
+                            if let (Some(parent), Some(i)) =
+                                (doc.parent(el), doc.index_in_parent(el))
+                            {
                                 ds.editor.set_caret(Pos::new(parent, i));
                             }
                         }
@@ -826,7 +847,11 @@ impl XylemApp {
                 if let Some(ds) = self.docs.get(self.active)
                     && ds.view != View::Source
                 {
-                    self.palette = Some(Palette { query: String::new(), selected: 0, surround: !ds.editor.sel.is_caret() });
+                    self.palette = Some(Palette {
+                        query: String::new(),
+                        selected: 0,
+                        surround: !ds.editor.sel.is_caret(),
+                    });
                 }
             }
             Cmd::FindNext(forward) => {
@@ -834,10 +859,17 @@ impl XylemApp {
                     self.find.open = true;
                     return;
                 }
-                let Some(ds) = self.docs.get(self.active) else { return };
-                if let Some(crate::find::FindAction::Goto(node, range)) = self.find.step(ds, forward) {
+                let Some(ds) = self.docs.get(self.active) else {
+                    return;
+                };
+                if let Some(crate::find::FindAction::Goto(node, range)) =
+                    self.find.step(ds, forward)
+                {
                     let ds = self.docs.get_mut(self.active).unwrap();
-                    ds.editor.sel = Selection { anchor: Pos::new(node, range.start), focus: Pos::new(node, range.end) };
+                    ds.editor.sel = Selection {
+                        anchor: Pos::new(node, range.start),
+                        focus: Pos::new(node, range.end),
+                    };
                     ds.canvas.scroll_to_caret = true;
                     ds.canvas.request_focus = true;
                 }
@@ -873,7 +905,9 @@ impl XylemApp {
     /// caret. Returns false when the document has no image element configured.
     fn insert_image_file(&mut self, file: &Path) -> bool {
         let file = &std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
-        let Some(ds) = self.docs.get(self.active) else { return false };
+        let Some(ds) = self.docs.get(self.active) else {
+            return false;
+        };
         if ds.view == View::Source || ds.package.behaviour.images.is_empty() {
             return false;
         }
@@ -883,7 +917,10 @@ impl XylemApp {
         // other markup gets a path relative to the document when possible.
         let reference = |attr: &str| -> String {
             if attr == "infoEntityIdent" || attr == "boardno" {
-                return file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                return file
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
             }
             match dir.as_deref().and_then(|d| file.strip_prefix(d).ok()) {
                 Some(rel) => rel.to_string_lossy().replace('\\', "/"),
@@ -896,7 +933,8 @@ impl XylemApp {
             xylem_dom::escape_attr(&reference(&img.source_attr), &mut xml);
             xml.push_str("\"/>");
             let name = img.element.clone();
-            match self.with_editor_result(|ed, r| ed.insert_element_xml(r, &name, &xml).map(|_| ())) {
+            match self.with_editor_result(|ed, r| ed.insert_element_xml(r, &name, &xml).map(|_| ()))
+            {
                 Some(Ok(())) => {
                     self.after_insert();
                     return true;
@@ -909,8 +947,15 @@ impl XylemApp {
         // or required content holds the image element (e.g. a figure).
         let ds = self.docs.get(self.active).unwrap();
         for img in &ds.package.behaviour.images {
-            if let Some((name, xml)) = image_container_xml(ds, &img.element, &img.source_attr, &reference(&img.source_attr)) {
-                match self.with_editor_result(|ed, r| ed.insert_element_xml(r, &name, &xml).map(|_| ())) {
+            if let Some((name, xml)) = image_container_xml(
+                ds,
+                &img.element,
+                &img.source_attr,
+                &reference(&img.source_attr),
+            ) {
+                match self
+                    .with_editor_result(|ed, r| ed.insert_element_xml(r, &name, &xml).map(|_| ()))
+                {
                     Some(Ok(())) => {
                         self.after_insert();
                         return true;
@@ -1269,7 +1314,6 @@ impl XylemApp {
             if i.consume_shortcut(&shs(Key::V)) {
                 cmds.push(Cmd::PasteText);
             }
-
         });
         cmds
     }
@@ -1406,16 +1450,28 @@ impl XylemApp {
                     }
                 }
                 ui.separator();
-                if ui.add_enabled(has_doc, egui::Button::new("Collapse element\tCtrl+Shift+-")).clicked() {
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Collapse element\tCtrl+Shift+-"))
+                    .clicked()
+                {
                     cmds.push(Cmd::Collapse(true));
                 }
-                if ui.add_enabled(has_doc, egui::Button::new("Expand element\tCtrl+Shift+=")).clicked() {
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Expand element\tCtrl+Shift+="))
+                    .clicked()
+                {
                     cmds.push(Cmd::Collapse(false));
                 }
-                if ui.add_enabled(has_doc, egui::Button::new("Collapse children")).clicked() {
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Collapse children"))
+                    .clicked()
+                {
                     cmds.push(Cmd::CollapseChildren);
                 }
-                if ui.add_enabled(has_doc, egui::Button::new("Expand all")).clicked() {
+                if ui
+                    .add_enabled(has_doc, egui::Button::new("Expand all"))
+                    .clicked()
+                {
                     cmds.push(Cmd::ExpandAll);
                 }
                 ui.separator();
@@ -1799,7 +1855,11 @@ impl XylemApp {
                 CanvasAction::EditAttributes(_) => self.settings.show_attributes = true,
                 CanvasAction::EditNode(n) => {
                     if rules.is_protected(&ds.editor.doc, n) {
-                        self.toasts.push(("This marker is protected and can't be edited.".into(), 0.0, true));
+                        self.toasts.push((
+                            "This marker is protected and can't be edited.".into(),
+                            0.0,
+                            true,
+                        ));
                         continue;
                     }
                     let (target, text) = match ds.editor.doc.kind(n) {
@@ -1908,8 +1968,13 @@ impl XylemApp {
                             &mut picked,
                         );
                         item(ui, "Edit attributes", Cmd::EditAttributes, &mut picked);
-                    item(ui, &format!("Collapse <{name}>"), Cmd::Collapse(true), &mut picked);
-                    item(ui, "Collapse children", Cmd::CollapseChildren, &mut picked);
+                        item(
+                            ui,
+                            &format!("Collapse <{name}>"),
+                            Cmd::Collapse(true),
+                            &mut picked,
+                        );
+                        item(ui, "Collapse children", Cmd::CollapseChildren, &mut picked);
                         item(ui, "Follow link", Cmd::FollowLink(menu.node), &mut picked);
                     }
                     if in_table {
@@ -2592,8 +2657,18 @@ impl XylemApp {
                     _ => ds.editor.doc.to_xml(),
                 };
                 let _ = std::fs::write(&p, xml);
-                let errors = ds.issues.iter().filter(|i| i.severity == Severity::Error).count();
-                eprintln!("script save {}: {} issue(s), {} error(s), dirty={}", p.display(), ds.issues.len(), errors, ds.is_dirty());
+                let errors = ds
+                    .issues
+                    .iter()
+                    .filter(|i| i.severity == Severity::Error)
+                    .count();
+                eprintln!(
+                    "script save {}: {} issue(s), {} error(s), dirty={}",
+                    p.display(),
+                    ds.issues.len(),
+                    errors,
+                    ds.is_dirty()
+                );
                 for i in ds.issues.iter().take(5) {
                     eprintln!("  [{}] {}", i.source, i.message);
                 }
@@ -2671,11 +2746,16 @@ struct Palette {
 impl XylemApp {
     /// Element names offered at the caret: valid ones first.
     fn palette_items(&self, surround: bool) -> Vec<(String, bool)> {
-        let Some(ds) = self.docs.get(self.active) else { return Vec::new() };
+        let Some(ds) = self.docs.get(self.active) else {
+            return Vec::new();
+        };
         let doc = &ds.editor.doc;
         let Some(g) = ds.grammar.as_deref() else {
             // No schema: offer the element names the document already uses.
-            let mut names: Vec<String> = doc.descendants(doc.root()).filter_map(|n| doc.name(n).map(str::to_string)).collect();
+            let mut names: Vec<String> = doc
+                .descendants(doc.root())
+                .filter_map(|n| doc.name(n).map(str::to_string))
+                .collect();
             names.sort();
             names.dedup();
             return names.into_iter().map(|n| (n, true)).collect();
@@ -2683,10 +2763,13 @@ impl XylemApp {
         let mut items: Vec<(String, bool)> = if surround {
             let (a, _) = ds.editor.sel.ordered(doc);
             let parent = container(doc, a);
-            g.all_element_names().into_iter().map(|n| {
-                let ok = g.can_insert(doc, parent, 0, &n);
-                (n, ok)
-            }).collect()
+            g.all_element_names()
+                .into_iter()
+                .map(|n| {
+                    let ok = g.can_insert(doc, parent, 0, &n);
+                    (n, ok)
+                })
+                .collect()
         } else {
             let (mut parent, mut index) = ds.editor.insertion_point();
             let mut v: Vec<(String, bool)> = Vec::new();
@@ -2697,13 +2780,18 @@ impl XylemApp {
                         v.push((i.name, i.keeps_valid));
                     }
                 }
-                let Some(up) = doc.parent(parent).filter(|&p| doc.is_element(p)) else { break };
+                let Some(up) = doc.parent(parent).filter(|&p| doc.is_element(p)) else {
+                    break;
+                };
                 index = doc.index_in_parent(parent).unwrap_or(0) + 1;
                 parent = up;
             }
             v
         };
-        items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+        items.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+        });
         items
     }
 
@@ -2726,46 +2814,66 @@ impl XylemApp {
         let mut chosen: Option<String> = None;
         let pal = self.palette.as_mut().unwrap();
         pal.selected = pal.selected.min(items.len().saturating_sub(1));
-        egui::Area::new(egui::Id::new("xylem-palette")).fixed_pos(anchor).order(egui::Order::Foreground).show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.set_width(260.0);
-                ui.label(RichText::new(if surround { "Surround selection with…" } else { "Insert element…" }).weak());
-                let edit = ui.add(egui::TextEdit::singleline(&mut pal.query).hint_text("type to filter").desired_width(f32::INFINITY));
-                edit.request_focus();
-                if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
-                    pal.selected = (pal.selected + 1).min(items.len().saturating_sub(1));
-                }
-                if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
-                    pal.selected = pal.selected.saturating_sub(1);
-                }
-                if ui.input(|i| i.key_pressed(Key::Escape)) {
-                    close = true;
-                }
-                if ui.input(|i| i.key_pressed(Key::Enter)) {
-                    chosen = items.get(pal.selected).map(|i| i.0.clone());
-                }
-                egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                    if items.is_empty() {
-                        ui.label(RichText::new("Nothing matches here.").weak());
+        egui::Area::new(egui::Id::new("xylem-palette"))
+            .fixed_pos(anchor)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(260.0);
+                    ui.label(
+                        RichText::new(if surround {
+                            "Surround selection with…"
+                        } else {
+                            "Insert element…"
+                        })
+                        .weak(),
+                    );
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut pal.query)
+                            .hint_text("type to filter")
+                            .desired_width(f32::INFINITY),
+                    );
+                    edit.request_focus();
+                    if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
+                        pal.selected = (pal.selected + 1).min(items.len().saturating_sub(1));
                     }
-                    for (k, (name, valid)) in items.iter().enumerate() {
-                        let mut text = RichText::new(name);
-                        if !valid {
-                            text = text.weak();
-                        }
-                        let r = ui.selectable_label(k == pal.selected, text);
-                        if k == pal.selected {
-                            r.scroll_to_me(None);
-                        }
-                        if r.clicked() {
-                            chosen = Some(name.clone());
-                        }
+                    if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
+                        pal.selected = pal.selected.saturating_sub(1);
                     }
+                    if ui.input(|i| i.key_pressed(Key::Escape)) {
+                        close = true;
+                    }
+                    if ui.input(|i| i.key_pressed(Key::Enter)) {
+                        chosen = items.get(pal.selected).map(|i| i.0.clone());
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(260.0)
+                        .show(ui, |ui| {
+                            if items.is_empty() {
+                                ui.label(RichText::new("Nothing matches here.").weak());
+                            }
+                            for (k, (name, valid)) in items.iter().enumerate() {
+                                let mut text = RichText::new(name);
+                                if !valid {
+                                    text = text.weak();
+                                }
+                                let r = ui.selectable_label(k == pal.selected, text);
+                                if k == pal.selected {
+                                    r.scroll_to_me(None);
+                                }
+                                if r.clicked() {
+                                    chosen = Some(name.clone());
+                                }
+                            }
+                        });
                 });
             });
-        });
         if let Some(name) = chosen {
-            cmds.push(if surround { Cmd::Surround(name) } else { Cmd::InsertElement(name) });
+            cmds.push(if surround {
+                Cmd::Surround(name)
+            } else {
+                Cmd::InsertElement(name)
+            });
             close = true;
         }
         if close {
@@ -2781,10 +2889,19 @@ impl XylemApp {
             return;
         }
         const KEYS: &[(&str, &str)] = &[
-            ("Ctrl+Space", "Insert an element (or surround the selection)"),
-            ("Enter", "Split the element, or start the element that follows it"),
+            (
+                "Ctrl+Space",
+                "Insert an element (or surround the selection)",
+            ),
+            (
+                "Enter",
+                "Split the element, or start the element that follows it",
+            ),
             ("Shift+Enter", "Line break inside the text"),
-            ("Ctrl+B / I / U", "Bold / italic / underline (per document type)"),
+            (
+                "Ctrl+B / I / U",
+                "Bold / italic / underline (per document type)",
+            ),
             ("Ctrl+E", "Select the current element"),
             ("Ctrl+Shift+- / =", "Collapse / expand the current element"),
             ("Tab / Shift+Tab", "Next / previous table cell"),
@@ -2792,22 +2909,32 @@ impl XylemApp {
             ("Double-click a tag", "Edit the element's attributes"),
             ("Ctrl+Z / Ctrl+Y", "Undo / redo"),
             ("Ctrl+Shift+V", "Paste as plain text"),
-            ("Ctrl+F, F3, Shift+F3", "Find and replace, find next, find previous"),
+            (
+                "Ctrl+F, F3, Shift+F3",
+                "Find and replace, find next, find previous",
+            ),
             ("F5 / F6 / F8", "Tags On / Normal / Source view"),
             ("F7", "Validate"),
             ("Ctrl+S, Ctrl+Shift+S", "Save, save as"),
             ("Ctrl+O, Ctrl+N, Ctrl+W", "Open, new, close"),
             ("Ctrl++ / Ctrl+- / Ctrl+0", "Zoom in / out / reset"),
         ];
-        egui::Window::new("Keyboard shortcuts").open(&mut self.shortcuts_open).resizable(false).show(ctx, |ui| {
-            egui::Grid::new("keys").num_columns(2).striped(true).spacing([16.0, 4.0]).show(ui, |ui| {
-                for (k, what) in KEYS {
-                    ui.label(RichText::new(*k).monospace());
-                    ui.label(*what);
-                    ui.end_row();
-                }
+        egui::Window::new("Keyboard shortcuts")
+            .open(&mut self.shortcuts_open)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::Grid::new("keys")
+                    .num_columns(2)
+                    .striped(true)
+                    .spacing([16.0, 4.0])
+                    .show(ui, |ui| {
+                        for (k, what) in KEYS {
+                            ui.label(RichText::new(*k).monospace());
+                            ui.label(*what);
+                            ui.end_row();
+                        }
+                    });
             });
-        });
     }
 
     fn show_recovery(&mut self, ctx: &egui::Context) {
@@ -2816,22 +2943,25 @@ impl XylemApp {
         }
         let mut open_items = Vec::new();
         let mut discard_all = false;
-        egui::Window::new("Recover unsaved work").collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.label("Xylem closed without saving these documents. Open the recovered copies?");
-            ui.add_space(4.0);
-            for (k, r) in self.recovery.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(r.describe());
-                    if ui.button("Open").clicked() {
-                        open_items.push(k);
-                    }
-                });
-            }
-            ui.add_space(4.0);
-            if ui.button("Discard all").clicked() {
-                discard_all = true;
-            }
-        });
+        egui::Window::new("Recover unsaved work")
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label("Xylem closed without saving these documents. Open the recovered copies?");
+                ui.add_space(4.0);
+                for (k, r) in self.recovery.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(r.describe());
+                        if ui.button("Open").clicked() {
+                            open_items.push(k);
+                        }
+                    });
+                }
+                ui.add_space(4.0);
+                if ui.button("Discard all").clicked() {
+                    discard_all = true;
+                }
+            });
         for k in open_items.into_iter().rev() {
             let r = self.recovery.remove(k);
             match r.load() {
@@ -2852,7 +2982,8 @@ impl XylemApp {
 
     /// Writes unsaved documents to the autosave folder every few seconds.
     fn autosave_tick(&mut self, ctx: &egui::Context) {
-        if self.settings.autosave_seconds == 0 || self.script.is_some() || self.screenshot.is_some() {
+        if self.settings.autosave_seconds == 0 || self.script.is_some() || self.screenshot.is_some()
+        {
             return;
         }
         let now = ctx.input(|i| i.time);
@@ -3001,15 +3132,27 @@ fn load_texture(ctx: &egui::Context, p: &Path) -> Option<egui::TextureHandle> {
 /// Markup for an element that may be inserted at the caret and contains the
 /// image element (from the package template or the schema's required
 /// content), with the image's source attribute filled in.
-fn image_container_xml(ds: &DocState, image: &str, attr: &str, value: &str) -> Option<(String, String)> {
+fn image_container_xml(
+    ds: &DocState,
+    image: &str,
+    attr: &str,
+    value: &str,
+) -> Option<(String, String)> {
     let g = ds.grammar.as_deref()?;
     let doc = &ds.editor.doc;
     // Candidate positions: the caret, then after each enclosing element.
     let (mut parent, mut index) = ds.editor.insertion_point();
     let mut candidates = Vec::new();
     loop {
-        candidates.extend(g.insertable_at(doc, parent, index).into_iter().filter(|i| i.keeps_valid).map(|i| (i.name, i.decl)));
-        let Some(up) = doc.parent(parent).filter(|&p| doc.is_element(p)) else { break };
+        candidates.extend(
+            g.insertable_at(doc, parent, index)
+                .into_iter()
+                .filter(|i| i.keeps_valid)
+                .map(|i| (i.name, i.decl)),
+        );
+        let Some(up) = doc.parent(parent).filter(|&p| doc.is_element(p)) else {
+            break;
+        };
         index = doc.index_in_parent(parent).unwrap_or(0) + 1;
         parent = up;
     }
@@ -3020,20 +3163,31 @@ fn image_container_xml(ds: &DocState, image: &str, attr: &str, value: &str) -> O
             .map(|t| t.xml.clone())
             .filter(|x| x.contains(&format!("<{image}")))
             .unwrap_or_else(|| crate::doc::skeleton_xml(&g.required_skeleton(decl)));
-        let Ok(mut frag) = xylem_dom::parse_fragment(&xml) else { continue };
-        let target = frag.descendants(frag.root()).find(|&n| frag.name(n) == Some(image));
+        let Ok(mut frag) = xylem_dom::parse_fragment(&xml) else {
+            continue;
+        };
+        let target = frag
+            .descendants(frag.root())
+            .find(|&n| frag.name(n) == Some(image));
         let Some(target) = target else { continue };
         frag.set_attr(target, attr, value);
-        let out: String = frag.children(frag.root()).iter().map(|&c| frag.node_to_xml(c)).collect();
+        let out: String = frag
+            .children(frag.root())
+            .iter()
+            .map(|&c| frag.node_to_xml(c))
+            .collect();
         return Some((name, out));
     }
     None
 }
 
 fn is_image_file(p: &Path) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "svg" | "cgm" | "webp"))
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        matches!(
+            e.to_ascii_lowercase().as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "svg" | "cgm" | "webp"
+        )
+    })
 }
 
 fn parse_color(s: &str) -> Option<Color32> {

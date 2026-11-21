@@ -103,7 +103,11 @@ impl Speller {
 
     /// Misspelled words in all text nodes (skips code-like elements). Results
     /// are cached per text node and recomputed only when its text changes.
-    pub fn check_document(&self, doc: &Document, cache: &mut SpellCache) -> Vec<(NodeId, Range<usize>)> {
+    pub fn check_document(
+        &self,
+        doc: &Document,
+        cache: &mut SpellCache,
+    ) -> Vec<(NodeId, Range<usize>)> {
         use std::hash::{Hash, Hasher};
         let mut out = Vec::new();
         let mut seen = HashSet::new();
@@ -112,7 +116,14 @@ impl Speller {
             let skip = doc.parent(n).and_then(|p| doc.name(p)).is_some_and(|name| {
                 matches!(
                     xylem_dom::local_name(name),
-                    "code" | "codeph" | "verbatimText" | "pre" | "programlisting" | "dmCode" | "partNumber" | "identNumber"
+                    "code"
+                        | "codeph"
+                        | "verbatimText"
+                        | "pre"
+                        | "programlisting"
+                        | "dmCode"
+                        | "partNumber"
+                        | "identNumber"
                 )
             });
             if skip {
@@ -175,13 +186,18 @@ mod tests {
     fn speller() -> Speller {
         let aff = "SET UTF-8\nTRY esianrtolcdugmphbyfvkwz\n";
         let dic = "3\nhello\nworld\nhydraulic\n";
-        Speller { dict: spellbook::Dictionary::new(aff, dic).unwrap(), user_words: HashSet::new(), user_file: None }
+        Speller {
+            dict: spellbook::Dictionary::new(aff, dic).unwrap(),
+            user_words: HashSet::new(),
+            user_file: None,
+        }
     }
 
     #[test]
     fn flags_misspellings_and_caches_per_node() {
         let sp = speller();
-        let doc = Document::from_str("<doc><p>hello wrold</p><p>hydraulic ABC 42x</p></doc>").unwrap();
+        let doc =
+            Document::from_str("<doc><p>hello wrold</p><p>hydraulic ABC 42x</p></doc>").unwrap();
         let mut cache = SpellCache::new();
         let found = sp.check_document(&doc, &mut cache);
         assert_eq!(found.len(), 1);

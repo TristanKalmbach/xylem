@@ -8,7 +8,9 @@ use xylem_dom::{Document, NodeId, NodeKind};
 use crate::ast::{Axis, BinOp, Expr, NodeTest, PathExpr, PathStart, Step};
 use crate::context::{Context, FunctionContext};
 use crate::error::XPathError;
-use crate::value::{Value, XNode, is_namespace_decl, is_xpath_node, string_to_number, string_value};
+use crate::value::{
+    Value, XNode, is_namespace_decl, is_xpath_node, string_to_number, string_value,
+};
 
 const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
 
@@ -51,9 +53,25 @@ pub(crate) struct Evaluator<'a> {
     index: OnceCell<Index>,
 }
 
-pub(crate) fn evaluate(expr: &Expr, doc: &Document, node: XNode, ctx: &Context) -> Result<Value, XPathError> {
-    let ev = Evaluator { doc, ctx, index: OnceCell::new() };
-    ev.eval(expr, &Dyn { node, position: 1, size: 1 })
+pub(crate) fn evaluate(
+    expr: &Expr,
+    doc: &Document,
+    node: XNode,
+    ctx: &Context,
+) -> Result<Value, XPathError> {
+    let ev = Evaluator {
+        doc,
+        ctx,
+        index: OnceCell::new(),
+    };
+    ev.eval(
+        expr,
+        &Dyn {
+            node,
+            position: 1,
+            size: 1,
+        },
+    )
 }
 
 impl<'a> Evaluator<'a> {
@@ -62,7 +80,11 @@ impl<'a> Evaluator<'a> {
     }
 
     fn pre(&self, id: NodeId) -> u32 {
-        self.index().pre.get(id.index()).copied().unwrap_or(u32::MAX)
+        self.index()
+            .pre
+            .get(id.index())
+            .copied()
+            .unwrap_or(u32::MAX)
     }
 
     fn sibling_index(&self, id: NodeId) -> usize {
@@ -100,8 +122,12 @@ impl<'a> Evaluator<'a> {
                 Some(v) => Ok(v.clone()),
                 None => Err(XPathError::eval(format!("undefined variable ${name}"))),
             },
-            Expr::Or(a, b) => Ok(Value::Boolean(self.eval(a, d)?.to_boolean() || self.eval(b, d)?.to_boolean())),
-            Expr::And(a, b) => Ok(Value::Boolean(self.eval(a, d)?.to_boolean() && self.eval(b, d)?.to_boolean())),
+            Expr::Or(a, b) => Ok(Value::Boolean(
+                self.eval(a, d)?.to_boolean() || self.eval(b, d)?.to_boolean(),
+            )),
+            Expr::And(a, b) => Ok(Value::Boolean(
+                self.eval(a, d)?.to_boolean() && self.eval(b, d)?.to_boolean(),
+            )),
             Expr::Neg(e) => Ok(Value::Number(-self.eval(e, d)?.to_number(self.doc))),
             Expr::Binary(op, a, b) => {
                 let l = self.eval(a, d)?;
@@ -138,7 +164,10 @@ impl<'a> Evaluator<'a> {
     fn eval_node_set(&self, expr: &Expr, d: &Dyn, what: &str) -> Result<Vec<XNode>, XPathError> {
         match self.eval(expr, d)? {
             Value::NodeSet(n) => Ok(n),
-            other => Err(XPathError::eval(format!("{what} requires a node-set, found a {}", other.type_name()))),
+            other => Err(XPathError::eval(format!(
+                "{what} requires a node-set, found a {}",
+                other.type_name()
+            ))),
         }
     }
 
@@ -176,16 +205,35 @@ impl<'a> Evaluator<'a> {
                 left.iter().any(|l| right.iter().any(|r| l != r))
             }
             _ => {
-                let left: Vec<f64> = x.iter().map(|&n| string_to_number(&string_value(self.doc, n))).collect();
-                let right: Vec<f64> = y.iter().map(|&n| string_to_number(&string_value(self.doc, n))).collect();
-                left.iter().any(|&l| right.iter().any(|&r| compare_numbers(op, l, r)))
+                let left: Vec<f64> = x
+                    .iter()
+                    .map(|&n| string_to_number(&string_value(self.doc, n)))
+                    .collect();
+                let right: Vec<f64> = y
+                    .iter()
+                    .map(|&n| string_to_number(&string_value(self.doc, n)))
+                    .collect();
+                left.iter()
+                    .any(|&l| right.iter().any(|&r| compare_numbers(op, l, r)))
             }
         }
     }
 
     /// `swapped` is true when the node-set was the right-hand operand.
-    fn compare_set_scalar(&self, op: BinOp, nodes: &[XNode], scalar: &Value, swapped: bool) -> bool {
-        let ordered = |l: f64, r: f64| if swapped { compare_numbers(op, r, l) } else { compare_numbers(op, l, r) };
+    fn compare_set_scalar(
+        &self,
+        op: BinOp,
+        nodes: &[XNode],
+        scalar: &Value,
+        swapped: bool,
+    ) -> bool {
+        let ordered = |l: f64, r: f64| {
+            if swapped {
+                compare_numbers(op, r, l)
+            } else {
+                compare_numbers(op, l, r)
+            }
+        };
         match scalar {
             Value::Boolean(b) => {
                 let set_bool = !nodes.is_empty();
@@ -195,15 +243,17 @@ impl<'a> Evaluator<'a> {
                     ordered(f64::from(u8::from(set_bool)), f64::from(u8::from(*b)))
                 }
             }
-            Value::Number(n) => {
-                nodes.iter().any(|&node| ordered(string_to_number(&string_value(self.doc, node)), *n))
-            }
+            Value::Number(n) => nodes
+                .iter()
+                .any(|&node| ordered(string_to_number(&string_value(self.doc, node)), *n)),
             Value::String(s) => match op {
                 BinOp::Eq => nodes.iter().any(|&node| string_value(self.doc, node) == *s),
                 BinOp::Neq => nodes.iter().any(|&node| string_value(self.doc, node) != *s),
                 _ => {
                     let n = string_to_number(s);
-                    nodes.iter().any(|&node| ordered(string_to_number(&string_value(self.doc, node)), n))
+                    nodes
+                        .iter()
+                        .any(|&node| ordered(string_to_number(&string_value(self.doc, node)), n))
                 }
             },
             Value::NodeSet(_) => false,
@@ -272,16 +322,22 @@ impl<'a> Evaluator<'a> {
     fn filter_predicate(&self, nodes: Vec<XNode>, pred: &Expr) -> Result<Vec<XNode>, XPathError> {
         if let Expr::Number(n) = pred {
             let idx = *n;
-            return Ok(if idx >= 1.0 && idx.fract() == 0.0 && (idx as usize) <= nodes.len() {
-                vec![nodes[idx as usize - 1]]
-            } else {
-                Vec::new()
-            });
+            return Ok(
+                if idx >= 1.0 && idx.fract() == 0.0 && (idx as usize) <= nodes.len() {
+                    vec![nodes[idx as usize - 1]]
+                } else {
+                    Vec::new()
+                },
+            );
         }
         let size = nodes.len();
         let mut out = Vec::new();
         for (i, &node) in nodes.iter().enumerate() {
-            let d = Dyn { node, position: i + 1, size };
+            let d = Dyn {
+                node,
+                position: i + 1,
+                size,
+            };
             let keep = match self.eval(pred, &d)? {
                 Value::Number(n) => n == (i + 1) as f64,
                 other => other.to_boolean(),
@@ -298,7 +354,12 @@ impl<'a> Evaluator<'a> {
     }
 
     fn subtree(&self, id: NodeId, out: &mut Vec<XNode>) {
-        out.extend(self.doc.descendants(id).filter(|&n| self.is_xp(n)).map(XNode::Node));
+        out.extend(
+            self.doc
+                .descendants(id)
+                .filter(|&n| self.is_xp(n))
+                .map(XNode::Node),
+        );
     }
 
     /// Nodes on `axis` from `n`, in axis (proximity) order.
@@ -341,7 +402,13 @@ impl<'a> Evaluator<'a> {
             }
             Axis::Child => {
                 if !is_attr {
-                    out.extend(doc.children(id).iter().copied().filter(|&c| self.is_xp(c)).map(XNode::Node));
+                    out.extend(
+                        doc.children(id)
+                            .iter()
+                            .copied()
+                            .filter(|&c| self.is_xp(c))
+                            .map(XNode::Node),
+                    );
                 }
             }
             Axis::Descendant | Axis::DescendantOrSelf => {
@@ -350,7 +417,10 @@ impl<'a> Evaluator<'a> {
                 }
                 if !is_attr {
                     out.extend(
-                        doc.descendants(id).skip(1).filter(|&c| self.is_xp(c)).map(XNode::Node),
+                        doc.descendants(id)
+                            .skip(1)
+                            .filter(|&c| self.is_xp(c))
+                            .map(XNode::Node),
                     );
                 }
             }
@@ -359,9 +429,22 @@ impl<'a> Evaluator<'a> {
                     let kids = doc.children(p);
                     let at = self.sibling_index(id);
                     if axis == Axis::FollowingSibling {
-                        out.extend(kids[at + 1..].iter().copied().filter(|&c| self.is_xp(c)).map(XNode::Node));
+                        out.extend(
+                            kids[at + 1..]
+                                .iter()
+                                .copied()
+                                .filter(|&c| self.is_xp(c))
+                                .map(XNode::Node),
+                        );
                     } else {
-                        out.extend(kids[..at].iter().rev().copied().filter(|&c| self.is_xp(c)).map(XNode::Node));
+                        out.extend(
+                            kids[..at]
+                                .iter()
+                                .rev()
+                                .copied()
+                                .filter(|&c| self.is_xp(c))
+                                .map(XNode::Node),
+                        );
                     }
                 }
             }
@@ -427,17 +510,17 @@ impl<'a> Evaluator<'a> {
                 }
                 XNode::Node(id) => {
                     !principal_attr
-                        && doc.name(id).is_some_and(|name| self.name_matches(q, name, id, false))
+                        && doc
+                            .name(id)
+                            .is_some_and(|name| self.name_matches(q, name, id, false))
                 }
             },
             NodeTest::PrefixWildcard(p) => {
                 let (actual, id, is_attr) = match n {
-                    XNode::Attr(id, i) => {
-                        match doc.element(id).and_then(|e| e.attrs.get(i)) {
-                            Some(a) => (a.name.as_str(), id, true),
-                            None => return false,
-                        }
-                    }
+                    XNode::Attr(id, i) => match doc.element(id).and_then(|e| e.attrs.get(i)) {
+                        Some(a) => (a.name.as_str(), id, true),
+                        None => return false,
+                    },
                     XNode::Node(id) => match doc.name(id) {
                         Some(name) => (name, id, false),
                         None => return false,
@@ -447,8 +530,12 @@ impl<'a> Evaluator<'a> {
                     return false;
                 }
                 match self.ctx.namespaces.get(p) {
-                    Some(uri) => self.namespace_of(actual, id, is_attr).as_deref() == Some(uri.as_str()),
-                    None => actual.split_once(':').is_some_and(|(prefix, _)| prefix == p),
+                    Some(uri) => {
+                        self.namespace_of(actual, id, is_attr).as_deref() == Some(uri.as_str())
+                    }
+                    None => actual
+                        .split_once(':')
+                        .is_some_and(|(prefix, _)| prefix == p),
                 }
             }
         }
@@ -461,7 +548,8 @@ impl<'a> Evaluator<'a> {
             && let Some(uri) = self.ctx.namespaces.get(tp)
         {
             let local = actual.rsplit_once(':').map_or(actual, |(_, l)| l);
-            return local == tl && self.namespace_of(actual, owner, is_attr).as_deref() == Some(uri.as_str());
+            return local == tl
+                && self.namespace_of(actual, owner, is_attr).as_deref() == Some(uri.as_str());
         }
         test == actual
     }
@@ -498,12 +586,23 @@ impl<'a> Evaluator<'a> {
         Ok(self.eval(&args[i], d)?.to_number(self.doc))
     }
 
-    fn arg_nodes(&self, name: &str, args: &[Expr], i: usize, d: &Dyn) -> Result<Vec<XNode>, XPathError> {
+    fn arg_nodes(
+        &self,
+        name: &str,
+        args: &[Expr],
+        i: usize,
+        d: &Dyn,
+    ) -> Result<Vec<XNode>, XPathError> {
         self.eval_node_set(&args[i], d, &format!("{name}()"))
     }
 
     /// The node a name-style function operates on: its argument's first node, or the context node.
-    fn subject_node(&self, name: &str, args: &[Expr], d: &Dyn) -> Result<Option<XNode>, XPathError> {
+    fn subject_node(
+        &self,
+        name: &str,
+        args: &[Expr],
+        d: &Dyn,
+    ) -> Result<Option<XNode>, XPathError> {
         if args.is_empty() {
             Ok(Some(d.node))
         } else {
@@ -533,7 +632,12 @@ impl<'a> Evaluator<'a> {
             for a in args {
                 values.push(self.eval(a, d)?);
             }
-            let fc = FunctionContext { doc: self.doc, node: d.node, position: d.position, size: d.size };
+            let fc = FunctionContext {
+                doc: self.doc,
+                node: d.node,
+                position: d.position,
+                size: d.size,
+            };
             return match f(&fc, &values)? {
                 Value::NodeSet(mut ns) => {
                     self.sort_dedup(&mut ns);
@@ -544,7 +648,9 @@ impl<'a> Evaluator<'a> {
         }
         let arity = |min: usize, max: usize| -> Result<(), XPathError> {
             if args.len() < min || args.len() > max {
-                let expected = if min == max { min.to_string() } else if max == usize::MAX {
+                let expected = if min == max {
+                    min.to_string()
+                } else if max == usize::MAX {
                     format!("at least {min}")
                 } else {
                     format!("{min} to {max}")
@@ -578,12 +684,17 @@ impl<'a> Evaluator<'a> {
                 arity(0, 1)?;
                 let n = self.subject_node(name, args, d)?;
                 let full = n.map(|n| self.node_name(n)).unwrap_or_default();
-                Ok(Value::String(full.rsplit_once(':').map_or(full.clone(), |(_, l)| l.to_string())))
+                Ok(Value::String(
+                    full.rsplit_once(':')
+                        .map_or(full.clone(), |(_, l)| l.to_string()),
+                ))
             }
             "name" => {
                 arity(0, 1)?;
                 let n = self.subject_node(name, args, d)?;
-                Ok(Value::String(n.map(|n| self.node_name(n)).unwrap_or_default()))
+                Ok(Value::String(
+                    n.map(|n| self.node_name(n)).unwrap_or_default(),
+                ))
             }
             "namespace-uri" => {
                 arity(0, 1)?;
@@ -614,38 +725,67 @@ impl<'a> Evaluator<'a> {
             }
             "starts-with" => {
                 arity(2, 2)?;
-                Ok(Value::Boolean(self.arg_string(args, 0, d)?.starts_with(&self.arg_string(args, 1, d)?)))
+                Ok(Value::Boolean(
+                    self.arg_string(args, 0, d)?
+                        .starts_with(&self.arg_string(args, 1, d)?),
+                ))
             }
             "contains" => {
                 arity(2, 2)?;
-                Ok(Value::Boolean(self.arg_string(args, 0, d)?.contains(&self.arg_string(args, 1, d)?)))
+                Ok(Value::Boolean(
+                    self.arg_string(args, 0, d)?
+                        .contains(&self.arg_string(args, 1, d)?),
+                ))
             }
             "substring-before" => {
                 arity(2, 2)?;
                 let (s, pat) = (self.arg_string(args, 0, d)?, self.arg_string(args, 1, d)?);
-                Ok(Value::String(s.find(&pat).map(|i| s[..i].to_string()).unwrap_or_default()))
+                Ok(Value::String(
+                    s.find(&pat).map(|i| s[..i].to_string()).unwrap_or_default(),
+                ))
             }
             "substring-after" => {
                 arity(2, 2)?;
                 let (s, pat) = (self.arg_string(args, 0, d)?, self.arg_string(args, 1, d)?);
-                Ok(Value::String(s.find(&pat).map(|i| s[i + pat.len()..].to_string()).unwrap_or_default()))
+                Ok(Value::String(
+                    s.find(&pat)
+                        .map(|i| s[i + pat.len()..].to_string())
+                        .unwrap_or_default(),
+                ))
             }
             "substring" => {
                 arity(2, 3)?;
                 let s = self.arg_string(args, 0, d)?;
                 let start = self.arg_number(args, 1, d)?;
-                let len = if args.len() == 3 { Some(self.arg_number(args, 2, d)?) } else { None };
+                let len = if args.len() == 3 {
+                    Some(self.arg_number(args, 2, d)?)
+                } else {
+                    None
+                };
                 Ok(Value::String(substring(&s, start, len)))
             }
             "string-length" => {
                 arity(0, 1)?;
-                let s = if args.is_empty() { string_value(self.doc, d.node) } else { self.arg_string(args, 0, d)? };
+                let s = if args.is_empty() {
+                    string_value(self.doc, d.node)
+                } else {
+                    self.arg_string(args, 0, d)?
+                };
                 Ok(Value::Number(s.chars().count() as f64))
             }
             "normalize-space" => {
                 arity(0, 1)?;
-                let s = if args.is_empty() { string_value(self.doc, d.node) } else { self.arg_string(args, 0, d)? };
-                Ok(Value::String(s.split([' ', '\t', '\r', '\n']).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")))
+                let s = if args.is_empty() {
+                    string_value(self.doc, d.node)
+                } else {
+                    self.arg_string(args, 0, d)?
+                };
+                Ok(Value::String(
+                    s.split([' ', '\t', '\r', '\n'])
+                        .filter(|w| !w.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ))
             }
             "translate" => {
                 arity(3, 3)?;
@@ -685,7 +825,9 @@ impl<'a> Evaluator<'a> {
             "number" => {
                 arity(0, 1)?;
                 if args.is_empty() {
-                    Ok(Value::Number(string_to_number(&string_value(self.doc, d.node))))
+                    Ok(Value::Number(string_to_number(&string_value(
+                        self.doc, d.node,
+                    ))))
                 } else {
                     Ok(Value::Number(self.eval(&args[0], d)?.to_number(self.doc)))
                 }
@@ -721,15 +863,26 @@ impl<'a> Evaluator<'a> {
         let tokens: HashSet<String> = match &value {
             Value::NodeSet(ns) => ns
                 .iter()
-                .flat_map(|&n| string_value(self.doc, n).split_whitespace().map(str::to_string).collect::<Vec<_>>())
+                .flat_map(|&n| {
+                    string_value(self.doc, n)
+                        .split_whitespace()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
                 .collect(),
-            other => other.to_string_value(self.doc).split_whitespace().map(str::to_string).collect(),
+            other => other
+                .to_string_value(self.doc)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect(),
         };
         let mut out = Vec::new();
         if !tokens.is_empty() {
             for id in self.doc.descendants(self.doc.root()) {
                 let hit = self.doc.element(id).is_some_and(|e| {
-                    e.attrs.iter().any(|a| (a.name == "id" || a.name == "xml:id") && tokens.contains(&a.value))
+                    e.attrs.iter().any(|a| {
+                        (a.name == "id" || a.name == "xml:id") && tokens.contains(&a.value)
+                    })
                 });
                 if hit {
                     out.push(XNode::Node(id));
@@ -746,7 +899,10 @@ impl<'a> Evaluator<'a> {
             .find_map(|n| self.doc.attr(n, "xml:lang"));
         let Some(actual) = found else { return false };
         let (actual, wanted) = (actual.to_ascii_lowercase(), wanted.to_ascii_lowercase());
-        actual == wanted || actual.strip_prefix(&wanted).is_some_and(|rest| rest.starts_with('-'))
+        actual == wanted
+            || actual
+                .strip_prefix(&wanted)
+                .is_some_and(|rest| rest.starts_with('-'))
     }
 }
 

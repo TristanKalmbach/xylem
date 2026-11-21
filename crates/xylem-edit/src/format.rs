@@ -37,7 +37,10 @@ fn whitespace_is_formatting(doc: &Document, rules: &dyn Rules, el: NodeId) -> bo
         return false;
     }
     let kids = doc.children(el);
-    let has_text = kids.iter().any(|&c| matches!(doc.kind(c), NodeKind::Text(t) if !t.trim().is_empty()) || matches!(doc.kind(c), NodeKind::CData(_) | NodeKind::EntityRef(_)));
+    let has_text = kids.iter().any(|&c| {
+        matches!(doc.kind(c), NodeKind::Text(t) if !t.trim().is_empty())
+            || matches!(doc.kind(c), NodeKind::CData(_) | NodeKind::EntityRef(_))
+    });
     if has_text {
         return false;
     }
@@ -45,10 +48,17 @@ fn whitespace_is_formatting(doc: &Document, rules: &dyn Rules, el: NodeId) -> bo
         return true;
     }
     // Without a schema: whitespace that already spans lines is layout.
-    kids.iter().all(|&c| !doc.is_text(c) || is_ignorable(doc, rules, c))
+    kids.iter()
+        .all(|&c| !doc.is_text(c) || is_ignorable(doc, rules, c))
 }
 
-fn format_element(doc: &mut Document, rules: &dyn Rules, opts: &FormatOptions, el: NodeId, depth: usize) {
+fn format_element(
+    doc: &mut Document,
+    rules: &dyn Rules,
+    opts: &FormatOptions,
+    el: NodeId,
+    depth: usize,
+) {
     let name = doc.name(el).unwrap_or("").to_string();
     let inner = if (opts.flat)(&name) { depth } else { depth + 1 };
     if whitespace_is_formatting(doc, rules, el) && !doc.children(el).is_empty() {

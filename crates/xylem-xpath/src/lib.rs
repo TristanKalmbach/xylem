@@ -37,7 +37,10 @@ pub struct XPath {
 
 /// Compiles an expression, reporting syntax errors with their position.
 pub fn compile(expr: &str) -> Result<XPath, XPathError> {
-    Ok(XPath { source: expr.to_string(), expr: parser::parse(expr)? })
+    Ok(XPath {
+        source: expr.to_string(),
+        expr: parser::parse(expr)?,
+    })
 }
 
 impl XPath {
@@ -52,7 +55,12 @@ impl XPath {
     }
 
     /// Evaluates with variables, namespace prefixes and custom functions.
-    pub fn evaluate_with(&self, doc: &Document, context: XNode, ctx: &Context) -> Result<Value, XPathError> {
+    pub fn evaluate_with(
+        &self,
+        doc: &Document,
+        context: XNode,
+        ctx: &Context,
+    ) -> Result<Value, XPathError> {
         eval::evaluate(&self.expr, doc, context, ctx)
     }
 
@@ -62,7 +70,12 @@ impl XPath {
     }
 
     /// Like [`XPath::select`] with an explicit [`Context`].
-    pub fn select_with(&self, doc: &Document, context: XNode, ctx: &Context) -> Result<Vec<XNode>, XPathError> {
+    pub fn select_with(
+        &self,
+        doc: &Document,
+        context: XNode,
+        ctx: &Context,
+    ) -> Result<Vec<XNode>, XPathError> {
         match self.evaluate_with(doc, context, ctx)? {
             Value::NodeSet(nodes) => Ok(nodes),
             other => Err(XPathError::eval(format!(

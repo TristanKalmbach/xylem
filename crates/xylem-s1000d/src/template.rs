@@ -83,7 +83,15 @@ pub fn new_data_module(
     lang: (&str, &str),
     date: IssueDate,
 ) -> Result<String, S1000dError> {
-    new_data_module_with(issue, kind, dmc, tech_name, info_name, lang, &NewModuleOptions::new(date))
+    new_data_module_with(
+        issue,
+        kind,
+        dmc,
+        tech_name,
+        info_name,
+        lang,
+        &NewModuleOptions::new(date),
+    )
 }
 
 /// Like [`new_data_module`] with explicit [`NewModuleOptions`].
@@ -99,7 +107,15 @@ pub fn new_data_module_with(
     if !available_kinds(issue).contains(&kind) {
         return Err(S1000dError::Unsupported { issue, kind });
     }
-    let parts = Parts { issue, kind, dmc, tech_name, info_name, lang, options };
+    let parts = Parts {
+        issue,
+        kind,
+        dmc,
+        tech_name,
+        info_name,
+        lang,
+        options,
+    };
     Ok(match issue.markup() {
         Markup::Modern => parts.modern(),
         Markup::Legacy => parts.legacy(),
@@ -226,7 +242,10 @@ impl Parts<'_> {
             d = attr_value(&o.date.day),
             content = self.modern_content(),
         );
-        format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}\n", Self::reindent(&body))
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}\n",
+            Self::reindent(&body)
+        )
     }
 
     /// The raw template is flat; give it a readable nesting by element depth.
@@ -243,7 +262,11 @@ impl Parts<'_> {
             }
             out.push(format!("{}{t}", "  ".repeat(depth)));
             // A line that opens an element without closing it nests what follows.
-            if t.starts_with('<') && !t.starts_with("</") && !t.starts_with("<?") && !closes_itself(t) {
+            if t.starts_with('<')
+                && !t.starts_with("</")
+                && !t.starts_with("<?")
+                && !closes_itself(t)
+            {
                 depth += 1;
             }
         }
@@ -360,7 +383,10 @@ impl Parts<'_> {
             SchemaKind::Proced => ("Procedural", "proced.dtd"),
             _ => ("Descriptive", "descript.dtd"),
         };
-        let infoname = self.info_name.map(|i| format!("<infoname>{}</infoname>", text(i))).unwrap_or_default();
+        let infoname = self
+            .info_name
+            .map(|i| format!("<infoname>{}</infoname>", text(i)))
+            .unwrap_or_default();
         let avee = [
             ("modelic", &d.model_ident_code),
             ("sdc", &d.system_diff_code),

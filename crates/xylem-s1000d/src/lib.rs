@@ -23,16 +23,18 @@ mod xmlutil;
 mod testdata;
 
 pub use brex::{
-    AllowedFlag, Brex, BrexRule, BrexViolation, NotationRule, ObjectValue, Severity, SnsRule, ValueForm,
-    ValueMatcher, check_brex,
+    AllowedFlag, Brex, BrexRule, BrexViolation, NotationRule, ObjectValue, Severity, SnsRule,
+    ValueForm, ValueMatcher, check_brex,
 };
 pub use detect::{DetectSource, S1000dInfo, detect};
 pub use error::S1000dError;
-pub use ident::{DmIdent, DmTitle, Dmc, IssueDate, IssueInfo, Language, PmIdent, Pmc, csdb_filename};
+pub use ident::{
+    DmIdent, DmTitle, Dmc, IssueDate, IssueInfo, Language, PmIdent, Pmc, csdb_filename,
+};
 pub use issue::{Issue, Markup, SchemaKind, available_kinds};
 pub use pattern::Pattern;
 pub use refs::{
-    DmRef, EntityDecl, IcnRef, IcnRefKind, PmRef, entity_declarations, find_dm_refs, find_files, find_icn_refs,
-    find_pm_refs, glob_match, parse_entity_declarations,
+    DmRef, EntityDecl, IcnRef, IcnRefKind, PmRef, entity_declarations, find_dm_refs, find_files,
+    find_icn_refs, find_pm_refs, glob_match, parse_entity_declarations,
 };
 pub use template::{NewModuleOptions, default_brex_dmc, new_data_module, new_data_module_with};

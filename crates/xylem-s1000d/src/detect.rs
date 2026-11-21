@@ -49,20 +49,32 @@ pub fn detect(doc: &Document) -> Option<S1000dInfo> {
         // A schema URL only counts when it really is an S1000D one or the structure agrees.
         let looks_s1000d = url_issue.is_some() || markup.is_some();
         if looks_s1000d {
-            let markup = markup.or_else(|| url_issue.map(Issue::markup)).unwrap_or(Markup::Modern);
+            let markup = markup
+                .or_else(|| url_issue.map(Issue::markup))
+                .unwrap_or(Markup::Modern);
             let schema = url_kind
                 .or_else(|| kind_from_structure(doc, root, &root_name, markup))
                 .unwrap_or(SchemaKind::Unknown);
             let issue = url_issue.unwrap_or_else(|| guess_issue(markup));
-            let source = if url_issue.is_some() { DetectSource::SchemaLocation } else { DetectSource::Structure };
-            return Some(S1000dInfo { issue, schema, root: root_name, source });
+            let source = if url_issue.is_some() {
+                DetectSource::SchemaLocation
+            } else {
+                DetectSource::Structure
+            };
+            return Some(S1000dInfo {
+                issue,
+                schema,
+                root: root_name,
+                source,
+            });
         }
     }
 
     if let Some(dt) = doc.doctype() {
         let pubid = dt.public_id.as_deref().unwrap_or("");
         let sysid = dt.system_id.as_deref().unwrap_or("");
-        let marked = pubid.to_ascii_uppercase().contains("S1000D") || sysid.to_ascii_uppercase().contains("S1000D");
+        let marked = pubid.to_ascii_uppercase().contains("S1000D")
+            || sysid.to_ascii_uppercase().contains("S1000D");
         if marked || (markup == Some(Markup::Legacy) && root_name == "dmodule") {
             let markup = markup.unwrap_or(Markup::Legacy);
             let issue = issue_from_text(pubid)
@@ -73,14 +85,24 @@ pub fn detect(doc: &Document) -> Option<S1000dInfo> {
                 .or_else(|| kind_from_system_id(sysid))
                 .or_else(|| kind_from_structure(doc, root, &root_name, markup))
                 .unwrap_or(SchemaKind::Unknown);
-            return Some(S1000dInfo { issue, schema, root: root_name, source: DetectSource::DocType });
+            return Some(S1000dInfo {
+                issue,
+                schema,
+                root: root_name,
+                source: DetectSource::DocType,
+            });
         }
     }
 
     let markup = markup?;
     let schema = kind_from_structure(doc, root, &root_name, markup).unwrap_or(SchemaKind::Unknown);
     let issue = issue_from_comments(doc).unwrap_or_else(|| guess_issue(markup));
-    Some(S1000dInfo { issue, schema, root: root_name, source: DetectSource::Structure })
+    Some(S1000dInfo {
+        issue,
+        schema,
+        root: root_name,
+        source: DetectSource::Structure,
+    })
 }
 
 /// The markup family implied by the document's identification section, if it has one.
@@ -92,15 +114,25 @@ fn structural_markup(doc: &Document, root: NodeId, root_name: &str) -> Option<Ma
     if child(doc, root, "identAndStatusSection").is_some() {
         return Some(Markup::Modern);
     }
-    if child(doc, root, "idstatus").is_some() || (root_name == "pm" && descendant(doc, root, "pmaddres").is_some()) {
+    if child(doc, root, "idstatus").is_some()
+        || (root_name == "pm" && descendant(doc, root, "pmaddres").is_some())
+    {
         return Some(Markup::Legacy);
     }
     None
 }
 
-fn kind_from_structure(doc: &Document, root: NodeId, root_name: &str, markup: Markup) -> Option<SchemaKind> {
+fn kind_from_structure(
+    doc: &Document,
+    root: NodeId,
+    root_name: &str,
+    markup: Markup,
+) -> Option<SchemaKind> {
     if root_name != "dmodule" {
-        return OTHER_ROOTS.iter().find(|(n, _)| *n == root_name).map(|&(_, k)| k);
+        return OTHER_ROOTS
+            .iter()
+            .find(|(n, _)| *n == root_name)
+            .map(|&(_, k)| k);
     }
     let content = child(doc, root, "content")?;
     let first = doc.element_children(content).next()?;
@@ -187,10 +219,14 @@ fn issue_from_text(text: &str) -> Option<Issue> {
 
 /// Top-level comments such as `<!-- S1000D issue 3.0 -->` hint at the issue of DTD documents.
 fn issue_from_comments(doc: &Document) -> Option<Issue> {
-    doc.children(doc.root()).iter().find_map(|&c| match doc.kind(c) {
-        NodeKind::Comment(text) if text.to_ascii_uppercase().contains("S1000D") => issue_from_text(text),
-        _ => None,
-    })
+    doc.children(doc.root())
+        .iter()
+        .find_map(|&c| match doc.kind(c) {
+            NodeKind::Comment(text) if text.to_ascii_uppercase().contains("S1000D") => {
+                issue_from_text(text)
+            }
+            _ => None,
+        })
 }
 
 fn kind_from_public_id(pubid: &str) -> Option<SchemaKind> {
@@ -211,7 +247,10 @@ fn kind_from_public_id(pubid: &str) -> Option<SchemaKind> {
         ("comment", SchemaKind::Comment),
         ("update", SchemaKind::Update),
     ];
-    TABLE.iter().find(|(needle, _)| p.contains(needle)).map(|&(_, k)| k)
+    TABLE
+        .iter()
+        .find(|(needle, _)| p.contains(needle))
+        .map(|&(_, k)| k)
 }
 
 fn kind_from_system_id(sysid: &str) -> Option<SchemaKind> {

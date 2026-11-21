@@ -139,9 +139,18 @@ pub enum Op {
     /// `node` was attached to a parent.
     Inserted { node: NodeId },
     /// `node` was removed from `parent` at `index`.
-    Detached { node: NodeId, parent: NodeId, index: usize },
+    Detached {
+        node: NodeId,
+        parent: NodeId,
+        index: usize,
+    },
     /// `node`'s content (name, attributes, text) changed; holds the old state.
-    Changed { node: NodeId, kind: NodeKind, raw: Option<String>, raw_end: Option<String> },
+    Changed {
+        node: NodeId,
+        kind: NodeKind,
+        raw: Option<String>,
+        raw_end: Option<String>,
+    },
 }
 
 impl Default for Document {
@@ -178,6 +187,9 @@ impl Document {
         Ok(doc)
     }
 
+    /// Parses a complete document from a string. (Also available through
+    /// [`std::str::FromStr`], i.e. `text.parse::<Document>()`.)
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(text: &str) -> Result<Self, ParseError> {
         parse(text)
     }
@@ -464,7 +476,12 @@ impl Document {
     fn record_change(&mut self, id: NodeId) {
         if self.journal.is_some() {
             let n = &self.nodes[id.index()];
-            let op = Op::Changed { node: id, kind: n.kind.clone(), raw: n.raw.clone(), raw_end: n.raw_end.clone() };
+            let op = Op::Changed {
+                node: id,
+                kind: n.kind.clone(),
+                raw: n.raw.clone(),
+                raw_end: n.raw_end.clone(),
+            };
             self.record(op);
         }
     }
@@ -475,8 +492,17 @@ impl Document {
         for op in ops.iter().rev() {
             match op {
                 Op::Inserted { node } => self.detach(*node),
-                Op::Detached { node, parent, index } => self.insert_child(*parent, *index, *node),
-                Op::Changed { node, kind, raw, raw_end } => {
+                Op::Detached {
+                    node,
+                    parent,
+                    index,
+                } => self.insert_child(*parent, *index, *node),
+                Op::Changed {
+                    node,
+                    kind,
+                    raw,
+                    raw_end,
+                } => {
                     self.record_change(*node);
                     let n = self.node_mut(*node);
                     n.kind = kind.clone();
@@ -513,7 +539,11 @@ impl Document {
             let index = self.children(p).iter().position(|&c| c == id).unwrap_or(0);
             self.node_mut(p).children.remove(index);
             self.node_mut(id).parent = None;
-            self.record(Op::Detached { node: id, parent: p, index });
+            self.record(Op::Detached {
+                node: id,
+                parent: p,
+                index,
+            });
             self.touch();
             self.mark_changed(p);
         }
@@ -707,6 +737,13 @@ impl Document {
     /// Serialises a node freshly (ignoring preserved source), indented.
     pub fn pretty_xml(&self, id: NodeId) -> String {
         serialize::pretty(self, id)
+    }
+}
+
+impl std::str::FromStr for Document {
+    type Err = ParseError;
+    fn from_str(text: &str) -> Result<Self, ParseError> {
+        parse(text)
     }
 }
 

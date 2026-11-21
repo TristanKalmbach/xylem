@@ -1,0 +1,86 @@
+name: Release
+
+# Push a tag such as `v0.2.0` to build binaries for every platform and attach
+# them to a draft GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe: xylem.exe
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            exe: xylem
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            exe: xylem
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            exe: xylem
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev
+
+      - name: Build
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} -p xylem-app
+          cargo build --release --locked --target ${{ matrix.target }} -p xylem-customize --bin xylem-import
+
+      - name: Package
+        shell: bash
+        run: |
+          name=xylem-${GITHUB_REF_NAME}-${{ matrix.target }}
+          mkdir -p "$name"
+          bin=target/${{ matrix.target }}/release
+          cp "$bin/${{ matrix.exe }}" "$name/"
+          cp "$bin/xylem-import"* "$name/" 2>/dev/null || true
+          rm -f "$name"/*.d "$name"/*.pdb
+          cp README.md "$name/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$name.zip" "$name" > /dev/null
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: xylem-*.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: xylem-*

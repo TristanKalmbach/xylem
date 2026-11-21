@@ -8,7 +8,9 @@ use xylem_dom::{Document, NodeId};
 
 use crate::error::S1000dError;
 use crate::issue::Markup;
-use crate::xmlutil::{attr, child, descendant, ensure_child, path, set_text, strip_prefix_ci, text};
+use crate::xmlutil::{
+    attr, child, descendant, ensure_child, path, set_text, strip_prefix_ci, text,
+};
 
 // ------------------------------------------------------------------ locating
 
@@ -49,7 +51,12 @@ pub(crate) fn sections(doc: &Document) -> Option<Sections> {
         }
     }
     if let Some(addr) = path(doc, root, &["idstatus", "dmaddres"]) {
-        return Some(Sections { markup: Markup::Legacy, module: ModuleKind::Data, ident: addr, items: Some(addr) });
+        return Some(Sections {
+            markup: Markup::Legacy,
+            module: ModuleKind::Data,
+            ident: addr,
+            items: Some(addr),
+        });
     }
     if let Some(addr) = descendant(doc, root, "pmaddres") {
         return Some(Sections {
@@ -100,7 +107,11 @@ impl Dmc {
             ("subSubSystemCode", "subsect", &mut self.sub_sub_system_code),
             ("assyCode", "subject", &mut self.assy_code),
             ("disassyCode", "discode", &mut self.disassy_code),
-            ("disassyCodeVariant", "discodev", &mut self.disassy_code_variant),
+            (
+                "disassyCodeVariant",
+                "discodev",
+                &mut self.disassy_code_variant,
+            ),
             ("infoCode", "incode", &mut self.info_code),
             ("infoCodeVariant", "incodev", &mut self.info_code_variant),
             ("itemLocationCode", "itemloc", &mut self.item_location_code),
@@ -140,15 +151,22 @@ impl Dmc {
         if parts.len() != 8 && parts.len() != 9 {
             return Err(bad("expected 8 or 9 groups separated by '-'"));
         }
-        if parts.iter().any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_alphanumeric())) {
+        if parts
+            .iter()
+            .any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_alphanumeric()))
+        {
             return Err(bad("groups must be non-empty letters and digits"));
         }
-        let [mic, sdc, sys, subs, assy, dis, info, item] = parts[..8] else { unreachable!() };
+        let [mic, sdc, sys, subs, assy, dis, info, item] = parts[..8] else {
+            unreachable!()
+        };
         if subs.len() != 2 {
             return Err(bad("sub-system and sub-sub-system must be two characters"));
         }
         if dis.len() < 3 {
-            return Err(bad("disassembly code and variant need at least three characters"));
+            return Err(bad(
+                "disassembly code and variant need at least three characters",
+            ));
         }
         if info.len() != 4 {
             return Err(bad("information code and variant must be four characters"));
@@ -190,8 +208,13 @@ impl Dmc {
         let mut check = |name: &str, value: &str, min: usize, max: usize| {
             let n = value.chars().count();
             if n < min || n > max {
-                problems.push(format!("{name} '{value}' must be {min} to {max} characters"));
-            } else if !value.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()) {
+                problems.push(format!(
+                    "{name} '{value}' must be {min} to {max} characters"
+                ));
+            } else if !value
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            {
                 problems.push(format!("{name} '{value}' may only contain A-Z and 0-9"));
             }
         };
@@ -246,7 +269,9 @@ impl Dmc {
 
     /// Writes the code into the document's identification section.
     pub fn write_to_document(&self, doc: &mut Document) -> Result<(), S1000dError> {
-        let s = sections(doc).filter(|s| s.module == ModuleKind::Data).ok_or_else(|| missing("dmAddress"))?;
+        let s = sections(doc)
+            .filter(|s| s.module == ModuleKind::Data)
+            .ok_or_else(|| missing("dmAddress"))?;
         let mut copy = self.clone();
         match s.markup {
             Markup::Modern => {
@@ -314,7 +339,10 @@ impl Pmc {
 
     /// The code without the `PMC-` prefix.
     pub fn code(&self) -> String {
-        format!("{}-{}-{}-{}", self.model_ident_code, self.pm_issuer, self.pm_number, self.pm_volume)
+        format!(
+            "{}-{}-{}-{}",
+            self.model_ident_code, self.pm_issuer, self.pm_number, self.pm_volume
+        )
     }
 
     /// Parses `PMC-S1000DBIKE-C0419-00001-00` (the prefix is optional).
@@ -322,8 +350,14 @@ impl Pmc {
         let trimmed = text.trim();
         let body = strip_prefix_ci(trimmed, "PMC-").unwrap_or(trimmed);
         let parts: Vec<&str> = body.split('-').collect();
-        if parts.len() != 4 || parts.iter().any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_alphanumeric())) {
-            return Err(S1000dError::InvalidCode(format!("'{text}': expected PMC-model-issuer-number-volume")));
+        if parts.len() != 4
+            || parts
+                .iter()
+                .any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_alphanumeric()))
+        {
+            return Err(S1000dError::InvalidCode(format!(
+                "'{text}': expected PMC-model-issuer-number-volume"
+            )));
         }
         Ok(Pmc {
             model_ident_code: parts[0].to_string(),
@@ -408,7 +442,10 @@ pub struct IssueInfo {
 
 impl IssueInfo {
     pub fn new(issue_number: impl Into<String>, in_work: impl Into<String>) -> Self {
-        Self { issue_number: issue_number.into(), in_work: in_work.into() }
+        Self {
+            issue_number: issue_number.into(),
+            in_work: in_work.into(),
+        }
     }
 
     /// Parses `001-00`.
@@ -421,7 +458,10 @@ impl IssueInfo {
     /// Reads an `issueInfo` (modern) or `issno` (legacy) element.
     pub fn from_element(doc: &Document, el: NodeId, markup: Markup) -> Option<IssueInfo> {
         match markup {
-            Markup::Modern => Some(IssueInfo::new(attr(doc, el, "issueNumber")?, attr(doc, el, "inWork")?)),
+            Markup::Modern => Some(IssueInfo::new(
+                attr(doc, el, "issueNumber")?,
+                attr(doc, el, "inWork")?,
+            )),
             Markup::Legacy => Some(IssueInfo::new(
                 attr(doc, el, "issno")?,
                 attr(doc, el, "inwork").unwrap_or_else(|| "00".to_string()),
@@ -432,7 +472,9 @@ impl IssueInfo {
     pub fn from_document(doc: &Document) -> Option<IssueInfo> {
         let s = sections(doc)?;
         match s.markup {
-            Markup::Modern => IssueInfo::from_element(doc, child(doc, s.ident, "issueInfo")?, s.markup),
+            Markup::Modern => {
+                IssueInfo::from_element(doc, child(doc, s.ident, "issueInfo")?, s.markup)
+            }
             Markup::Legacy => IssueInfo::from_element(doc, child(doc, s.ident, "issno")?, s.markup),
         }
     }
@@ -472,7 +514,10 @@ pub struct Language {
 
 impl Language {
     pub fn new(language: impl Into<String>, country: impl Into<String>) -> Self {
-        Self { language_iso_code: language.into(), country_iso_code: country.into() }
+        Self {
+            language_iso_code: language.into(),
+            country_iso_code: country.into(),
+        }
     }
 
     /// Parses `en-US`.
@@ -504,11 +549,12 @@ impl Language {
             Markup::Legacy => descendant(doc, s.ident, "language"),
         }
         .ok_or_else(|| missing("language"))?;
-        let (lang_attr, country_attr) = if s.markup == Markup::Legacy && doc.attr(el, "languageIsoCode").is_none() {
-            ("language", "country")
-        } else {
-            ("languageIsoCode", "countryIsoCode")
-        };
+        let (lang_attr, country_attr) =
+            if s.markup == Markup::Legacy && doc.attr(el, "languageIsoCode").is_none() {
+                ("language", "country")
+            } else {
+                ("languageIsoCode", "countryIsoCode")
+            };
         doc.set_attr(el, lang_attr, self.language_iso_code.clone());
         doc.set_attr(el, country_attr, self.country_iso_code.clone());
         Ok(())
@@ -533,7 +579,11 @@ pub struct IssueDate {
 
 impl IssueDate {
     pub fn new(year: u32, month: u32, day: u32) -> Self {
-        Self { year: format!("{year:04}"), month: format!("{month:02}"), day: format!("{day:02}") }
+        Self {
+            year: format!("{year:04}"),
+            month: format!("{month:02}"),
+            day: format!("{day:02}"),
+        }
     }
 
     /// Today's date (UTC), derived from the system clock.
@@ -559,14 +609,22 @@ impl IssueDate {
     }
 
     fn element(doc: &Document, s: &Sections) -> Option<NodeId> {
-        let name = if s.markup == Markup::Modern { "issueDate" } else { "issdate" };
+        let name = if s.markup == Markup::Modern {
+            "issueDate"
+        } else {
+            "issdate"
+        };
         child(doc, s.items?, name)
     }
 
     pub fn from_document(doc: &Document) -> Option<IssueDate> {
         let s = sections(doc)?;
         let el = Self::element(doc, &s)?;
-        Some(IssueDate { year: attr(doc, el, "year")?, month: attr(doc, el, "month")?, day: attr(doc, el, "day")? })
+        Some(IssueDate {
+            year: attr(doc, el, "year")?,
+            month: attr(doc, el, "month")?,
+            day: attr(doc, el, "day")?,
+        })
     }
 
     pub fn write_to_document(&self, doc: &mut Document) -> Result<(), S1000dError> {
@@ -596,7 +654,10 @@ pub struct DmTitle {
 
 impl DmTitle {
     pub fn new(tech_name: impl Into<String>, info_name: Option<&str>) -> Self {
-        Self { tech_name: tech_name.into(), info_name: info_name.map(str::to_string) }
+        Self {
+            tech_name: tech_name.into(),
+            info_name: info_name.map(str::to_string),
+        }
     }
 
     fn element(doc: &Document, s: &Sections) -> Option<NodeId> {
@@ -626,7 +687,9 @@ impl DmTitle {
 
     /// Updates the title, creating or removing `infoName` as needed.
     pub fn write_to_document(&self, doc: &mut Document) -> Result<(), S1000dError> {
-        let s = sections(doc).filter(|s| s.module == ModuleKind::Data).ok_or_else(|| missing("dmAddress"))?;
+        let s = sections(doc)
+            .filter(|s| s.module == ModuleKind::Data)
+            .ok_or_else(|| missing("dmAddress"))?;
         let title = Self::element(doc, &s).ok_or_else(|| missing("dmTitle"))?;
         let (tech, info) = Self::child_names(s.markup);
         let tech_el = ensure_child(doc, title, tech);
@@ -686,7 +749,11 @@ impl DmIdent {
 
     /// The standard CSDB file name, when issue and language are known.
     pub fn csdb_filename(&self) -> Option<String> {
-        Some(csdb_filename(&self.dmc.to_string(), self.issue_info.as_ref()?, self.language.as_ref()?))
+        Some(csdb_filename(
+            &self.dmc.to_string(),
+            self.issue_info.as_ref()?,
+            self.language.as_ref()?,
+        ))
     }
 }
 
@@ -703,7 +770,11 @@ pub struct PmIdent {
 impl PmIdent {
     pub fn from_document(doc: &Document) -> Option<PmIdent> {
         let s = sections(doc).filter(|s| s.module == ModuleKind::Publication)?;
-        let title_name = if s.markup == Markup::Modern { "pmTitle" } else { "pmtitle" };
+        let title_name = if s.markup == Markup::Modern {
+            "pmTitle"
+        } else {
+            "pmtitle"
+        };
         let title = child(doc, s.items?, title_name).map(|e| text(doc, e));
         Some(PmIdent {
             pmc: Pmc::from_document(doc)?,
@@ -715,7 +786,11 @@ impl PmIdent {
     }
 
     pub fn csdb_filename(&self) -> Option<String> {
-        Some(csdb_filename(&self.pmc.to_string(), self.issue_info.as_ref()?, self.language.as_ref()?))
+        Some(csdb_filename(
+            &self.pmc.to_string(),
+            self.issue_info.as_ref()?,
+            self.language.as_ref()?,
+        ))
     }
 }
 

@@ -84,7 +84,10 @@ impl std::fmt::Display for EditError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EditError::ReadOnly => write!(f, "This part of the document is read-only."),
-            EditError::Protected => write!(f, "This marker is protected; it can only be removed with its parent element."),
+            EditError::Protected => write!(
+                f,
+                "This marker is protected; it can only be removed with its parent element."
+            ),
             EditError::NotAllowed(m) => write!(f, "{m}"),
             EditError::Nothing => write!(f, "Nothing to do here."),
             EditError::Parse(m) => write!(f, "Not well-formed XML: {m}"),
@@ -191,9 +194,16 @@ impl Editor {
             && self.last_kind == Some(EditKind::Typing)
             && !self.break_undo_group;
         match self.undo.last_mut() {
-            Some(UndoEntry { change: UndoChange::Ops(prev), .. }) if coalesce => prev.extend(ops),
+            Some(UndoEntry {
+                change: UndoChange::Ops(prev),
+                ..
+            }) if coalesce => prev.extend(ops),
             _ => {
-                self.undo.push(UndoEntry { change: UndoChange::Ops(ops), sel: sel_before, state: self.state });
+                self.undo.push(UndoEntry {
+                    change: UndoChange::Ops(ops),
+                    sel: sel_before,
+                    state: self.state,
+                });
                 if self.undo.len() > self.undo_limit {
                     self.undo.remove(0);
                 }
@@ -249,7 +259,11 @@ impl Editor {
             }
             UndoChange::Doc(doc) => UndoChange::Doc(std::mem::replace(&mut self.doc, doc)),
         };
-        let inverse = UndoEntry { change, sel: self.sel, state: self.state };
+        let inverse = UndoEntry {
+            change,
+            sel: self.sel,
+            state: self.state,
+        };
         self.sel = entry.sel;
         self.state = entry.state;
         self.last_kind = None;
@@ -258,14 +272,18 @@ impl Editor {
     }
 
     pub fn undo(&mut self) -> bool {
-        let Some(e) = self.undo.pop() else { return false };
+        let Some(e) = self.undo.pop() else {
+            return false;
+        };
         let inv = self.apply_entry(e);
         self.redo.push(inv);
         true
     }
 
     pub fn redo(&mut self) -> bool {
-        let Some(e) = self.redo.pop() else { return false };
+        let Some(e) = self.redo.pop() else {
+            return false;
+        };
         let inv = self.apply_entry(e);
         self.undo.push(inv);
         true
@@ -280,7 +298,11 @@ impl Editor {
     pub fn replace_document(&mut self, doc: Document) {
         let old = std::mem::replace(&mut self.doc, doc);
         let state = self.state;
-        self.undo.push(UndoEntry { change: UndoChange::Doc(old), sel: self.sel, state });
+        self.undo.push(UndoEntry {
+            change: UndoChange::Doc(old),
+            sel: self.sel,
+            state,
+        });
         self.state = self.fresh_state();
         self.redo.clear();
         let start = self
@@ -423,17 +445,28 @@ impl Editor {
     /// `parent[index]`, if that element can hold text.
     fn text_target_near(&self, rules: &dyn Rules, parent: NodeId, index: usize) -> Option<Pos> {
         let kids = self.doc.children(parent);
-        let after = kids[index.min(kids.len())..].iter().copied().find(|&c| !is_ignorable(&self.doc, rules, c));
+        let after = kids[index.min(kids.len())..]
+            .iter()
+            .copied()
+            .find(|&c| !is_ignorable(&self.doc, rules, c));
         if let Some(e) = after.filter(|&e| self.doc.is_element(e)) {
             let p = first_editable(&self.doc, rules, e);
-            if p.node != parent && (self.doc.is_text(p.node) || rules.can_contain_text(&self.doc, p.node)) {
+            if p.node != parent
+                && (self.doc.is_text(p.node) || rules.can_contain_text(&self.doc, p.node))
+            {
                 return Some(p);
             }
         }
-        let before = kids[..index.min(kids.len())].iter().rev().copied().find(|&c| !is_ignorable(&self.doc, rules, c));
+        let before = kids[..index.min(kids.len())]
+            .iter()
+            .rev()
+            .copied()
+            .find(|&c| !is_ignorable(&self.doc, rules, c));
         if let Some(e) = before.filter(|&e| self.doc.is_element(e)) {
             let p = end_of(&self.doc, rules, e);
-            if p.node != parent && (self.doc.is_text(p.node) || rules.can_contain_text(&self.doc, p.node)) {
+            if p.node != parent
+                && (self.doc.is_text(p.node) || rules.can_contain_text(&self.doc, p.node))
+            {
                 return Some(p);
             }
         }
@@ -1031,11 +1064,21 @@ impl Editor {
 
     /// Inserts prepared markup for element `name` (e.g. a new table) at the
     /// caret, or after the nearest ancestor where it is allowed.
-    pub fn insert_element_xml(&mut self, rules: &dyn Rules, name: &str, xml: &str) -> EditResult<NodeId> {
+    pub fn insert_element_xml(
+        &mut self,
+        rules: &dyn Rules,
+        name: &str,
+        xml: &str,
+    ) -> EditResult<NodeId> {
         self.insert_element_impl(rules, name, Some(xml))
     }
 
-    fn insert_element_impl(&mut self, rules: &dyn Rules, name: &str, xml: Option<&str>) -> EditResult<NodeId> {
+    fn insert_element_impl(
+        &mut self,
+        rules: &dyn Rules,
+        name: &str,
+        xml: Option<&str>,
+    ) -> EditResult<NodeId> {
         self.transact(|ed| {
             if !ed.sel.is_caret() {
                 ed.delete_selection_inner(rules)?;

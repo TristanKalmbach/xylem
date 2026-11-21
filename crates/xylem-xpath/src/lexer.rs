@@ -96,10 +96,12 @@ pub(crate) fn tokenize(src: &str) -> Result<Vec<Spanned>, XPathError> {
         // After one of these tokens (or at the start) a name is a name and `*` is a wildcard.
         let operator_expected = match out.last() {
             None => false,
-            Some(s) => !(matches!(
-                s.token,
-                Token::At | Token::ColonColon | Token::LParen | Token::LBracket | Token::Comma
-            ) || s.token.is_operator()),
+            Some(s) => {
+                !(matches!(
+                    s.token,
+                    Token::At | Token::ColonColon | Token::LParen | Token::LBracket | Token::Comma
+                ) || s.token.is_operator())
+            }
         };
         let next_is = |k: usize, want: char| chars.get(k) == Some(&want);
         let token = match c {
@@ -188,7 +190,11 @@ pub(crate) fn tokenize(src: &str) -> Result<Vec<Spanned>, XPathError> {
             }
             '*' => {
                 i += 1;
-                if operator_expected { Token::Multiply } else { Token::Star }
+                if operator_expected {
+                    Token::Multiply
+                } else {
+                    Token::Star
+                }
             }
             '"' | '\'' => {
                 let quote = c;
@@ -253,7 +259,10 @@ pub(crate) fn tokenize(src: &str) -> Result<Vec<Spanned>, XPathError> {
                         k += 1;
                     }
                     if next_is(k, '(') {
-                        if matches!(name.as_str(), "comment" | "text" | "processing-instruction" | "node") {
+                        if matches!(
+                            name.as_str(),
+                            "comment" | "text" | "processing-instruction" | "node"
+                        ) {
                             Token::NodeType(name)
                         } else {
                             Token::FunctionName(name)
@@ -266,7 +275,10 @@ pub(crate) fn tokenize(src: &str) -> Result<Vec<Spanned>, XPathError> {
                 }
             }
             other => {
-                return Err(XPathError::syntax(i, format!("unexpected character '{other}'")));
+                return Err(XPathError::syntax(
+                    i,
+                    format!("unexpected character '{other}'"),
+                ));
             }
         };
         out.push(Spanned { token, pos: start });
@@ -317,7 +329,8 @@ fn read_qname(chars: &[char], i: usize) -> Option<(String, usize)> {
 
 /// Reads a QName or `prefix:*`; the wildcard form is returned with a `:*` suffix.
 fn lex_name(chars: &[char], i: usize) -> Result<(String, usize), XPathError> {
-    let (first, next) = read_ncname(chars, i).ok_or_else(|| XPathError::syntax(i, "expected a name"))?;
+    let (first, next) =
+        read_ncname(chars, i).ok_or_else(|| XPathError::syntax(i, "expected a name"))?;
     if chars.get(next) == Some(&':') && chars.get(next + 1) != Some(&':') {
         if chars.get(next + 1) == Some(&'*') {
             return Ok((format!("{first}:*"), next + 2));

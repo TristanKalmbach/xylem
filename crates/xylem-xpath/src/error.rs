@@ -9,11 +9,17 @@ pub struct XPathError {
 
 impl XPathError {
     pub(crate) fn syntax(position: usize, message: impl Into<String>) -> Self {
-        Self { message: message.into(), position: Some(position) }
+        Self {
+            message: message.into(),
+            position: Some(position),
+        }
     }
 
     pub(crate) fn eval(message: impl Into<String>) -> Self {
-        Self { message: message.into(), position: None }
+        Self {
+            message: message.into(),
+            position: None,
+        }
     }
 
     /// Creates an evaluation error; useful for custom functions.

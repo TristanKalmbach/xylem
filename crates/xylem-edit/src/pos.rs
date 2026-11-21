@@ -374,7 +374,9 @@ fn first_editable_in(doc: &Document, rules: &dyn Rules, n: NodeId) -> Option<Pos
                 if let Some(p) = first_editable_in(doc, rules, c) {
                     return Some(p);
                 }
-                let empty_holder = doc.children(c).is_empty() && rules.can_contain_text(doc, c) && !rules.is_element_only(doc, c);
+                let empty_holder = doc.children(c).is_empty()
+                    && rules.can_contain_text(doc, c)
+                    && !rules.is_element_only(doc, c);
                 if empty_holder {
                     return Some(Pos::new(c, 0));
                 }
@@ -383,7 +385,10 @@ fn first_editable_in(doc: &Document, rules: &dyn Rules, n: NodeId) -> Option<Pos
             _ => return Some(Pos::new(n, doc.index_in_parent(c).unwrap())),
         }
     }
-    if doc.children(n).iter().all(|&c| is_ignorable(doc, rules, c)) && rules.can_contain_text(doc, n) && !rules.is_element_only(doc, n) {
+    if doc.children(n).iter().all(|&c| is_ignorable(doc, rules, c))
+        && rules.can_contain_text(doc, n)
+        && !rules.is_element_only(doc, n)
+    {
         return Some(canonical(doc, rules, Pos::new(n, 0)));
     }
     None

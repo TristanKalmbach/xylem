@@ -27,10 +27,10 @@ fn ed(xml: &str) -> Editor {
 
 fn text_pos(e: &Editor, needle: &str, at: usize) -> Pos {
     for n in e.doc.descendants(e.doc.root()) {
-        if let Some(t) = e.doc.text(n) {
-            if let Some(i) = t.find(needle) {
-                return Pos::new(n, i + at);
-            }
+        if let Some(t) = e.doc.text(n)
+            && let Some(i) = t.find(needle)
+        {
+            return Pos::new(n, i + at);
         }
     }
     panic!("{needle} not found")
@@ -291,7 +291,10 @@ fn journal_undo_redo_is_exact() {
     let mut e = ed(src);
     let a = text_pos(&e, "one", 2);
     let b = text_pos(&e, "four", 2);
-    e.sel = Selection { anchor: a, focus: b };
+    e.sel = Selection {
+        anchor: a,
+        focus: b,
+    };
     e.delete_selection(&TestRules).unwrap();
     e.enter(&TestRules).unwrap();
     e.insert_text(&TestRules, "Q").unwrap();
@@ -308,7 +311,11 @@ fn journal_undo_redo_is_exact() {
 fn failed_edit_rolls_back_without_snapshot() {
     // Nowhere nearby can hold text, so typing fails and nothing changes.
     let mut e = ed("<doc><section><list/></section></doc>");
-    let sec = e.doc.element_children(e.doc.document_element().unwrap()).next().unwrap();
+    let sec = e
+        .doc
+        .element_children(e.doc.document_element().unwrap())
+        .next()
+        .unwrap();
     e.set_caret(Pos::new(sec, 0));
     assert!(e.insert_text(&TestRules, "bad").is_err());
     assert_eq!(xml(&e), "<doc><section><list/></section></doc>");
@@ -331,7 +338,10 @@ fn read_only_elements_reject_edits() {
     e.set_caret(text_pos(&e, "fixed", 2));
     assert_eq!(e.insert_text(&Ro, "x"), Err(EditError::ReadOnly));
     assert_eq!(e.delete_backward(&Ro), Err(EditError::ReadOnly));
-    e.sel = Selection { anchor: text_pos(&e, "fixed", 1), focus: text_pos(&e, "free", 2) };
+    e.sel = Selection {
+        anchor: text_pos(&e, "fixed", 1),
+        focus: text_pos(&e, "free", 2),
+    };
     assert_eq!(e.delete_selection(&Ro), Err(EditError::ReadOnly));
     assert_eq!(xml(&e), "<doc><locked>fixed</locked><p>free</p></doc>");
     e.set_caret(text_pos(&e, "free", 4));
@@ -359,11 +369,18 @@ fn protected_markers_survive_deletes_but_not_parent_removal() {
     e.set_caret(text_pos(&e, "see ", 4));
     assert_eq!(e.delete_forward(&Prot), Err(EditError::Protected));
     // A selection that covers it.
-    e.sel = Selection { anchor: text_pos(&e, "see", 1), focus: text_pos(&e, "above", 2) };
+    e.sel = Selection {
+        anchor: text_pos(&e, "see", 1),
+        focus: text_pos(&e, "above", 2),
+    };
     assert_eq!(e.delete_selection(&Prot), Err(EditError::Protected));
     assert_eq!(xml(&e), src);
     // Deleting the whole paragraph is allowed.
-    let p = e.doc.element_children(e.doc.document_element().unwrap()).next().unwrap();
+    let p = e
+        .doc
+        .element_children(e.doc.document_element().unwrap())
+        .next()
+        .unwrap();
     e.delete_element(&Prot, p).unwrap();
     assert_eq!(xml(&e), "<doc><p>next</p></doc>");
 }
@@ -373,7 +390,10 @@ fn reformat_only_touches_formatting_whitespace() {
     let src = "<doc><section><p>a <b>b</b> c</p><p>d</p></section><pre>  keep
   this</pre></doc>";
     let mut e = ed(src);
-    let opts = format::FormatOptions { indent: 2, flat: &|_| false };
+    let opts = format::FormatOptions {
+        indent: 2,
+        flat: &|_| false,
+    };
     e.reformat(&TestRules, &opts).unwrap();
     assert_eq!(
         xml(&e),
@@ -401,15 +421,25 @@ fn moving_elements_keeps_whitespace_layout() {
   <p>one</p>
   <p>two</p>
 </doc>");
-    let second = e.doc.element_children(e.doc.document_element().unwrap()).nth(1).unwrap();
+    let second = e
+        .doc
+        .element_children(e.doc.document_element().unwrap())
+        .nth(1)
+        .unwrap();
     e.move_element(&TestRules, second, true).unwrap();
-    assert_eq!(xml(&e), "<doc>
+    assert_eq!(
+        xml(&e),
+        "<doc>
   <p>two</p>
   <p>one</p>
-</doc>");
+</doc>"
+    );
     e.move_element(&TestRules, second, false).unwrap();
-    assert_eq!(xml(&e), "<doc>
+    assert_eq!(
+        xml(&e),
+        "<doc>
   <p>one</p>
   <p>two</p>
-</doc>");
+</doc>"
+    );
 }

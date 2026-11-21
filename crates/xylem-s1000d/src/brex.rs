@@ -105,7 +105,11 @@ impl ValueMatcher {
 
 fn parse_number(s: &str) -> Option<f64> {
     let digits = s.strip_prefix('-').unwrap_or(s);
-    if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit() || c == '.') { s.parse().ok() } else { None }
+    if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        s.parse().ok()
+    } else {
+        None
+    }
 }
 
 fn in_range(value: &str, lo: &str, hi: &str) -> bool {
@@ -165,7 +169,10 @@ impl Brex {
 
     /// Parses the rules of a BREX document; a document without rules yields an empty `Brex`.
     pub fn from_document(doc: &Document) -> Brex {
-        let mut brex = Brex { dmc: Dmc::from_document(doc), ..Brex::default() };
+        let mut brex = Brex {
+            dmc: Dmc::from_document(doc),
+            ..Brex::default()
+        };
         for node in doc.descendants(doc.root()) {
             match doc.name(node) {
                 Some("structureObjectRule") => {
@@ -233,7 +240,9 @@ fn read_rule(doc: &Document, node: NodeId, ordinal: usize, names: RuleNames) -> 
         id: attr(doc, node, "id").unwrap_or_else(|| format!("rule-{ordinal}")),
         path: path_el.map(|p| text(doc, p)).unwrap_or_default(),
         flag,
-        use_text: child(doc, node, names.usage).map(|u| text(doc, u)).unwrap_or_default(),
+        use_text: child(doc, node, names.usage)
+            .map(|u| text(doc, u))
+            .unwrap_or_default(),
         values: doc
             .element_children(node)
             .filter(|&c| doc.name(c) == Some(names.value))
@@ -243,7 +252,9 @@ fn read_rule(doc: &Document, node: NodeId, ordinal: usize, names: RuleNames) -> 
 }
 
 fn read_value(doc: &Document, el: NodeId) -> ObjectValue {
-    let form_text = attr(doc, el, "valueForm").or_else(|| attr(doc, el, "valtype")).unwrap_or_default();
+    let form_text = attr(doc, el, "valueForm")
+        .or_else(|| attr(doc, el, "valtype"))
+        .unwrap_or_default();
     let form = match form_text.trim().to_ascii_lowercase().as_str() {
         "range" => ValueForm::Range,
         "pattern" => ValueForm::Pattern,
@@ -257,20 +268,31 @@ fn read_value(doc: &Document, el: NodeId) -> ObjectValue {
             _ => String::new(),
         }
     });
-    ObjectValue { form, allowed, description: text(doc, el) }
+    ObjectValue {
+        form,
+        allowed,
+        description: text(doc, el),
+    }
 }
 
 const SNS_CODE: [&str; 2] = ["snsCode", "snscode"];
 const SNS_TITLE: [&str; 3] = ["snsTitle", "snsName", "snstitle"];
 
 fn first_child_text(doc: &Document, node: NodeId, names: &[&str]) -> Option<String> {
-    names.iter().find_map(|n| child(doc, node, n)).map(|e| text(doc, e))
+    names
+        .iter()
+        .find_map(|n| child(doc, node, n))
+        .map(|e| text(doc, e))
 }
 
 fn read_sns(doc: &Document, node: NodeId, parent_code: &str, out: &mut Vec<SnsRule>) {
     let mut code = parent_code.to_string();
     if let Some(own) = first_child_text(doc, node, &SNS_CODE) {
-        code = if parent_code.is_empty() { own } else { format!("{parent_code}-{own}") };
+        code = if parent_code.is_empty() {
+            own
+        } else {
+            format!("{parent_code}-{own}")
+        };
         out.push(SnsRule {
             code: code.clone(),
             title: first_child_text(doc, node, &SNS_TITLE).unwrap_or_default(),
@@ -284,7 +306,8 @@ fn read_sns(doc: &Document, node: NodeId, parent_code: &str, out: &mut Vec<SnsRu
 
 fn read_notation(doc: &Document, node: NodeId) -> Option<NotationRule> {
     let name = first_child_text(doc, node, &["notationName", "notname"])?;
-    let description = first_child_text(doc, node, &["notationUse", "notuse", "notationDescr"]).unwrap_or_default();
+    let description = first_child_text(doc, node, &["notationUse", "notuse", "notationDescr"])
+        .unwrap_or_default();
     Some(NotationRule { name, description })
 }
 
@@ -328,14 +351,20 @@ pub fn check_brex(doc: &Document, brex: &Brex) -> Vec<BrexViolation> {
         let xpath: XPath = match xylem_xpath::compile(&rule.path) {
             Ok(x) => x,
             Err(e) => {
-                out.push(warn(format!("objectPath '{}' is not valid XPath: {e}", rule.path)));
+                out.push(warn(format!(
+                    "objectPath '{}' is not valid XPath: {e}",
+                    rule.path
+                )));
                 continue;
             }
         };
         let nodes = match xpath.select_with(doc, XNode::Node(doc.root()), &ctx) {
             Ok(n) => n,
             Err(e) => {
-                out.push(warn(format!("objectPath '{}' could not be evaluated: {e}", rule.path)));
+                out.push(warn(format!(
+                    "objectPath '{}' could not be evaluated: {e}",
+                    rule.path
+                )));
                 continue;
             }
         };
@@ -360,11 +389,22 @@ pub fn check_brex(doc: &Document, brex: &Brex) -> Vec<BrexViolation> {
                 for n in &nodes {
                     let value = node_value(doc, *n);
                     if !constrained {
-                        out.push(error(n, format!("{} ({})", describe(rule, "prohibited object present"), location(doc, *n))));
+                        out.push(error(
+                            n,
+                            format!(
+                                "{} ({})",
+                                describe(rule, "prohibited object present"),
+                                location(doc, *n)
+                            ),
+                        ));
                     } else if in_allowed_set(&value) {
                         out.push(error(
                             n,
-                            format!("{} ({}, value '{value}')", describe(rule, "prohibited value"), location(doc, *n)),
+                            format!(
+                                "{} ({}, value '{value}')",
+                                describe(rule, "prohibited value"),
+                                location(doc, *n)
+                            ),
                         ));
                     }
                 }
@@ -374,7 +414,10 @@ pub fn check_brex(doc: &Document, brex: &Brex) -> Vec<BrexViolation> {
                     out.push(BrexViolation {
                         node: None,
                         rule_id: rule.id.clone(),
-                        message: describe(rule, &format!("required object not found: {}", rule.path)),
+                        message: describe(
+                            rule,
+                            &format!("required object not found: {}", rule.path),
+                        ),
                         severity: Severity::Error,
                     });
                 }
@@ -401,11 +444,19 @@ pub fn check_brex(doc: &Document, brex: &Brex) -> Vec<BrexViolation> {
 }
 
 fn describe(rule: &BrexRule, fallback: &str) -> String {
-    if rule.use_text.is_empty() { fallback.to_string() } else { rule.use_text.clone() }
+    if rule.use_text.is_empty() {
+        fallback.to_string()
+    } else {
+        rule.use_text.clone()
+    }
 }
 
 fn allowed_summary(rule: &BrexRule) -> String {
-    rule.values.iter().map(|v| v.allowed.as_str()).collect::<Vec<_>>().join(", ")
+    rule.values
+        .iter()
+        .map(|v| v.allowed.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn node_value(doc: &Document, n: XNode) -> String {
@@ -417,7 +468,11 @@ fn location(doc: &Document, n: XNode) -> String {
     match n {
         XNode::Node(id) => doc.path(id),
         XNode::Attr(id, i) => {
-            let name = doc.element(id).and_then(|e| e.attrs.get(i)).map(|a| a.name.as_str()).unwrap_or("?");
+            let name = doc
+                .element(id)
+                .and_then(|e| e.attrs.get(i))
+                .map(|a| a.name.as_str())
+                .unwrap_or("?");
             format!("{}/@{name}", doc.path(id))
         }
     }

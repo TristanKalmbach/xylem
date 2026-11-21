@@ -46,8 +46,8 @@ impl Script {
             let step = match cmd {
                 "wait" => Step::Wait(rest.trim().parse().unwrap_or(10)),
                 "type" => Step::Type(rest.to_string()),
-                "paste" => Step::Paste(rest.replace("\n", "
-")),
+                // `\n` in the script stands for a line break in the pasted text.
+                "paste" => Step::Paste(rest.replace("\\n", "\n")),
                 "key" => {
                     let mut it = rest.split_whitespace();
                     let Some(k) = it.next().and_then(Key::from_name) else {
@@ -110,9 +110,18 @@ impl Script {
         // Scripted runs drive the window as if it had OS focus.
         raw.focused = true;
         if let Some((p, b)) = self.release.take() {
-            let m = if std::mem::take(&mut self.hold_ctrl) { Modifiers::COMMAND } else { Modifiers::NONE };
+            let m = if std::mem::take(&mut self.hold_ctrl) {
+                Modifiers::COMMAND
+            } else {
+                Modifiers::NONE
+            };
             raw.modifiers = m;
-            raw.events.push(Event::PointerButton { pos: p, button: b, pressed: false, modifiers: m });
+            raw.events.push(Event::PointerButton {
+                pos: p,
+                button: b,
+                pressed: false,
+                modifiers: m,
+            });
             return;
         }
         if self.wait > 0 {
@@ -164,13 +173,21 @@ impl Script {
             Step::CtrlClick(p) => {
                 raw.modifiers = Modifiers::COMMAND;
                 raw.events.push(Event::PointerMoved(p));
-                raw.events.push(Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::COMMAND });
+                raw.events.push(Event::PointerButton {
+                    pos: p,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::COMMAND,
+                });
                 self.release = Some((p, PointerButton::Primary));
                 self.hold_ctrl = true;
             }
             Step::Shot(p) => self.pending_shot = Some(p),
             Step::Save(p) => self.pending_save = Some(p),
-            Step::Drop(p) => raw.dropped_files.push(egui::DroppedFile { path: Some(p), ..Default::default() }),
+            Step::Drop(p) => raw.dropped_files.push(egui::DroppedFile {
+                path: Some(p),
+                ..Default::default()
+            }),
             Step::Quit => self.quit = true,
         }
     }

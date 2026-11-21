@@ -79,7 +79,10 @@ impl Value {
             Value::String(s) => s.clone(),
             Value::Boolean(b) => b.to_string(),
             Value::Number(n) => number_to_string(*n),
-            Value::NodeSet(nodes) => nodes.first().map(|&n| string_value(doc, n)).unwrap_or_default(),
+            Value::NodeSet(nodes) => nodes
+                .first()
+                .map(|&n| string_value(doc, n))
+                .unwrap_or_default(),
         }
     }
 
@@ -158,9 +161,11 @@ pub(crate) fn is_namespace_decl(name: &str) -> bool {
 /// The XPath string-value of a node.
 pub fn string_value(doc: &Document, node: XNode) -> String {
     match node {
-        XNode::Attr(id, i) => {
-            doc.element(id).and_then(|e| e.attrs.get(i)).map(|a| a.value.clone()).unwrap_or_default()
-        }
+        XNode::Attr(id, i) => doc
+            .element(id)
+            .and_then(|e| e.attrs.get(i))
+            .map(|a| a.value.clone())
+            .unwrap_or_default(),
         XNode::Node(id) => match doc.kind(id) {
             NodeKind::Document | NodeKind::Element(_) => {
                 let mut s = String::new();
@@ -206,7 +211,11 @@ pub(crate) fn number_to_string(n: f64) -> String {
     if n.is_nan() {
         "NaN".to_string()
     } else if n.is_infinite() {
-        if n > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() }
+        if n > 0.0 {
+            "Infinity".to_string()
+        } else {
+            "-Infinity".to_string()
+        }
     } else if n == 0.0 {
         "0".to_string()
     } else {

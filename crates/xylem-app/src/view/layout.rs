@@ -133,13 +133,22 @@ impl Decor {
         let d = Vec2::new(0.0, dy);
         match self {
             Decor::Fill(r, c) => Decor::Fill(r.translate(d), *c),
-            Decor::Marker { pos, text, font, color } => Decor::Marker {
+            Decor::Marker {
+                pos,
+                text,
+                font,
+                color,
+            } => Decor::Marker {
                 pos: *pos + d,
                 text: text.clone(),
                 font: font.clone(),
                 color: *color,
             },
-            Decor::Border { rect, widths, colors } => Decor::Border {
+            Decor::Border {
+                rect,
+                widths,
+                colors,
+            } => Decor::Border {
                 rect: rect.translate(d),
                 widths: *widths,
                 colors: *colors,
@@ -159,7 +168,10 @@ impl DocLayout {
         };
         let first = *self.first_para.get(p.node.index())? as usize;
         if first == u32::MAX as usize {
-            return self.element_paras.get(&p.node).map(|&(a, _)| Loc { para: a, ch: 0 });
+            return self
+                .element_paras
+                .get(&p.node)
+                .map(|&(a, _)| Loc { para: a, ch: 0 });
         }
         if doc.is_text(p.node) {
             // A text node's characters sit in one paragraph, or a few
@@ -168,7 +180,9 @@ impl DocLayout {
             for (pi, para) in self.paras.iter().enumerate().skip(first) {
                 let mut seen = false;
                 for seg in para.segs.iter() {
-                    let SegKind::Text { node, bytes } = &seg.kind else { continue };
+                    let SegKind::Text { node, bytes } = &seg.kind else {
+                        continue;
+                    };
                     if *node != p.node {
                         continue;
                     }
@@ -177,13 +191,22 @@ impl DocLayout {
                     if p.offset >= lo && p.offset <= hi {
                         // Position of the first displayed char at or after offset.
                         let i = bytes.partition_point(|&b| b < p.offset);
-                        return Some(Loc { para: pi, ch: seg.chars.start + i.min(seg.chars.len()) });
+                        return Some(Loc {
+                            para: pi,
+                            ch: seg.chars.start + i.min(seg.chars.len()),
+                        });
                     }
                     if p.offset < lo && best.is_none() {
-                        best = Some(Loc { para: pi, ch: seg.chars.start });
+                        best = Some(Loc {
+                            para: pi,
+                            ch: seg.chars.start,
+                        });
                     }
                     if p.offset > hi {
-                        best = Some(Loc { para: pi, ch: seg.chars.end });
+                        best = Some(Loc {
+                            para: pi,
+                            ch: seg.chars.end,
+                        });
                     }
                 }
                 let stop_here = para.stops.iter().any(|(_, s)| s.node == p.node);
@@ -200,7 +223,10 @@ impl DocLayout {
             return best;
         }
         // Element gap: the exact stop, else the nearest stop in the element.
-        let last = self.element_paras.get(&p.node).map_or(self.paras.len() - 1, |&(_, b)| b);
+        let last = self
+            .element_paras
+            .get(&p.node)
+            .map_or(self.paras.len() - 1, |&(_, b)| b);
         let mut nearest: Option<(usize, Loc)> = None;
         for (pi, para) in self.paras.iter().enumerate().take(last + 1).skip(first) {
             for &(ch, s) in para.stops.iter() {
@@ -751,16 +777,23 @@ impl<'a> Layouter<'a> {
         let stamp = self.doc.subtree_stamp(el);
         let style = self.styles.subtree_hash(el);
         let index = self.index[el.index()];
-        if cacheable {
-            if let Some(cb) = self.cache.blocks.get(&el) {
-                if cb.stamp == stamp && cb.style == style && cb.x == self.x && cb.width == self.width {
-                    self.reuse_block(el, index);
-                    return;
-                }
-            }
+        if cacheable
+            && let Some(cb) = self.cache.blocks.get(&el)
+            && cb.stamp == stamp
+            && cb.style == style
+            && cb.x == self.x
+            && cb.width == self.width
+        {
+            self.reuse_block(el, index);
+            return;
         }
         self.cache.stats.blocks_laid_out += 1;
-        let (p0, d0, i0, y0) = (self.out.paras.len(), self.out.decor.len(), self.out.images.len(), self.y);
+        let (p0, d0, i0, y0) = (
+            self.out.paras.len(),
+            self.out.decor.len(),
+            self.out.images.len(),
+            self.y,
+        );
         let (x, width) = (self.x, self.width);
         self.block_inner(el);
         if cacheable && self.cur.is_none() {
@@ -780,7 +813,10 @@ impl<'a> Layouter<'a> {
                 index,
                 y0,
                 y1: self.y,
-                paras: self.out.paras[p0..].iter().map(|p| p.shifted(0.0)).collect(),
+                paras: self.out.paras[p0..]
+                    .iter()
+                    .map(|p| p.shifted(0.0))
+                    .collect(),
                 decor: self.out.decor[d0..].to_vec(),
                 images: self.out.images[i0..].to_vec(),
                 elements,
@@ -819,17 +855,32 @@ impl<'a> Layouter<'a> {
             self.push_para(q);
         }
         let d = Vec2::new(0.0, dy);
-        self.out.decor.extend(cb.decor.iter().map(|x| x.shifted(dy)));
-        self.out.images.extend(cb.images.iter().map(|i| ImageBox { rect: i.rect.translate(d), ..i.clone() }));
+        self.out
+            .decor
+            .extend(cb.decor.iter().map(|x| x.shifted(dy)));
+        self.out.images.extend(cb.images.iter().map(|i| ImageBox {
+            rect: i.rect.translate(d),
+            ..i.clone()
+        }));
         for &(n, (a, b)) in &cb.elements {
             self.out.element_paras.insert(n, (a + base, b + base));
         }
         self.y = cb.y1 + dy;
         // Keep the entry in step with where the block now sits.
         if dy != 0.0 || shift != 0 {
-            cb.paras = self.out.paras[base..].iter().map(|p| p.shifted(0.0)).collect();
+            cb.paras = self.out.paras[base..]
+                .iter()
+                .map(|p| p.shifted(0.0))
+                .collect();
             cb.decor = cb.decor.iter().map(|x| x.shifted(dy)).collect();
-            cb.images = cb.images.iter().map(|i| ImageBox { rect: i.rect.translate(d), ..i.clone() }).collect();
+            cb.images = cb
+                .images
+                .iter()
+                .map(|i| ImageBox {
+                    rect: i.rect.translate(d),
+                    ..i.clone()
+                })
+                .collect();
             cb.y0 += dy;
             cb.y1 += dy;
             cb.index = index;
@@ -1295,8 +1346,17 @@ impl<'a> Layouter<'a> {
         self.begin_para(el, TextAlign::Left, 0.0);
         let name = self.doc.name(el).unwrap_or("").to_string();
         let mut fmt = self.tag_fmt(&name);
-        fmt.color = if self.params.dark { Color32::from_gray(170) } else { Color32::from_gray(90) };
-        let hidden = self.doc.descendants(el).filter(|&n| self.doc.is_element(n)).count().saturating_sub(1);
+        fmt.color = if self.params.dark {
+            Color32::from_gray(170)
+        } else {
+            Color32::from_gray(90)
+        };
+        let hidden = self
+            .doc
+            .descendants(el)
+            .filter(|&n| self.doc.is_element(n))
+            .count()
+            .saturating_sub(1);
         let label = if self.tags() {
             format!("  ... {hidden} hidden  ")
         } else {
@@ -1411,13 +1471,19 @@ impl<'a> Layouter<'a> {
                 self.out.decor.push(Decor::Grid(r, grid));
                 if let Some(bg) = cs.background {
                     idx.push(self.out.decor.len());
-                    self.out.decor.push(Decor::Fill(r, adjust_bg_for_dark(bg, self.params.dark)));
+                    self.out
+                        .decor
+                        .push(Decor::Fill(r, adjust_bg_for_dark(bg, self.params.dark)));
                 }
                 if rows_spanned > 1 {
                     for c in occupied.iter_mut().take(end + 1).skip(start) {
                         *c = rows_spanned;
                     }
-                    spanning.push(Spanning { decor: idx, rows_left: rows_spanned, content_bottom });
+                    spanning.push(Spanning {
+                        decor: idx,
+                        rows_left: rows_spanned,
+                        content_bottom,
+                    });
                 } else {
                     max_bottom = max_bottom.max(content_bottom);
                     row_decor.extend(idx);
@@ -1535,18 +1601,33 @@ impl<'a> Layouter<'a> {
 
     /// Column ranges given explicitly by CALS `colname` / `namest`+`nameend`.
     /// `None` for cells that are placed in the next free column instead.
-    fn explicit_columns(&self, row: NodeId, cells: &[NodeId], ncols: usize) -> Vec<Option<(usize, usize)>> {
-        let group = self
-            .doc
-            .ancestors(row)
-            .find(|&a| self.doc.element(a).is_some_and(|e| e.local_name() == "tgroup"));
+    fn explicit_columns(
+        &self,
+        row: NodeId,
+        cells: &[NodeId],
+        ncols: usize,
+    ) -> Vec<Option<(usize, usize)>> {
+        let group = self.doc.ancestors(row).find(|&a| {
+            self.doc
+                .element(a)
+                .is_some_and(|e| e.local_name() == "tgroup")
+        });
         let names: Vec<String> = match group {
             Some(g) => self
                 .doc
                 .element_children(g)
-                .filter(|&c| self.doc.element(c).is_some_and(|e| e.local_name() == "colspec"))
+                .filter(|&c| {
+                    self.doc
+                        .element(c)
+                        .is_some_and(|e| e.local_name() == "colspec")
+                })
                 .enumerate()
-                .map(|(i, c)| self.doc.attr(c, "colname").map(str::to_string).unwrap_or_else(|| format!("col{}", i + 1)))
+                .map(|(i, c)| {
+                    self.doc
+                        .attr(c, "colname")
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("col{}", i + 1))
+                })
                 .collect(),
             None => Vec::new(),
         };
@@ -1554,7 +1635,8 @@ impl<'a> Layouter<'a> {
         cells
             .iter()
             .map(|&c| {
-                let start = col(self.doc.attr(c, "namest")).or_else(|| col(self.doc.attr(c, "colname")))?;
+                let start =
+                    col(self.doc.attr(c, "namest")).or_else(|| col(self.doc.attr(c, "colname")))?;
                 let end = col(self.doc.attr(c, "nameend")).unwrap_or(start).max(start);
                 Some((start.min(ncols - 1), end.min(ncols - 1)))
             })
@@ -1584,7 +1666,7 @@ impl<'a> Layouter<'a> {
             pb.stop(inside);
         }
         // Generated images lead in ::before and trail in ::after.
-        self.generated_images(el, false, &s);
+        self.generated_images(el, false, s);
         if let Some((text, gs)) = self.styles.before(el) {
             self.generated(el, &text, &gs);
         }
@@ -1614,7 +1696,7 @@ impl<'a> Layouter<'a> {
                 _ => self.atom(c),
             }
         }
-        self.generated_images(el, true, &s);
+        self.generated_images(el, true, s);
         if let Some((text, gs)) = self.styles.after(el) {
             self.generated(el, &text, &gs);
         }

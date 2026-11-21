@@ -156,7 +156,14 @@ fn structure_node(
                 ui.close();
             }
             let collapsed = ds.canvas.collapsed.contains(&n);
-            if ui.button(if collapsed { "Expand in document" } else { "Collapse in document" }).clicked() {
+            if ui
+                .button(if collapsed {
+                    "Expand in document"
+                } else {
+                    "Collapse in document"
+                })
+                .clicked()
+            {
                 out.push(PanelAction::Collapse(n, !collapsed));
                 ui.close();
             }
