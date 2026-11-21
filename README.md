@@ -17,6 +17,9 @@ What it does:
   byte, including entities, quoting, whitespace and encoding.
 - Has CALS and HTML tables, find and replace, spell checking with Hunspell
   dictionaries, a structure tree, an attribute inspector and an issues list.
+- Tracks changes and keeps review comments in XMetaL's markup, so reviewed
+  files round-trip with XMetaL users; see
+  [docs/track-changes.md](docs/track-changes.md).
 - For S1000D: a new data module wizard, DMC and CSDB file naming, BREX
   checking, dmRef navigation and a built-in stylesheet.
 - Converts XMAX customizations (`.ctm` folders and `.xac` archives) into Xylem
@@ -82,6 +85,9 @@ own, or:
 | Ctrl+Shift+V | paste as plain text |
 | Ctrl+Space | insert an element (or surround the selection) |
 | Ctrl+Shift+- / = | collapse / expand the current element |
+| Ctrl+Shift+T | track changes on / off |
+| Ctrl+Shift+M | new comment |
+| Ctrl+Shift+A / R | accept / reject all changes |
 | F3 / Shift+F3 | find next / previous |
 | F1 | all keyboard shortcuts |
 
