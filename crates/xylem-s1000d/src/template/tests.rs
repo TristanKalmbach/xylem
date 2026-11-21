@@ -255,3 +255,29 @@ fn default_brex_by_issue() {
     let legacy = build(Issue::V3_0, SchemaKind::Descript);
     assert!(!legacy.contains("brexDmRef"));
 }
+
+#[test]
+fn publication_module_template() {
+    let pmc = Pmc::parse("PMC-S1000DBIKE-C0419-00001-00").unwrap();
+    let options = NewModuleOptions::new(date());
+    for issue in Issue::ALL {
+        let result = new_publication_module(issue, &pmc, "Bike & rider", ("en", "US"), &options);
+        if issue.is_legacy() {
+            assert!(result.is_err(), "{issue}");
+            continue;
+        }
+        let xml = result.unwrap();
+        let doc = Document::from_str(&xml).unwrap_or_else(|e| panic!("{issue}: {e}\n{xml}"));
+        let info = detect(&doc).unwrap_or_else(|| panic!("{issue} not detected"));
+        assert_eq!(info.issue, issue);
+        assert_eq!(info.schema, SchemaKind::Pm);
+        let ident = crate::ident::PmIdent::from_document(&doc).unwrap();
+        assert_eq!(ident.pmc, pmc);
+        assert_eq!(ident.title.as_deref(), Some("Bike & rider"));
+        assert_eq!(
+            ident.csdb_filename().unwrap(),
+            "PMC-S1000DBIKE-C0419-00001-00_001-00_en-US.XML"
+        );
+        assert!(xml.contains("<pmEntry>"));
+    }
+}

@@ -6,7 +6,10 @@
 
 use std::path::PathBuf;
 use xylem_dom::Document;
-use xylem_s1000d::{Dmc, Issue, IssueDate, available_kinds, new_data_module};
+use xylem_s1000d::{
+    Dmc, Issue, IssueDate, NewModuleOptions, Pmc, available_kinds, new_data_module,
+    new_publication_module,
+};
 use xylem_schema::{Catalog, Grammar, Severity};
 
 fn schema_root() -> Option<PathBuf> {
@@ -79,5 +82,47 @@ fn generated_modules_are_schema_valid() {
         }
     }
     println!("{checked} modules validated, {} problem(s)", failures.len());
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+#[ignore = "needs the official S1000D schemas (XYLEM_S1000D_SCHEMAS)"]
+fn generated_publication_modules_are_schema_valid() {
+    let Some(root) = schema_root() else { return };
+    let cat = catalog(&root);
+    let pmc = Pmc::parse("PMC-XYLEM-00000-00001-00").unwrap();
+    let options = NewModuleOptions::new(IssueDate::new(2026, 11, 20));
+    let mut failures = Vec::new();
+    for issue in Issue::ALL.into_iter().filter(|i| !i.is_legacy()) {
+        let xml = new_publication_module(issue, &pmc, "Lift manual", ("en", "US"), &options)
+            .unwrap_or_else(|e| panic!("{issue}: {e}"));
+        let doc = Document::from_str(&xml).unwrap_or_else(|e| panic!("{issue}: {e}"));
+        let grammar = match Grammar::for_document(&doc, None, &cat) {
+            Some(Ok(g)) => g,
+            Some(Err(e)) => {
+                failures.push(format!("{issue} pm: schema did not load: {e}"));
+                continue;
+            }
+            None => {
+                failures.push(format!("{issue} pm: no schema reference"));
+                continue;
+            }
+        };
+        let errors: Vec<String> = grammar
+            .validate(&doc)
+            .into_iter()
+            .filter(|e| e.severity == Severity::Error)
+            .map(|e| format!("{} ({})", e.message, doc.path(e.node)))
+            .collect();
+        if errors.is_empty() {
+            println!("ok    {issue} pm");
+        } else {
+            println!("FAIL  {issue} pm");
+            for e in &errors {
+                println!("        {e}");
+            }
+            failures.push(format!("{issue} pm: {} error(s)", errors.len()));
+        }
+    }
     assert!(failures.is_empty(), "{failures:#?}");
 }
