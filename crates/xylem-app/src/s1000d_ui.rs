@@ -130,9 +130,10 @@ pub fn applic_window(ctx: &egui::Context, dlg: &mut ApplicDialog, ds: Option<&mu
             {
                 crate::ui::notice(
                     ui,
-                    crate::ui::Tone::Warning,
-                    "Issues 2.0 to 2.3 state applicability as text (type, model, version) \
-                     that cannot be evaluated, so nothing is filtered.",
+                    crate::ui::Tone::Accent,
+                    "Issue 2.x applicability is read from the model, version and serial \
+                     numbers listed in each applic. The specification doesn't define this \
+                     evaluation, so check the result against your project's rules.",
                 );
             }
             crate::ui::form(ui, "applic-mode", |f| {

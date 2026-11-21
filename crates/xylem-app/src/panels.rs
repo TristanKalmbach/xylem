@@ -588,6 +588,11 @@ fn attr_editor(
             .hint_text(default.unwrap_or("")),
     );
     crate::script::track(&format!("attribute {name}"), &resp);
+    resp.widget_info(|| {
+        let mut info = egui::WidgetInfo::text_edit(true, buf.as_str(), buf.as_str(), "");
+        info.label = Some(format!("Attribute {name}"));
+        info
+    });
     if resp.has_focus() {
         ui.data_mut(|d| d.insert_temp(id, buf.clone()));
     } else {

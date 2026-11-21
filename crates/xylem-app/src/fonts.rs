@@ -280,10 +280,259 @@ pub fn install(ctx: &egui::Context) -> FontSet {
     strong.extend(prop);
     defs.families
         .insert(crate::ui::theme::strong_family(), strong);
+    // Symbols most text fonts lack (arrows, maths, dingbats): small, so
+    // always loaded.
+    if let Some(bytes) = find(&[
+        "seguisym.ttf",
+        "NotoSansSymbols-Regular.ttf",
+        "DejaVuSans.ttf",
+    ]) {
+        defs.font_data.insert(
+            "fallback-symbols".into(),
+            Arc::new(FontData::from_owned(bytes)),
+        );
+        for chain in defs.families.values_mut() {
+            chain.push("fallback-symbols".into());
+        }
+    }
+    if let Ok(mut base) = BASE.lock() {
+        *base = Some(defs.clone());
+    }
     ctx.set_fonts(defs);
     FontSet {
         has_bold: loaded.contains("sans-b"),
         has_italic: loaded.contains("sans-i"),
         has_serif: loaded.contains("serif"),
+    }
+}
+
+// ------------------------------------------------------------------ scripts
+
+/// The definitions installed at start-up, extended as documents need more
+/// scripts.
+static BASE: std::sync::Mutex<Option<FontDefinitions>> = std::sync::Mutex::new(None);
+
+/// Writing systems that need fonts beyond the Latin ones loaded at start-up.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Script {
+    Arabic,
+    Hebrew,
+    Thai,
+    Indic,
+    Japanese,
+    Korean,
+    ChineseSimplified,
+    ChineseTraditional,
+}
+
+impl Script {
+    pub fn name(self) -> &'static str {
+        match self {
+            Script::Arabic => "Arabic",
+            Script::Hebrew => "Hebrew",
+            Script::Thai => "Thai",
+            Script::Indic => "Indic",
+            Script::Japanese => "Japanese",
+            Script::Korean => "Korean",
+            Script::ChineseSimplified | Script::ChineseTraditional => "Chinese",
+        }
+    }
+
+    /// Scripts whose letters change shape or order with their neighbours.
+    /// The text layout draws them one character at a time, left to right,
+    /// so they show but don't read correctly yet.
+    pub fn needs_shaping(self) -> bool {
+        matches!(
+            self,
+            Script::Arabic | Script::Hebrew | Script::Thai | Script::Indic
+        )
+    }
+
+    fn fonts(self) -> &'static [&'static str] {
+        match self {
+            // Segoe UI and Arial already cover these on Windows.
+            Script::Arabic => &[
+                "segoeui.ttf",
+                "arial.ttf",
+                "NotoSansArabic-Regular.ttf",
+                "DejaVuSans.ttf",
+                "GeezaPro.ttc",
+            ],
+            Script::Hebrew => &[
+                "segoeui.ttf",
+                "arial.ttf",
+                "NotoSansHebrew-Regular.ttf",
+                "DejaVuSans.ttf",
+                "ArialHB.ttc",
+            ],
+            Script::Thai => &[
+                "LeelawUI.ttf",
+                "tahoma.ttf",
+                "NotoSansThai-Regular.ttf",
+                "Thonburi.ttc",
+            ],
+            Script::Indic => &[
+                "Nirmala.ttc",
+                "Nirmala.ttf",
+                "NotoSansDevanagari-Regular.ttf",
+                "Kohinoor.ttc",
+            ],
+            Script::Japanese => &[
+                "YuGothR.ttc",
+                "YuGothM.ttc",
+                "meiryo.ttc",
+                "msgothic.ttc",
+                "NotoSansCJK-Regular.ttc",
+                "NotoSansCJKjp-Regular.otf",
+                "Hiragino Sans GB.ttc",
+            ],
+            Script::Korean => &[
+                "malgun.ttf",
+                "NotoSansCJK-Regular.ttc",
+                "NotoSansCJKkr-Regular.otf",
+                "AppleSDGothicNeo.ttc",
+            ],
+            Script::ChineseSimplified => &[
+                "msyh.ttc",
+                "simsun.ttc",
+                "NotoSansCJK-Regular.ttc",
+                "NotoSansCJKsc-Regular.otf",
+                "PingFang.ttc",
+            ],
+            Script::ChineseTraditional => &[
+                "msjh.ttc",
+                "mingliu.ttc",
+                "NotoSansCJK-Regular.ttc",
+                "NotoSansCJKtc-Regular.otf",
+                "PingFang.ttc",
+            ],
+        }
+    }
+}
+
+/// The scripts used in `text`. `traditional` picks Traditional Chinese
+/// fonts for Han characters (from the document's `xml:lang`).
+pub fn scripts_in(text: &str, traditional: bool) -> Vec<Script> {
+    let (mut han, mut kana, mut hangul) = (false, false, false);
+    let mut found = Vec::new();
+    let add = |s: Script, found: &mut Vec<Script>| {
+        if !found.contains(&s) {
+            found.push(s);
+        }
+    };
+    for c in text.chars() {
+        let u = c as u32;
+        if u < 0x0590 {
+            continue;
+        }
+        match u {
+            0x0590..=0x05FF | 0xFB1D..=0xFB4F => add(Script::Hebrew, &mut found),
+            0x0600..=0x06FF
+            | 0x0750..=0x077F
+            | 0x08A0..=0x08FF
+            | 0xFB50..=0xFDFF
+            | 0xFE70..=0xFEFF => add(Script::Arabic, &mut found),
+            0x0900..=0x0DFF => add(Script::Indic, &mut found),
+            0x0E00..=0x0E7F => add(Script::Thai, &mut found),
+            0x3040..=0x30FF | 0x31F0..=0x31FF => kana = true,
+            0x1100..=0x11FF | 0x3130..=0x318F | 0xAC00..=0xD7AF => hangul = true,
+            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x2FFFF => han = true,
+            _ => {}
+        }
+    }
+    if kana {
+        found.push(Script::Japanese);
+    }
+    if hangul {
+        found.push(Script::Korean);
+    }
+    // Japanese fonts lack many Chinese characters, so Han text always gets
+    // a Chinese font too (after the Japanese one when both are present).
+    if han {
+        found.push(if traditional {
+            Script::ChineseTraditional
+        } else {
+            Script::ChineseSimplified
+        });
+    }
+    found
+}
+
+/// Makes sure fonts for `scripts` are installed, adding them as fallbacks
+/// to every family. Returns the scripts that were newly added (so callers
+/// can lay text out again), and those no installed font covers.
+pub fn ensure(ctx: &egui::Context, scripts: &[Script]) -> (Vec<Script>, Vec<Script>) {
+    static LOADED: std::sync::Mutex<Vec<Script>> = std::sync::Mutex::new(Vec::new());
+    let Ok(mut loaded) = LOADED.lock() else {
+        return (Vec::new(), Vec::new());
+    };
+    let wanted: Vec<Script> = scripts
+        .iter()
+        .copied()
+        .filter(|s| !loaded.contains(s))
+        .collect();
+    if wanted.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let Ok(mut base) = BASE.lock() else {
+        return (Vec::new(), Vec::new());
+    };
+    let Some(defs) = base.as_mut() else {
+        return (Vec::new(), Vec::new());
+    };
+    let (mut added, mut missing) = (Vec::new(), Vec::new());
+    for s in wanted {
+        loaded.push(s);
+        let key = format!("script-{s:?}");
+        if defs.font_data.contains_key(&key) {
+            continue;
+        }
+        match find(s.fonts()) {
+            Some(bytes) => {
+                defs.font_data
+                    .insert(key.clone(), Arc::new(FontData::from_owned(bytes)));
+                for chain in defs.families.values_mut() {
+                    chain.push(key.clone());
+                }
+                log::info!("loaded fonts for {s:?} text");
+                added.push(s);
+            }
+            None => {
+                log::warn!("no font found for {s:?} text");
+                missing.push(s);
+            }
+        }
+    }
+    if !added.is_empty() {
+        ctx.set_fonts(defs.clone());
+    }
+    (added, missing)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scripts_are_recognised() {
+        assert!(scripts_in("Plain English, café, naïve", false).is_empty());
+        assert_eq!(
+            scripts_in("保养手册", false),
+            vec![Script::ChineseSimplified]
+        );
+        assert_eq!(
+            scripts_in("保養手冊", true),
+            vec![Script::ChineseTraditional]
+        );
+        assert_eq!(
+            scripts_in("取扱説明書をお読みください", false),
+            vec![Script::Japanese, Script::ChineseSimplified]
+        );
+        assert_eq!(scripts_in("사용 설명서", false), vec![Script::Korean]);
+        assert_eq!(scripts_in("دليل المستخدم", false), vec![Script::Arabic]);
+        assert_eq!(scripts_in("מדריך", false), vec![Script::Hebrew]);
+        assert_eq!(scripts_in("คู่มือ", false), vec![Script::Thai]);
+        assert_eq!(scripts_in("उपयोगकर्ता", false), vec![Script::Indic]);
+        assert!(Script::Arabic.needs_shaping() && !Script::Japanese.needs_shaping());
     }
 }

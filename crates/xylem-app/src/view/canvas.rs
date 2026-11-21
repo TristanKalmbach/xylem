@@ -235,6 +235,26 @@ impl Canvas {
                 Sense::click_and_drag(),
             );
             let origin = rect.min;
+            // To a screen reader the document is a text field whose value is
+            // the paragraph (block) holding the caret, named after its element.
+            resp.widget_info(|| {
+                let doc = &ed.doc;
+                let block = xylem_edit::pos::container(doc, ed.sel.focus);
+                let name = doc.name(block).unwrap_or("document").to_string();
+                let mut text: String = doc.descendants(block).filter_map(|n| doc.text(n)).collect();
+                if text.len() > 4000 {
+                    let mut cut = 4000;
+                    while !text.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    text.truncate(cut);
+                }
+                {
+                    let mut info = egui::WidgetInfo::text_edit(!cx.read_only, &text, &text, "");
+                    info.label = Some(format!("Document, {name}"));
+                    info
+                }
+            });
             if self.request_focus {
                 resp.request_focus();
                 self.request_focus = false;

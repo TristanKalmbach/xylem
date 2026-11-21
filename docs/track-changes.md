@@ -58,12 +58,18 @@ When tracking is on:
 - Typing inside someone else's insertion splits it: theirs ends, yours
   follows, and theirs resumes after it.
 
-Structural edits are not tracked in this version. These happen as ordinary
-edits even with tracking on:
+Inserting and deleting whole elements is tracked too. A new element (from
+the Elements panel, Ctrl+Space, a table or a template) gets insertion marks
+around it, so rejecting it removes it. Deleting an element replaces it with
+a deletion mark that holds its markup, so rejecting puts it back exactly,
+including any changes it held. Deleting an element you inserted yourself, or
+an empty one (such as the blank paragraph Enter leaves), simply removes it.
+
+These still happen as ordinary edits with tracking on:
 
 - splitting and joining paragraphs (Enter, and Backspace at the start of a
   paragraph);
-- inserting, removing, renaming and moving elements;
+- renaming, moving, surrounding and removing tags from elements;
 - attribute changes and table operations;
 - pasting whole blocks between paragraphs.
 
@@ -108,9 +114,8 @@ when it rewrites a mark (to extend a deletion, or edit a comment). If XMetaL
 turns out to use other names, `crates/xylem-edit/src/revision.rs` is the one
 place to change them.
 
-Times are written in UTC (`+0000`). The Rust standard library cannot tell
-the local time zone, and UTC keeps the stamps exact. They are shown in the
-Review panel as stored.
+Times are written in the author's local time with its UTC offset
+(`20261121T145816-0500`), as XMetaL does.
 
 Marks you don't touch are saved byte for byte, like everything else in the
 document.

@@ -22,7 +22,7 @@ fn track(label: &str, r: &Response) {
 /// A compact, frameless button showing an icon. `tooltip` is also the
 /// label scripts use; `shortcut` is shown in the tooltip.
 pub fn icon_button(ui: &mut Ui, glyph: &str, tooltip: &str, shortcut: Option<&str>) -> Response {
-    icon_toggle(ui, false, glyph, tooltip, shortcut)
+    icon_widget(ui, None, glyph, tooltip, shortcut)
 }
 
 /// Like [`icon_button`], drawn as pressed while `selected`.
@@ -33,6 +33,18 @@ pub fn icon_toggle(
     tooltip: &str,
     shortcut: Option<&str>,
 ) -> Response {
+    icon_widget(ui, Some(selected), glyph, tooltip, shortcut)
+}
+
+/// `toggle` is `Some(on)` for buttons that switch something on and off.
+fn icon_widget(
+    ui: &mut Ui,
+    toggle: Option<bool>,
+    glyph: &str,
+    tooltip: &str,
+    shortcut: Option<&str>,
+) -> Response {
+    let selected = toggle.unwrap_or(false);
     let p = palette(ui.ctx());
     let size = vec2(30.0, 28.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
@@ -68,6 +80,12 @@ pub fn icon_toggle(
         Some(s) => format!("{tooltip}  ({s})"),
         None => tooltip.to_string(),
     };
+    // Screen readers get the name (and state) the icon only shows visually.
+    let enabled_now = ui.is_enabled();
+    resp.widget_info(|| match toggle {
+        Some(on) => egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled_now, on, &tip),
+        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled_now, &tip),
+    });
     let resp = resp.on_hover_text(tip);
     track(tooltip, &resp);
     resp
@@ -208,6 +226,13 @@ pub fn menu_item(
             );
         }
     }
+    r.widget_info(|| {
+        let name = match shortcut {
+            Some(sc) => format!("{label} ({sc})"),
+            None => label.to_string(),
+        };
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name)
+    });
     let r = if enabled {
         r.on_hover_cursor(egui::CursorIcon::Default)
     } else {
@@ -272,6 +297,14 @@ pub fn panel_tabs<T: PartialEq + Copy>(ui: &mut Ui, value: &mut T, options: &[(T
                 .size(size::BODY)
                 .color(if selected { p.text } else { p.text_muted });
             let r = ui.add(egui::Label::new(text).sense(Sense::click()));
+            r.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    true,
+                    selected,
+                    *label,
+                )
+            });
             if selected {
                 let y = r.rect.bottom() + 3.0;
                 ui.painter()
@@ -490,6 +523,14 @@ pub fn text_field(ui: &mut Ui, label: &str, text: &mut String, hint: &str, width
             .desired_width((width - 12.0).max(24.0))
             .margin(Margin::symmetric(6, 4)),
     );
+    // Hint text vanishes once something is typed; screen readers need a
+    // name that stays.
+    let enabled = ui.is_enabled();
+    r.widget_info(|| {
+        let mut info = egui::WidgetInfo::text_edit(enabled, text.as_str(), text.as_str(), hint);
+        info.label = Some(label.to_string());
+        info
+    });
     track(label, &r);
     r
 }
@@ -661,6 +702,7 @@ fn close_button(ui: &mut Ui) -> Response {
         FontId::proportional(size::ICON),
         if resp.hovered() { p.text } else { p.text_muted },
     );
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
     let resp = resp.on_hover_text("Close (Esc)");
     track("Close", &resp);
     resp
@@ -798,6 +840,16 @@ pub fn list_row(ui: &mut Ui, row: Row<'_>) -> RowResponse {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT), Sense::click());
     let mut toggled = false;
+    response.widget_info(|| {
+        let mut name = row.text.to_string();
+        if let Some(d) = row.detail.filter(|d| !d.is_empty()) {
+            name = format!("{name}, {d}");
+        }
+        if let Some(open) = row.chevron {
+            name.push_str(if open { ", expanded" } else { ", collapsed" });
+        }
+        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, row.selected, name)
+    });
     if !ui.is_rect_visible(rect) {
         return RowResponse { response, toggled };
     }

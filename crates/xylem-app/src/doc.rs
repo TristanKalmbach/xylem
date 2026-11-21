@@ -83,6 +83,10 @@ pub struct DocState {
     pub missing_warned: bool,
     /// Shown instead of the file name (copies of other versions).
     pub title_override: Option<String>,
+    /// Revision whose text was last checked for scripts needing fonts.
+    pub scripts_checked: Option<u64>,
+    /// Already warned that some text can't be shaped correctly.
+    pub shaping_warned: bool,
     pub inline_styles: HashMap<NodeId, String>,
     pub image_cache: HashMap<String, Option<egui::TextureHandle>>,
     pub image_sizes: HashMap<String, Option<egui::Vec2>>,
@@ -154,6 +158,8 @@ impl DocState {
             disk_ignored: None,
             missing_warned: false,
             title_override: None,
+            scripts_checked: None,
+            shaping_warned: false,
             inline_styles: HashMap::new(),
             image_cache: HashMap::new(),
             image_sizes: HashMap::new(),

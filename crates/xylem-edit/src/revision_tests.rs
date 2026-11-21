@@ -586,3 +586,125 @@ fn replacing_several_matches_in_one_text_node() {
     assert!(e.undo());
     assert_eq!(xml(&e), "<doc><p>cat and cat</p></doc>");
 }
+
+// ------------------------------------------------------------------ elements
+
+const TWO: &str = "<doc><section><p>One</p><p>Two</p></section></doc>";
+
+fn section(e: &Editor) -> NodeId {
+    e.doc
+        .descendants(e.doc.root())
+        .find(|&n| e.doc.name(n) == Some("section"))
+        .unwrap()
+}
+
+fn p_with(e: &Editor, text: &str) -> NodeId {
+    let t = at(e, text, 0).node;
+    e.doc.parent(t).unwrap()
+}
+
+#[test]
+fn inserted_elements_are_tracked_and_reject_removes_them() {
+    let mut e = tracked(TWO);
+    let s = section(&e);
+    e.set_caret(Pos::new(s, 1));
+    e.insert_element_xml(&R, "p", "<p>New</p>").unwrap();
+    assert_eq!(
+        xml(&e),
+        format!("<doc><section><p>One</p>{INS}<p>New</p>{END}<p>Two</p></section></doc>")
+    );
+    // Typing inside it extends the same insertion, no nested marks.
+    e.set_caret(at(&e, "New", 3));
+    type_str(&mut e, "er");
+    assert_eq!(xml(&e).matches("insertion_mark_start").count(), 1);
+
+    let mark = changes(&e.doc)[0].node;
+    e.reject_change(&R, mark).unwrap();
+    assert_eq!(xml(&e), TWO);
+}
+
+#[test]
+fn accepting_an_inserted_element_keeps_it() {
+    let mut e = tracked(TWO);
+    let s = section(&e);
+    e.set_caret(Pos::new(s, 2));
+    e.insert_element_xml(&R, "p", "<p>Three</p>").unwrap();
+    e.resolve_all(&R, true).unwrap();
+    assert_eq!(
+        xml(&e),
+        "<doc><section><p>One</p><p>Two</p><p>Three</p></section></doc>"
+    );
+}
+
+#[test]
+fn deleted_elements_are_kept_in_a_deletion_mark() {
+    let mut e = tracked(TWO);
+    let two = p_with(&e, "Two");
+    e.delete_element(&R, two).unwrap();
+    assert_eq!(
+        xml(&e),
+        format!(
+            "<doc><section><p>One</p>{}</section></doc>",
+            del("&lt;p&gt;Two&lt;/p&gt;")
+        )
+    );
+    let c = &changes(&e.doc)[0];
+    assert_eq!(c.kind, ChangeKind::Deletion);
+    assert_eq!(c.excerpt, "Two");
+    // Reject brings the element back exactly; undo does too.
+    e.reject_change(&R, c.node).unwrap();
+    assert_eq!(xml(&e), TWO);
+    e.undo();
+    e.undo();
+    assert_eq!(xml(&e), TWO);
+
+    let mut e = tracked(TWO);
+    let two = p_with(&e, "Two");
+    e.delete_element(&R, two).unwrap();
+    e.resolve_all(&R, true).unwrap();
+    assert_eq!(xml(&e), "<doc><section><p>One</p></section></doc>");
+}
+
+#[test]
+fn deleting_your_own_inserted_element_leaves_no_trace() {
+    let mut e = tracked(TWO);
+    let s = section(&e);
+    e.set_caret(Pos::new(s, 1));
+    let n = e.insert_element_xml(&R, "p", "<p>Oops</p>").unwrap();
+    e.delete_element(&R, n).unwrap();
+    assert!(!xml(&e).contains("deletion_mark"), "{}", xml(&e));
+    // Only the now-empty insertion pair is left, which tidying removes or
+    // accepting clears; either way no deletion is recorded.
+    e.resolve_all(&R, true).ok();
+    assert_eq!(xml(&e), TWO);
+}
+
+#[test]
+fn removing_an_empty_element_is_not_recorded() {
+    let mut e = tracked("<doc><section><p>One</p><p></p></section></doc>");
+    let empty = e
+        .doc
+        .descendants(e.doc.root())
+        .filter(|&n| e.doc.name(n) == Some("p"))
+        .nth(1)
+        .unwrap();
+    e.delete_element(&R, empty).unwrap();
+    assert_eq!(xml(&e), "<doc><section><p>One</p></section></doc>");
+}
+
+#[test]
+fn resolving_works_on_documents_read_from_disk() {
+    let src = format!(
+        "<doc><section><p>a{INS}X{END}b{}c</p></section></doc>",
+        del("Y")
+    );
+    for (accept, want) in [(true, "aXbc"), (false, "abYc")] {
+        let mut e = Editor::new(Document::from_str(&src).unwrap());
+        e.resolve_all(&R, accept).unwrap();
+        assert_eq!(
+            xml(&e),
+            format!("<doc><section><p>{want}</p></section></doc>"),
+            "accept={accept}"
+        );
+    }
+}

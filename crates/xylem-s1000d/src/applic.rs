@@ -6,10 +6,16 @@
 //! `evaluate` (`andOr`), collected in `referencedApplicGroup` and referenced
 //! from content through `applicRefId`. Issue 3.0 has the same model under
 //! other names (`actidref`, `actreftype`, `actvalues`, `evaluate/@operator`,
-//! `inlineapplics` and `refapplic`), so it is evaluated too. Issues 2.0 to 2.3
-//! state applicability only as `type` and `model`/`version` text, which has no
-//! defined evaluation; those documents report no properties and nothing is
-//! filtered.
+//! `inlineapplics` and `refapplic`), so it is evaluated too.
+//!
+//! Issues 2.0 to 2.3 have no asserts. Their `applic` lists the models it
+//! covers (`model/@model`), each optionally narrowed to versions
+//! (`version/@version`) and serial numbers (`serialno` or `version/versrank`,
+//! as `single` values and `range from/to`); content points at a `version` by
+//! its id through `refapplic`. Those become three properties, `model`,
+//! `version` and `serialno` (kind `2.x`), and a statement applies when one of
+//! its models matches everything chosen. The specification does not define
+//! this evaluation; it is the reading of the markup an author would expect.
 //!
 //! Evaluation is three-valued. An assert on a property the user left at "any"
 //! is unknown, and unknown counts as applicable: the filter only removes what
@@ -121,10 +127,47 @@ fn markup_of(doc: &Document) -> Markup {
     sections(doc).map_or(Markup::Modern, |s| s.markup)
 }
 
+/// Property kind used for the issue 2.x model/version/serial properties.
+pub const KIND_2X: &str = "2.x";
+
 /// Every property named by an assert in the document, sorted by identifier.
 pub fn applic_properties(doc: &Document) -> Vec<ApplicProperty> {
     let n = names(markup_of(doc));
     let mut found: BTreeMap<PropertyKey, BTreeSet<String>> = BTreeMap::new();
+    // Issue 2.x statements.
+    for model in doc.descendants(doc.root()).filter(|&e| is_2x_model(doc, e)) {
+        if let Some(m) = doc.attr(model, "model") {
+            found
+                .entry(PropertyKey::new("model", KIND_2X))
+                .or_default()
+                .insert(m.to_string());
+        }
+        let versions: Vec<NodeId> = doc
+            .element_children(model)
+            .filter(|&c| doc.name(c) == Some("version"))
+            .collect();
+        for &v in &versions {
+            if let Some(name) = doc.attr(v, "version") {
+                found
+                    .entry(PropertyKey::new("version", KIND_2X))
+                    .or_default()
+                    .insert(name.to_string());
+            }
+        }
+        let mut serials = serial_ranges(doc, model);
+        for &v in &versions {
+            serials.extend(serial_ranges(doc, v));
+        }
+        for (low, high) in serials {
+            let set = found
+                .entry(PropertyKey::new("serialno", KIND_2X))
+                .or_default();
+            set.insert(low);
+            if let Some(h) = high {
+                set.insert(h);
+            }
+        }
+    }
     for el in doc.descendants(doc.root()) {
         if doc.name(el) != Some("assert") {
             continue;
@@ -178,6 +221,99 @@ pub fn values_match(spec: &str, value: &str) -> bool {
     })
 }
 
+/// A `model` element inside an issue 2.x `applic`.
+fn is_2x_model(doc: &Document, el: NodeId) -> bool {
+    doc.name(el) == Some("model")
+        && doc
+            .parent(el)
+            .is_some_and(|p| doc.name(p) == Some("applic"))
+}
+
+/// Serial numbers an element (model or version) is limited to, as
+/// (single or low, high) pairs from its `serialno` and `versrank` children,
+/// each holding `single` text and `range from/to`.
+fn serial_ranges(doc: &Document, el: NodeId) -> Vec<(String, Option<String>)> {
+    let mut out = Vec::new();
+    for holder in doc
+        .element_children(el)
+        .filter(|&c| matches!(doc.name(c), Some("serialno" | "versrank")))
+    {
+        for item in doc.element_children(holder) {
+            match doc.name(item) {
+                Some("single") => {
+                    let t: String = doc.descendants(item).filter_map(|n| doc.text(n)).collect();
+                    if !t.trim().is_empty() {
+                        out.push((t.trim().to_string(), None));
+                    }
+                }
+                Some("range") => {
+                    if let (Some(f), Some(t)) = (doc.attr(item, "from"), doc.attr(item, "to")) {
+                        out.push((f.trim().to_string(), Some(t.trim().to_string())));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// One part of a 2.x statement. Nothing chosen is unknown (unless the
+/// statement doesn't restrict it); otherwise it holds when a value matches.
+fn component(chosen: Option<&String>, allowed: &[(String, Option<String>)]) -> Truth {
+    match chosen {
+        _ if allowed.is_empty() => Truth::True,
+        None => Truth::Unknown,
+        Some(v) => {
+            let spec: Vec<String> = allowed
+                .iter()
+                .map(|(l, h)| match h {
+                    Some(h) => format!("{l}~{h}"),
+                    None => l.clone(),
+                })
+                .collect();
+            if values_match(&spec.join("|"), v) {
+                Truth::True
+            } else {
+                Truth::False
+            }
+        }
+    }
+}
+
+fn chosen_2x<'a>(choice: &'a ApplicChoice, ident: &str) -> Option<&'a String> {
+    choice.get(&PropertyKey::new(ident, KIND_2X))
+}
+
+/// A 2.x model, optionally narrowed to one of its versions.
+fn evaluate_2x_model(
+    doc: &Document,
+    model: NodeId,
+    only: Option<NodeId>,
+    choice: &ApplicChoice,
+) -> Truth {
+    let name = doc.attr(model, "model").unwrap_or("").to_string();
+    let model_t = component(chosen_2x(choice, "model"), &[(name, None)]);
+    let versions: Vec<NodeId> = match only {
+        Some(v) => vec![v],
+        None => doc
+            .element_children(model)
+            .filter(|&c| doc.name(c) == Some("version"))
+            .collect(),
+    };
+    let version_names: Vec<(String, Option<String>)> = versions
+        .iter()
+        .filter_map(|&v| doc.attr(v, "version").map(|n| (n.to_string(), None)))
+        .collect();
+    let version_t = component(chosen_2x(choice, "version"), &version_names);
+    let mut serials = serial_ranges(doc, model);
+    for &v in &versions {
+        serials.extend(serial_ranges(doc, v));
+    }
+    let serial_t = component(chosen_2x(choice, "serialno"), &serials);
+    model_t.and(version_t).and(serial_t)
+}
+
 /// Evaluates an `applic`, `assert` or `evaluate` element.
 pub fn evaluate(doc: &Document, el: NodeId, choice: &ApplicChoice) -> Truth {
     evaluate_with(doc, el, choice, names(markup_of(doc)))
@@ -185,6 +321,21 @@ pub fn evaluate(doc: &Document, el: NodeId, choice: &ApplicChoice) -> Truth {
 
 fn evaluate_with(doc: &Document, el: NodeId, choice: &ApplicChoice, n: &Names) -> Truth {
     match doc.name(el) {
+        Some("applic") if doc.element_children(el).any(|c| is_2x_model(doc, c)) => {
+            // Issue 2.x: applies when any listed model does.
+            let mut models = doc.element_children(el).filter(|&c| is_2x_model(doc, c));
+            let first = models
+                .next()
+                .map_or(Truth::True, |m| evaluate_2x_model(doc, m, None, choice));
+            models.fold(first, |acc, m| {
+                acc.or(evaluate_2x_model(doc, m, None, choice))
+            })
+        }
+        // Issue 2.x content points at one version of one model.
+        Some("version") => match doc.parent(el).filter(|&m| is_2x_model(doc, m)) {
+            Some(model) => evaluate_2x_model(doc, model, Some(el), choice),
+            None => Truth::Unknown,
+        },
         Some("applic") => {
             // Display text alone states no computable condition.
             let logic = doc
@@ -283,9 +434,14 @@ pub fn filter_document(doc: &Document, choice: &ApplicChoice) -> ApplicFilterRes
         result.excluded.push(content);
         return result;
     }
+    // `applic` statements, and in issue 2.x the `version`s content points at.
     let by_id: HashMap<&str, NodeId> = doc
         .descendants(root)
-        .filter(|&e| doc.name(e) == Some("applic"))
+        .filter(|&e| {
+            doc.name(e) == Some("applic")
+                || (doc.name(e) == Some("version")
+                    && doc.parent(e).is_some_and(|m| is_2x_model(doc, m)))
+        })
         .filter_map(|e| Some((doc.attr(e, "id")?, e)))
         .collect();
     let mut memo: HashMap<NodeId, Truth> = HashMap::new();
@@ -494,14 +650,63 @@ mod tests {
     }
 
     #[test]
-    fn issue_2_x_reports_nothing() {
+    fn issue_2_x_models_versions_and_serials() {
         let xml = r#"<dmodule><idstatus><dmaddres><dmc><avee><modelic>X</modelic></avee></dmc></dmaddres>
-<status><applic><type>Lift</type><model model="L1"><version version="A"/></model></applic></status></idstatus>
-<content><descript><para0><title>T</title></para0></descript></content></dmodule>"#;
+<status><applic><type>Lift</type>
+<model model="L100"><version version="A" id="v-a"/><version version="B" id="v-b"/></model>
+<model model="L200"><version version="A" id="v2-a"><versrank><range from="500" to="999"/></versrank></version></model>
+</applic></status></idstatus>
+<content><descript>
+<para0 id="all"><title>Both</title></para0>
+<para0 id="l100a" refapplic="v-a"><title>L100 A</title></para0>
+<para0 id="l100b" refapplic="v-b"><title>L100 B</title></para0>
+<para0 id="late" refapplic="v2-a"><title>L200 late</title></para0>
+</descript></content></dmodule>"#;
         let doc = Document::from_str(xml).unwrap();
-        assert!(applic_properties(&doc).is_empty());
-        let r = filter_document(&doc, &ApplicChoice::new());
-        assert_eq!(r.module, Some(Truth::True));
-        assert!(r.excluded.is_empty());
+        let props = applic_properties(&doc);
+        let key = |i: &str| PropertyKey::new(i, KIND_2X);
+        let values = |i: &str| {
+            props
+                .iter()
+                .find(|p| p.key == key(i))
+                .map(|p| p.values.clone())
+        };
+        assert_eq!(values("model"), Some(vec!["L100".into(), "L200".into()]));
+        assert_eq!(values("version"), Some(vec!["A".into(), "B".into()]));
+        assert_eq!(values("serialno"), Some(vec!["500".into(), "999".into()]));
+
+        let pick = |pairs: &[(&str, &str)]| -> ApplicChoice {
+            pairs.iter().map(|(k, v)| (key(k), v.to_string())).collect()
+        };
+        let excluded = |c: &ApplicChoice| -> Vec<String> {
+            filter_document(&doc, c)
+                .excluded
+                .iter()
+                .map(|&n| doc.attr(n, "id").unwrap_or("?").to_string())
+                .collect()
+        };
+        assert!(
+            excluded(&ApplicChoice::new()).is_empty(),
+            "nothing chosen excludes nothing"
+        );
+        assert_eq!(excluded(&pick(&[("model", "L100")])), ["late"]);
+        assert_eq!(
+            excluded(&pick(&[("model", "L100"), ("version", "B")])),
+            ["l100a", "late"]
+        );
+        assert_eq!(
+            excluded(&pick(&[("model", "L200"), ("serialno", "600")])),
+            ["l100a", "l100b"]
+        );
+        // An L200 below serial 500 isn't covered by the module at all.
+        assert_eq!(
+            filter_document(&doc, &pick(&[("model", "L200"), ("serialno", "100")])).module,
+            Some(Truth::False)
+        );
+        // A model the module doesn't cover excludes all its content.
+        let r = filter_document(&doc, &pick(&[("model", "L300")]));
+        assert_eq!(r.module, Some(Truth::False));
+        assert_eq!(doc.name(r.excluded[0]), Some("content"));
+        assert!(r.dangling.is_empty());
     }
 }

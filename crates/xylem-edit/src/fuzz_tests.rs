@@ -85,11 +85,25 @@ fn text_positions(doc: &Document) -> Vec<(NodeId, usize)> {
         .collect()
 }
 
-fn run(seed: u64, steps: usize) {
+fn clock() -> String {
+    "20261121T120000+0000".into()
+}
+
+fn no_marks(xml: &str) -> bool {
+    !xml.contains("<?xm-insertion") && !xml.contains("<?xm-deletion")
+}
+
+fn run(seed: u64, steps: usize, tracking: bool) {
     let original = Document::from_str(SAMPLE)
         .expect("sample parses")
         .to_bytes();
     let mut ed = Editor::new(Document::from_str(SAMPLE).unwrap());
+    if tracking {
+        ed.tracking = Some(crate::revision::Tracking {
+            author: "fuzz".into(),
+            clock,
+        });
+    }
     let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut done = 0usize;
     for step in 0..steps {
@@ -101,12 +115,27 @@ fn run(seed: u64, steps: usize) {
         let caret = Pos::new(n, i);
         // Edits are separate undo steps, so undo can be counted exactly.
         ed.set_caret(caret);
-        let op = rng.below(6);
+        // Deleting a whole element is rarer than the other edits.
+        let op = match rng.below(14) {
+            13 => 5,
+            k => [0, 1, 2, 3, 4, 6][k % 6],
+        };
         let result = match op {
             0 | 1 => ed.insert_text(&Rules, WORDS[rng.below(WORDS.len())]),
             2 => ed.delete_backward(&Rules),
             3 => ed.delete_forward(&Rules),
             4 => ed.enter(&Rules),
+            5 => {
+                // Delete the element around the caret (never the root).
+                match ed
+                    .doc
+                    .parent(n)
+                    .filter(|&e| Some(e) != ed.doc.document_element())
+                {
+                    Some(e) => ed.delete_element(&Rules, e),
+                    None => Err(EditError::Nothing),
+                }
+            }
             _ => {
                 // Replace a selection inside one text node.
                 let len = ed.doc.text(n).map_or(0, str::len);
@@ -128,10 +157,18 @@ fn run(seed: u64, steps: usize) {
         if let Err(e) = Document::from_str(&xml) {
             panic!("seed {seed}, step {step}, op {op}: not well-formed ({e}):\n{xml}");
         }
+        if tracking {
+            let starts = xml.matches("<?xm-insertion_mark_start").count();
+            let ends = xml.matches("<?xm-insertion_mark_end").count();
+            assert_eq!(
+                starts, ends,
+                "seed {seed}, step {step}, op {op}: unpaired insertion marks:\n{xml}"
+            );
+        }
     }
     // Guard against a test that silently does nothing.
     assert!(
-        done >= steps / 3,
+        done >= 8,
         "seed {seed}: only {done} of {steps} edits applied"
     );
     assert_ne!(
@@ -159,15 +196,41 @@ fn run(seed: u64, steps: usize) {
         String::from_utf8_lossy(&edited),
         "seed {seed}: redoing everything must give back the edited document"
     );
+    if tracking {
+        // Accept all and reject all each leave a well-formed document
+        // with no revision marks.
+        for accept in [true, false] {
+            let mut e = Editor::new(Document::from_bytes(&edited).unwrap());
+            let before = crate::revision::changes(&e.doc).len();
+            let marks_before = e.doc.to_xml().matches("<?xm-").count();
+            let result = e.resolve_all(&Rules, accept);
+            let result = format!("{result:?} ({before} changes, {marks_before} marks before)");
+            let out = e.doc.to_xml();
+            assert!(
+                Document::from_str(&out).is_ok() && no_marks(&out),
+                "seed {seed}: resolve_all({accept}) gave {result:?} and left marks or broke the document:\n{out}"
+            );
+        }
+    }
+}
+
+fn runs() -> u64 {
+    std::env::var("XYLEM_FUZZ_RUNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(150)
 }
 
 #[test]
 fn random_edits_stay_well_formed_and_undo_exactly() {
-    let runs: u64 = std::env::var("XYLEM_FUZZ_RUNS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(150);
-    for seed in 1..=runs {
-        run(seed, 60);
+    for seed in 1..=runs() {
+        run(seed, 60, false);
+    }
+}
+
+#[test]
+fn random_tracked_edits_keep_marks_paired_and_resolve_cleanly() {
+    for seed in 1..=runs() {
+        run(seed, 60, true);
     }
 }

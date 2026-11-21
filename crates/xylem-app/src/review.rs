@@ -15,15 +15,15 @@ pub fn os_user_name() -> String {
         .unwrap_or_else(|| "Anonymous".to_string())
 }
 
-/// The current time in XMetaL's stamp format. The standard library has no
-/// time zone support, so stamps are written in UTC with a `+0000` offset;
-/// they are exact, just not in local time.
+/// The current local time in XMetaL's stamp format, with the machine's UTC
+/// offset (`20261121T141502-0500`). Falls back to UTC if the time zone can't
+/// be determined.
 pub fn now() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
+    let now = jiff::Timestamp::now();
+    let offset_minutes = jiff::tz::TimeZone::try_system()
+        .map(|tz| tz.to_offset(now).seconds() / 60)
         .unwrap_or(0);
-    revision::format_time(secs, 0)
+    revision::format_time(now.as_second(), offset_minutes)
 }
 
 /// A colour per author, so reviewers can tell each other's changes apart.

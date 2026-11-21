@@ -645,6 +645,46 @@ impl Editor {
         }
     }
 
+    /// Marks a newly inserted element as a tracked insertion (insertion
+    /// marks on either side of it, which XML allows anywhere). Rejecting it
+    /// removes the element.
+    pub(crate) fn track_inserted_element(&mut self, el: NodeId) {
+        let (Some(parent), Some(idx)) = (self.doc.parent(el), self.doc.index_in_parent(el)) else {
+            return;
+        };
+        let (author, time) = self.stamp();
+        self.wrap_tracked(parent, idx, idx + 1, &author, &time);
+    }
+
+    /// Removes element `el` with tracking on: it is replaced by a deletion
+    /// mark holding its markup, so rejecting puts it back. An element the
+    /// author inserted themselves, or one with no content at all (such as
+    /// the empty paragraph Enter leaves behind), is simply removed.
+    pub(crate) fn tracked_remove_element(&mut self, rules: &dyn Rules, el: NodeId) -> EditResult {
+        let parent = self.doc.parent(el).ok_or(EditError::Nothing)?;
+        let idx = self.doc.index_in_parent(el).unwrap();
+        let (author, time) = self.stamp();
+        let own = enclosing_insertion(&self.doc, Pos::new(parent, idx))
+            .is_some_and(|s| self.is_own(s, &author));
+        let empty = self.doc.element_children(el).next().is_none()
+            && self
+                .doc
+                .descendants(el)
+                .filter_map(|n| self.doc.text(n))
+                .all(|t| t.trim().is_empty());
+        if own || empty {
+            self.doc.detach(el);
+            self.sel = Selection::caret(self.normalize_keep(rules, Pos::new(parent, idx)));
+            return Ok(());
+        }
+        let xml = self.doc.node_to_xml(el);
+        self.doc.detach(el);
+        let mark = self.add_deletion(parent, idx, &xml, &author, &time);
+        let after = self.doc.index_in_parent(mark).unwrap() + 1;
+        self.sel = Selection::caret(self.normalize_keep(rules, Pos::new(parent, after)));
+        Ok(())
+    }
+
     /// Before an element is split at `p`: an insertion running through `p`
     /// is ended there, and a copy of its start mark begins the other side,
     /// so each part keeps a complete pair. Returns the split point, which is
@@ -1009,9 +1049,23 @@ impl Editor {
         self.transact(|ed| {
             // Later changes first: rejecting an insertion takes any deletion
             // inside it along, and that deletion has been dealt with by then.
-            for n in nodes.into_iter().rev() {
-                if ed.attached(n) {
-                    ed.resolve(rules, n, accept)?;
+            let mut nodes = nodes;
+            // Rejecting a deleted element brings it back with the changes it
+            // held, which then need resolving too; repeat until none are
+            // left (bounded, in case a change can't be resolved).
+            for _ in 0..32 {
+                for n in nodes.into_iter().rev() {
+                    if ed.attached(n) {
+                        ed.resolve(rules, n, accept)?;
+                    }
+                }
+                nodes = changes(&ed.doc)
+                    .into_iter()
+                    .filter(|c| c.kind != ChangeKind::Comment)
+                    .map(|c| c.node)
+                    .collect();
+                if nodes.is_empty() {
+                    break;
                 }
             }
             Ok(())

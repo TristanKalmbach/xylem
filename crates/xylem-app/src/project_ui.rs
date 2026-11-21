@@ -240,6 +240,15 @@ impl ProjectView {
                         Sense::click(),
                     );
                     crate::script::track(&m.code, &resp);
+                    let selected_row = self.selected == Some(i);
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            true,
+                            selected_row,
+                            format!("{}, {}", m.code, m.title),
+                        )
+                    });
                     let visuals = ui.visuals();
                     if self.selected == Some(i) {
                         ui.painter()

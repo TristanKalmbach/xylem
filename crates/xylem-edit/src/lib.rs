@@ -936,6 +936,9 @@ impl Editor {
         if rules.is_non_removable(&self.doc, e) {
             return Err(EditError::ReadOnly);
         }
+        if self.is_tracking() {
+            return self.tracked_remove_element(rules, e);
+        }
         let parent = self.doc.parent(e).unwrap();
         let idx = self.doc.index_in_parent(e).unwrap();
         self.doc.detach(e);
@@ -1178,6 +1181,9 @@ impl Editor {
                     let idx = ed.doc.index_in_parent(cur).unwrap() + 1;
                     if ed.doc.is_element(parent) && rules.can_insert(&ed.doc, parent, idx, name) {
                         let n = ed.insert_new_element(rules, parent, idx, name, xml)?;
+                        if ed.is_tracking() {
+                            ed.track_inserted_element(n);
+                        }
                         ed.sel = Selection::caret(first_editable(&ed.doc, rules, n));
                         return Ok(n);
                     }
@@ -1188,6 +1194,9 @@ impl Editor {
                 )));
             }
             let n = ed.insert_new_element(rules, b.node, b.offset, name, xml)?;
+            if ed.is_tracking() {
+                ed.track_inserted_element(n);
+            }
             ed.sel = Selection::caret(first_editable(&ed.doc, rules, n));
             Ok(n)
         })

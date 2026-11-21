@@ -317,6 +317,7 @@ pub struct XylemApp {
     locks: HashMap<PathBuf, Option<crate::files::Lock>>,
     disk_poll: Option<std::sync::mpsc::Receiver<DiskStamps>>,
     last_disk_poll: f64,
+    last_script_check: f64,
     update: UpdateState,
     script: Option<crate::script::Script>,
     shot_path: Option<PathBuf>,
@@ -402,6 +403,7 @@ impl XylemApp {
             locks: HashMap::new(),
             disk_poll: None,
             last_disk_poll: 0.0,
+            last_script_check: 0.0,
             update: UpdateState::Idle,
             script: crate::script::Script::from_env(),
             shot_path: None,
@@ -2625,6 +2627,19 @@ impl XylemApp {
                                 glyph_color,
                             );
                         }
+                        resp.widget_info(|| {
+                            let name = if dirty {
+                                format!("{}, unsaved changes", title.trim_end_matches(" •"))
+                            } else {
+                                title.clone()
+                            };
+                            egui::WidgetInfo::selected(
+                                egui::WidgetType::SelectableLabel,
+                                true,
+                                active,
+                                name,
+                            )
+                        });
                         let resp = match &d.path {
                             Some(path) => resp.on_hover_text(path.display().to_string()),
                             None => resp.on_hover_text("Not saved yet"),
@@ -2707,6 +2722,9 @@ impl XylemApp {
                     if hovered {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
+                    r.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)
+                    });
                     crate::script::track(label, &r);
                     if r.clicked() {
                         cmds.push(cmd);
@@ -2750,6 +2768,13 @@ impl XylemApp {
                         egui::FontId::proportional(size::SMALL),
                         p.text_faint,
                     );
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            true,
+                            format!("Open {name}, {dir}"),
+                        )
+                    });
                     crate::script::track(&name, &resp);
                     if resp.on_hover_text(path.display().to_string()).clicked() {
                         cmds.push(Cmd::OpenPath(path.clone()));
@@ -3585,6 +3610,66 @@ impl XylemApp {
         }
     }
 
+    /// Loads fonts for the writing systems the active document uses, once
+    /// when it opens and then at most every two seconds while it changes
+    /// (scanning a large document on every keystroke would show).
+    fn check_scripts(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        let Some(ds) = self.docs.get(self.active) else {
+            return;
+        };
+        let rev = ds.editor.doc.revision();
+        if ds.scripts_checked == Some(rev)
+            || (ds.scripts_checked.is_some() && now - self.last_script_check < 2.0)
+        {
+            return;
+        }
+        self.last_script_check = now;
+        let doc = &ds.editor.doc;
+        let lang = doc
+            .document_element()
+            .and_then(|r| doc.attr(r, "xml:lang").or_else(|| doc.attr(r, "lang")))
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let traditional = ["zh-tw", "zh-hk", "zh-mo", "zh-hant"]
+            .iter()
+            .any(|t| lang.starts_with(t));
+        let scripts = crate::fonts::scripts_in(&doc.to_xml(), traditional);
+        let (added, missing) = crate::fonts::ensure(ctx, &scripts);
+        if !added.is_empty() {
+            // Cached layout was measured without these glyphs.
+            for d in &mut self.docs {
+                d.canvas.invalidate();
+            }
+        }
+        for s in missing {
+            self.toast(
+                format!(
+                    "No font for {} text was found on this computer; it shows as boxes.",
+                    s.name()
+                ),
+                true,
+            );
+        }
+        let ds = &mut self.docs[self.active];
+        ds.scripts_checked = Some(rev);
+        let unshaped: Vec<&str> = scripts
+            .iter()
+            .filter(|s| s.needs_shaping())
+            .map(|s| s.name())
+            .collect();
+        if !unshaped.is_empty() && !ds.shaping_warned {
+            ds.shaping_warned = true;
+            let names = unshaped.join(" and ");
+            self.toast(
+                format!(
+                    "This document has {names} text. Xylem shows its characters but can't yet join them or lay out right-to-left text, so check that text in another viewer."
+                ),
+                true,
+            );
+        }
+    }
+
     /// Holds a lock file for every open document that may be saved, and
     /// lets go of the rest (dropping a lock removes its file).
     fn sync_locks(&mut self) {
@@ -3892,7 +3977,8 @@ impl XylemApp {
                                     .unwrap_or_default();
                                 ui.label(format!("Saved {}", crate::files::age(*when)))
                                     .on_hover_text(&stamp);
-                                crate::ui::muted(ui, stamp.trim_end_matches(" UTC").get(11..).unwrap_or("").to_string() + " UTC");
+                                // Time of day, so versions saved minutes apart differ.
+                                crate::ui::muted(ui, stamp.get(11..).unwrap_or("").to_string());
                                 let size = std::fs::metadata(file).map(|m| m.len()).unwrap_or(0);
                                 crate::ui::muted(ui, format!("{:.1} KB", size as f64 / 1024.0));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -5554,6 +5640,7 @@ impl eframe::App for XylemApp {
         crate::ui::widgets::begin_frame(ctx);
         self.sync_locks();
         self.poll_disk(ctx);
+        self.check_scripts(ctx);
         self.poll_update_check();
         self.update_dialog(ctx);
         for p in std::mem::take(&mut self.pending_open) {

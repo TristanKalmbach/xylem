@@ -201,20 +201,32 @@ pub fn backups(doc: &Path) -> Vec<(PathBuf, SystemTime)> {
     v
 }
 
-/// A stamp such as `20261121T171502+0000` as `2026-11-21 17:15 UTC`.
+/// A stamp such as `20261121T141502-0500` as `2026-11-21 14:15`. Stamps are
+/// in the writer's local time; the offset is shown only when it differs
+/// from this machine's (someone in another time zone).
 pub fn readable_stamp(stamp: &str) -> String {
     let d = stamp.as_bytes();
-    if stamp.len() >= 13 && d[8] == b'T' && stamp.is_char_boundary(13) {
-        format!(
-            "{}-{}-{} {}:{} UTC",
-            &stamp[0..4],
-            &stamp[4..6],
-            &stamp[6..8],
-            &stamp[9..11],
-            &stamp[11..13]
-        )
-    } else {
-        stamp.to_string()
+    if !(stamp.is_ascii() && stamp.len() >= 13 && d[8] == b'T') {
+        return stamp.to_string();
+    }
+    let base = format!(
+        "{}-{}-{} {}:{}",
+        &stamp[0..4],
+        &stamp[4..6],
+        &stamp[6..8],
+        &stamp[9..11],
+        &stamp[11..13]
+    );
+    let theirs = stamp.get(15..).unwrap_or("");
+    let mine = crate::review::now();
+    match (theirs, mine.get(15..)) {
+        ("", _) => base,
+        (t, Some(m)) if t == m => base,
+        (t, _) => format!(
+            "{base} (UTC{}:{})",
+            &t[..t.len().min(3)],
+            t.get(3..).unwrap_or("00")
+        ),
     }
 }
 

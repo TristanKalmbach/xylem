@@ -32,6 +32,9 @@ are unverified.
 | Inline images | verified | PNG, JPEG, GIF, BMP, TIFF. CGM and SVG show a labelled box. |
 | Images in CSS generated content (`url(...)`) | verified | Drawn before the text in `::before`, after it in `::after`. |
 | Comments shown | verified | |
+| Chinese, Japanese and Korean text | verified | Fonts for these, Thai, Indic and symbols load when a document needs them (Windows fonts, or Noto on Linux). In a file mixing Japanese and Chinese, Chinese-only characters sit slightly lower on the line. |
+| Arabic, Hebrew and Indic text | partial | The characters show, but letters are not joined and right-to-left text runs left to right; the editor says so when such a document opens. The interface toolkit (egui) has no text shaping. |
+| Screen readers | tested | Every control, menu item, tree row and tab has a spoken name and state (checked through Windows UI Automation, which Narrator, NVDA and JAWS use); the document area reads as a text field with the current paragraph. Not yet tried with an actual screen reader. |
 | Zoom, light and dark themes | verified | Both kept across a restart. |
 
 ## CSS
@@ -97,8 +100,9 @@ XMetaL itself.
 | Edit and delete comments in the Review panel | verified | |
 | Review author in Preferences (login name by default) | verified | Set in Preferences and seen in the saved marks. |
 | Untouched marks saved byte for byte | verified | |
-| Structural edits tracked (split, join, insert or remove elements) | not done | They stay ordinary edits with tracking on. |
-| Time stamps in local time | partial | Written in UTC (`+0000`). |
+| Inserting and deleting elements tracked | verified | An inserted paragraph shows as an insertion and a deleted list item as a deletion; Reject all gave back the original file byte for byte. 240,000 random edits (half tracked) resolve cleanly both ways. |
+| Splitting, joining, renaming and moving elements tracked | not done | These stay ordinary edits with tracking on. |
+| Time stamps in local time | verified | Local time with the UTC offset (`-0500`). |
 
 ## Validation and tools
 
@@ -160,7 +164,7 @@ the host's installer and its shared customization folder.
 | Insert reference (dmRef, pmRef) from the project view | verified | Complete reference with issue, language and title, placed where the schema allows it; the publication module stays valid. 4.0+ markup only. |
 | Applicability filter, issues 4.0 to 6.0 (dim or hide) | verified | `assert`/`evaluate`, value lists and ranges, `applicRefId`, module-level applicability. Values are picked from those the asserts mention or typed. |
 | Applicability filter, issue 3.0 | tested | Same model with the 3.0 names (`actidref`, `refapplic`, `inlineapplics`). |
-| Applicability filter, issues 2.0 to 2.3 | not done | These issues state applicability as text (`type`, `model`, `version`), which has no defined evaluation. |
+| Applicability filter, issues 2.0 to 2.3 | tested | Model, version and serial-number ranges from `applic/model`, with content pointing at versions through `refapplic`. Not defined by the specification; see docs/s1000d.md. |
 
 ## Performance (release build, Windows)
 
