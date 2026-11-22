@@ -93,7 +93,8 @@ the changes involved first:
 - joining a paragraph that holds another author's pending insertions (they
   would be folded into yours);
 - joining a paragraph that is one half of a tracked split;
-- joining two paragraphs with a tracked deletion between them.
+- joining two paragraphs across a tracked deletion that lies inside an
+  insertion.
 
 Deleting one half of a tracked split is allowed: its content is marked
 deleted and the element stays, so the split can still be rejected. With

@@ -845,3 +845,51 @@ fn resolving_works_on_documents_read_from_disk() {
         );
     }
 }
+
+#[test]
+fn three_paragraphs_join_one_after_another() {
+    let src = "<doc><p>a</p><p>b</p><p>c</p></doc>";
+    let mut e = tracked(src);
+    e.set_caret(at(&e, "b", 0));
+    e.delete_backward(&R).unwrap();
+    e.set_caret(at(&e, "c", 0));
+    e.delete_backward(&R).unwrap();
+    assert_balanced(&e);
+    let (rejected, accepted) = reject_and_accept(&e);
+    assert_eq!(rejected, src);
+    assert_eq!(accepted, "<doc><p>abc</p></doc>");
+}
+
+#[test]
+fn joining_after_deleting_the_paragraph_between() {
+    let src = "<doc><p>a</p><p>b</p><p>c</p></doc>";
+    let mut e = tracked(src);
+    let b = e
+        .doc
+        .descendants(e.doc.root())
+        .filter(|&n| e.doc.name(n) == Some("p"))
+        .nth(1)
+        .unwrap();
+    e.delete_element(&R, b).unwrap();
+    e.set_caret(at(&e, "c", 0));
+    e.delete_backward(&R).unwrap();
+    assert_balanced(&e);
+    let (rejected, accepted) = reject_and_accept(&e);
+    assert_eq!(rejected, src);
+    assert_eq!(accepted, "<doc><p>ac</p></doc>");
+}
+
+#[test]
+fn changes_without_text_are_described() {
+    let mut e = tracked("<doc><p>ab</p><p>x<b/>y</p></doc>");
+    e.set_caret(at(&e, "ab", 1));
+    e.enter(&R).unwrap();
+    let b = e
+        .doc
+        .descendants(e.doc.root())
+        .find(|&n| e.doc.name(n) == Some("b"))
+        .unwrap();
+    e.delete_element(&R, b).unwrap();
+    let texts: Vec<String> = changes(&e.doc).into_iter().map(|c| c.excerpt).collect();
+    assert_eq!(texts, ["Split <p>", "Empty <b>"]);
+}

@@ -987,13 +987,17 @@ impl Editor {
     fn join(&mut self, rules: &dyn Rules, a: NodeId, b: NodeId) -> EditResult {
         self.check_writable(rules, a)?;
         self.check_writable(rules, b)?;
-        // A deletion between the two would end up outside whatever insertion
-        // it was in once `b`'s content moves up.
+        // A deletion between the two that lies inside an insertion would end
+        // up outside it once `b`'s content moves up.
         let mut cur = self.doc.next_sibling(a);
         while let Some(c) = cur
             && c != b
         {
-            if revision::mark_kind(&self.doc, c) == Some(revision::MarkKind::Deletion) {
+            let parent = self.doc.parent(c).unwrap();
+            let at = Pos::new(parent, self.doc.index_in_parent(c).unwrap());
+            if revision::mark_kind(&self.doc, c) == Some(revision::MarkKind::Deletion)
+                && revision::enclosing_insertion(&self.doc, at).is_some()
+            {
                 return Err(EditError::NotAllowed(
                     "Accept or reject the tracked deletion between these paragraphs first.".into(),
                 ));

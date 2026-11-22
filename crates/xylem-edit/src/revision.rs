@@ -449,6 +449,35 @@ pub fn change_of(doc: &Document, n: NodeId) -> Option<Change> {
         }
         MarkKind::InsertionEnd | MarkKind::CommentEnd => return None,
     };
+    // Changes with no text of their own get a description instead.
+    let excerpt = if !excerpt.trim().is_empty() {
+        excerpt
+    } else if kind == ChangeKind::Insertion {
+        let end_parent = end.and_then(|e| doc.parent(e));
+        match end_parent {
+            Some(ep) if Some(ep) != doc.parent(n) => {
+                format!("Split <{}>", doc.name(ep).unwrap_or("element"))
+            }
+            _ => {
+                let mut cur = doc.next_sibling(n);
+                let mut name = None;
+                while let Some(c) = cur
+                    && Some(c) != end
+                {
+                    if let Some(nm) = doc.name(c) {
+                        name = Some(nm.to_string());
+                        break;
+                    }
+                    cur = doc.next_sibling(c);
+                }
+                name.map_or(excerpt, |nm| format!("Empty <{nm}>"))
+            }
+        }
+    } else if kind == ChangeKind::Deletion {
+        describe_markup(data).unwrap_or(excerpt)
+    } else {
+        excerpt
+    };
     Some(Change {
         kind,
         node: n,
@@ -458,6 +487,20 @@ pub fn change_of(doc: &Document, n: NodeId) -> Option<Change> {
         excerpt,
         comment: comment.to_string(),
     })
+}
+
+/// What deleted markup with no text was: a placeholder or an empty element.
+fn describe_markup(xml: &str) -> Option<String> {
+    let t = xml.trim_start();
+    if t.starts_with("<?xm-replace_text") {
+        return Some("Placeholder".into());
+    }
+    let name: String = t
+        .strip_prefix('<')?
+        .chars()
+        .take_while(|c| !c.is_whitespace() && *c != '>' && *c != '/')
+        .collect();
+    (!name.is_empty() && !name.starts_with(['?', '!'])).then(|| format!("Empty <{name}>"))
 }
 
 /// The text between two markers, cut short for display.
