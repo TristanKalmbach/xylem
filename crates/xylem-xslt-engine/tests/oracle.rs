@@ -13,6 +13,10 @@
 //! - `suite` runs a stylesheet check suite (`XYLEM_XSLT_ENGINE_SUITE` = a
 //!   suite `.toml`) and reports how many saved outputs the engine
 //!   reproduces. Suites hold real documents and are never committed.
+//!   `XYLEM_XSLT_ENGINE_STYLESHEET` overrides the suite's stylesheet,
+//!   `XYLEM_XSLT_ENGINE_AGAINST_HOST=1` (with `XYLEM_SAXON_HOST`) compares
+//!   with the host's output instead of the saved one, and
+//!   `XYLEM_XSLT_ENGINE_LIMIT` runs only the first tests.
 //!
 //! ```text
 //! XYLEM_SAXON_HOST=C:\path\SaxonDotnetHost.exe cargo test -p xylem-xslt-engine --test oracle -- --ignored
@@ -155,7 +159,19 @@ fn suite() {
         return;
     };
     let suite = xylem_xslt::suite::Suite::load(Path::new(&path)).unwrap();
-    let style = suite.stylesheet.clone().expect("suite names no stylesheet");
+    let style = std::env::var_os("XYLEM_XSLT_ENGINE_STYLESHEET")
+        .map(PathBuf::from)
+        .or(suite.stylesheet.clone())
+        .expect("suite names no stylesheet; set XYLEM_XSLT_ENGINE_STYLESHEET");
+    // Compare with the live host instead of the saved outputs.
+    let against_host =
+        host().filter(|_| std::env::var_os("XYLEM_XSLT_ENGINE_AGAINST_HOST").is_some());
+    let limit: usize = std::env::var("XYLEM_XSLT_ENGINE_LIMIT")
+        .ok()
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(usize::MAX);
+    let tmp = std::env::temp_dir().join(format!("xylem-xslt-engine-suite-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
     let compiled = std::time::Instant::now();
     let ss = match Stylesheet::compile(&style) {
         Ok(s) => s,
@@ -163,9 +179,30 @@ fn suite() {
     };
     eprintln!("compiled in {:?}", compiled.elapsed());
     let (mut same, mut total) = (0, 0);
-    for t in &suite.tests {
-        let Some(expected) = &t.expected else {
-            continue;
+    for t in suite.tests.iter().take(limit) {
+        let expected = match &against_host {
+            Some(exe) => {
+                let out = tmp.join(format!("{total}.xml"));
+                let run = xylem_xslt::host::Host::new(exe).run(
+                    &style,
+                    &[(t.input.clone(), out.clone())],
+                    &t.params,
+                    false,
+                );
+                if let Some(e) = run.jobs.first().and_then(|j| j.error.clone()).or(run.error) {
+                    eprintln!(
+                        "{}: host failed: {}",
+                        t.name,
+                        e.lines().next().unwrap_or("")
+                    );
+                    continue;
+                }
+                out
+            }
+            None => match &t.expected {
+                Some(e) => e.clone(),
+                None => continue,
+            },
         };
         total += 1;
         let params: HashMap<String, String> = t.params.clone().into_iter().collect();
@@ -197,5 +234,6 @@ fn suite() {
             Err(e) => eprintln!("{}: error: {}", t.name, e.lines().next().unwrap_or("")),
         }
     }
+    let _ = std::fs::remove_dir_all(&tmp);
     eprintln!("{same} of {total} outputs identical");
 }

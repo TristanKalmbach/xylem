@@ -3,8 +3,9 @@
   <para>first line
 second line</para>
   <proc>
-    <step><para>a</para><step><para>a1</para></step><step><para>a2</para></step></step>
-    <step><para>b</para></step>
+    <item/>
+    <task><line>a</line><task><line>a1</line></task><task><line>a2</line></task></task>
+    <task><line>b</line></task>
   </proc>
   <!-- note -->
 </doc>

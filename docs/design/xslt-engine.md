@@ -12,14 +12,22 @@ the workspace, that produces the same bytes.
 ## Recommendation
 
 **Build it, on our own tree, from the W3C specifications.** The prototype
-already runs the full production publishing stylesheet (38 modules) and
-reproduces the saved output of **43 of 43** documents in the four check
-suites tried, identical under the Check tool's own comparison (which only
-renumbers the document part of `generate-id()` values). That result, from
-about 5,800 lines, is the main evidence that building is feasible and that
-the remaining work is mostly matching details rather than missing
-architecture. Neither existing crate ran any of the five synthetic cases
-(below).
+compiles all seven production publishing stylesheets (the 38 XSLT 2.0
+modules) and its output is identical, under the Check tool's own comparison
+(which only renumbers the document part of `generate-id()` values), to:
+
+- the saved output of **43 of 43** documents in the four check suites that
+  have saved output matching the current stylesheets (Default 5,
+  Bulletin 5, Service 31, NarrativeTroubleshooting 2); and
+- the live reference host's output for the other three stylesheets
+  (Operator, Parts, NarrativeParts) on a sample of real inputs (see the
+  conformance plan for the command; counts are in the hand-over notes).
+
+The XSLT 1.0 FO-to-HTML stylesheet does not compile yet (its DTD declares
+entities the engine does not read). That result, from about 5,800 lines,
+is the main evidence that building is feasible and that the remaining work
+is mostly matching details rather than missing architecture. Neither
+existing crate ran any of the five synthetic cases (below).
 
 Rules for the work:
 
@@ -43,9 +51,10 @@ output compared loosely, ignoring empty-element spelling and quote style):
 | Crate | Licence | What it is | Cases matching | What happened |
 |---|---|---|---|---|
 | `xee-xslt-compiler` 0.1.6 (with `xee-xpath`) | MIT | XPath 3.1 bytecode interpreter over the `xot` tree; early XSLT 3.0 | 0 of 5 | Every case failed to compile (`Unsupported`, and `XPST0017` for a function it lacks). Its AST-to-IR pass (about 900 lines) has no `xsl:call-template`, `xsl:number`, `xsl:key`, `xsl:sort`, `xsl:import`, `xsl:attribute-set` or tunnel parameters; the target stylesheets use all of them (669 `call-template`s, 94 `xsl:number`s, 127 attribute sets, 131 tunnel parameters). |
-| `xrust` 2.4.1 | Apache-2.0 | XPath and XSLT over its own tree traits | 0 of 5 | `basics` ran but differed; `xpath2` failed to parse a double literal; `params` rejected `xsl:param` inside a template; `numbering` overflowed the stack; `imports` was not reached. No tunnel parameters in its source. |
+| `xrust` 2.4.1 | Apache-2.0 | XPath and XSLT over its own tree traits | 0 of 5 | Release build, one case per process. `basics` ran but differed (`last()` wrong, output stops after the first chapter); `xpath2` failed to parse a double literal; `params` rejected `xsl:param` inside a template; `numbering` rejected `xsl:sort` inside `xsl:for-each`; `imports` could not resolve its include because the harness gave no base URL (not a fair test). No tunnel parameters in its source. |
 
-Why not adopt `xee-xpath` for the XPath half only:
+Why not adopt `xee-xpath` for the XPath half only (reasoning, not
+measured: only its XSLT layer was run):
 
 - **XPath 3.1 is not XPath 2.0.** The output we must reproduce comes from a
   2.0 processor. Number formatting, `string()` of doubles, error versus
@@ -170,7 +179,8 @@ if evaluating the pattern from one of its ancestors reaches it; absolute
 patterns and `key()` patterns are evaluated from the root. A quick test of
 the last step's node test rejects most candidates before any evaluation.
 Rules per mode are sorted once by import precedence, priority and position
-(the last declared wins a tie, as the reference processor does). This is
+(the last declared wins a tie, as the reference processor does; spec
+note 7). This is
 fast enough for the production stylesheets (5–200 ms per document in
 release builds); a name-indexed rule table is the obvious next step if
 needed.
@@ -218,7 +228,10 @@ first-item semantics for string functions) are a milestone of their own.
 1. **Oracle suites (primary).** The stylesheet check suites (`*.toml` with
    saved outputs) run through `tests/oracle.rs`'s `suite` test:
    `XYLEM_XSLT_ENGINE_SUITE=<suite.toml> cargo test -p xylem-xslt-engine
-   --release --test oracle -- --ignored suite --nocapture`. Customer
+   --release --test oracle -- --ignored suite --nocapture`. Where saved
+   outputs are out of date, `XYLEM_XSLT_ENGINE_AGAINST_HOST=1` (with
+   `XYLEM_SAXON_HOST`) compares with the host's fresh output instead, and
+   `XYLEM_XSLT_ENGINE_STYLESHEET` picks the stylesheet. Customer
    documents never enter the repository; only counts and differences are
    reported. The goal is every saved output byte-identical after the usual
    `generate-id` renumbering.
@@ -308,9 +321,8 @@ named in brackets; notes marked *unverified* still need a probe.
 6. **Empty `xsl:value-of` in a typed variable** [`edge`]. Inside a
    variable with `as="xs:string"` it gives a zero-length string, not an
    empty sequence.
-7. **Template conflicts** (*unverified*). Among rules with the same
-   precedence and priority the engine picks the last declared, without an
-   error; no probe has exercised a real conflict yet.
+7. **Template conflicts** [`edge`]. Among rules with the same precedence
+   and priority the last declared is used, without an error.
 8. **Default sort order** (*unverified* beyond [`numbering`]). `xsl:sort`
    without `lang` or `collation` matched code-point order on the cases seen
    (`Bolt, Motor, Seal, Washer`); needs a probe with mixed case and accents.

@@ -16,8 +16,10 @@
     </edge>
   </xsl:template>
   <xsl:template match="para"><p><xsl:value-of select="."/></p></xsl:template>
-  <xsl:template match="step">
-    <s n="{string-length(.)}"><xsl:number count="step[para]" from="step" format="1." level="single"/><xsl:apply-templates select="step"/></s>
+  <xsl:template match="item" priority="1"><first/></xsl:template>
+  <xsl:template match="item" priority="1"><last/></xsl:template>
+  <xsl:template match="task">
+    <s n="{string-length(.)}"><xsl:number level="single" from="task" count="task[line]" format="1."/><xsl:apply-templates select="task"/></s>
   </xsl:template>
   <xsl:template match="comment()"><c id="{generate-id()}"><xsl:value-of select="."/></c></xsl:template>
 </xsl:stylesheet>
