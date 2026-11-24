@@ -33,7 +33,7 @@ committed. Saxon-HE is published by Saxonica under the Mozilla Public License
 ## Run
 
 ```
-bin\SaxonDotnetHost.exe run --stylesheet stylesheets\book-to-fo.xsl ^
+bin\SaxonDotnetHost.exe run --stylesheet stylesheetsook-to-fo.xsl ^
     --job manual.xml=manual.fo ^
     --param draft=yes
 ```
