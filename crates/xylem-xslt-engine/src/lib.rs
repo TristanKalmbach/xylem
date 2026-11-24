@@ -13,6 +13,7 @@
 //! println!("{}", out.text);
 //! ```
 
+pub mod api;
 mod compile;
 mod eval;
 mod exec;
@@ -107,6 +108,67 @@ pub fn transform_bytes(
         messages: engine.messages.borrow().clone(),
         timing,
         total_ms: if time { total_ms } else { 0.0 },
+    })
+}
+
+/// Where a transformation starts.
+#[derive(Clone, Debug)]
+pub enum Start {
+    /// Template rules applied to the source document (the usual start).
+    Rules,
+    /// Template rules in a named mode, applied to the source document.
+    Mode(String, String),
+    /// A named template: (namespace URI, local name).
+    Template(String, String),
+}
+
+/// Like [`transform_bytes`], starting from the named template `template`
+/// (an unprefixed name) instead of the source document's rules. With no
+/// input there is no context item.
+pub fn transform_named(
+    ss: &Stylesheet,
+    input: Option<&[u8]>,
+    params: &HashMap<String, String>,
+    template: &str,
+) -> Result<Output, String> {
+    transform_from(
+        ss,
+        input,
+        params,
+        &Start::Template(String::new(), template.into()),
+    )
+}
+
+/// Runs a transformation from `start`. With no input there is no context
+/// item (only a named template can start without one).
+pub fn transform_from(
+    ss: &Stylesheet,
+    input: Option<&[u8]>,
+    params: &HashMap<String, String>,
+    start: &Start,
+) -> Result<Output, String> {
+    let source = match input {
+        Some(bytes) => {
+            let doc = xylem_dom::Document::from_bytes(bytes).map_err(|e| format!("input: {e}"))?;
+            tree::from_dom(&doc, &ss.base.to_string_lossy(), ss)?
+        }
+        None => tree::Tree::new_document(),
+    };
+    let engine = exec::Engine::new(ss, source, params.clone(), false);
+    let compat = ss.version.starts_with('1');
+    let result = value::with_compat(compat, || match start {
+        Start::Rules => engine.run(),
+        Start::Mode(uri, local) => engine.run_mode(&tree::QName::new(uri, local, "")),
+        Start::Template(uri, local) => {
+            engine.run_named(&tree::QName::new(uri, local, ""), input.is_some())
+        }
+    })?;
+    Ok(Output {
+        text: value::with_compat(compat, || serialize::host_style(&result)),
+        serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
+        messages: engine.messages.borrow().clone(),
+        timing: Vec::new(),
+        total_ms: 0.0,
     })
 }
 

@@ -26,6 +26,28 @@ fn bound<'a>(scope: &'a [(Rc<str>, Rc<str>)], p: &str) -> Option<&'a str> {
         .map(|(_, u)| &**u)
 }
 
+/// One node written as XML, with the namespace declarations it needs.
+pub fn node_xml(t: &Tree, i: u32) -> String {
+    let mut out = String::new();
+    let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];
+    match t.node(i).kind {
+        Kind::Attribute => {
+            let n = t.node(i);
+            out.push_str(&n.name.as_ref().unwrap().lexical());
+            out.push_str("=\"");
+            escape(&n.value, true, &mut out);
+            out.push('"');
+        }
+        Kind::Document => {
+            for &c in &t.node(i).children {
+                node(t, c, &mut scope, &mut out);
+            }
+        }
+        _ => node(t, i, &mut scope, &mut out),
+    }
+    out
+}
+
 fn node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String) {
     let n = t.node(i);
     match n.kind {

@@ -247,11 +247,10 @@ first-item semantics for string functions) are a milestone of their own.
    host and is committed; `live_oracle` re-runs the host when
    `XYLEM_SAXON_HOST` is set (and `XYLEM_XSLT_ENGINE_REGEN=1` rewrites the
    expected files). Every spec note below should get a case.
-3. **W3C suites (breadth).** The QT3 suite covers XPath 2.0 and F&O, and
-   the XSLT 3.0 test suite marks which tests also apply to XSLT 2.0 through
-   its dependency declarations. Before M4, confirm the repositories, their
-   licences and the exact filter values (not checked yet), then fetch them
-   at test time into a cache directory rather than vendoring them. Track a pass-rate table per
+3. **W3C suites (breadth).** `crates/xylem-w3c` runs the QT3 suite
+   (XPath 2.0 subset) and the XSLT test suite (1.0 and 2.0 subset), fetched
+   at run time. Repositories, licences, filters and the current pass rates
+   are in [conformance.md](conformance.md). Track a pass-rate table per
    feature area; failures in out-of-scope areas (schema awareness,
    `for-each-group` until needed) are expected.
 4. **Differential fuzzing (later).** Generate small stylesheet/input pairs

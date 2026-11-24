@@ -4352,6 +4352,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xylem-w3c"
+version = "0.5.0"
+dependencies = [
+ "serde_json",
+ "xylem-dom",
+ "xylem-xslt-engine",
+]
+
+[[package]]
 name = "xylem-xpath"
 version = "0.5.0"
 dependencies = [

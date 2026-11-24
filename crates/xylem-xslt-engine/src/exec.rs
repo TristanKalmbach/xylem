@@ -190,6 +190,52 @@ impl<'s> Engine<'s> {
         Ok(out.finish_tree())
     }
 
+    /// Runs the transformation from a named template (`initial-template`),
+    /// with the source document, if any, as the context item.
+    pub fn run_named(&self, name: &QName, with_context: bool) -> R<Tree> {
+        let t = self
+            .ss
+            .named
+            .iter()
+            .find(|(n, _)| n.same(name))
+            .map(|(_, &t)| t)
+            .ok_or_else(|| format!("no template named '{}'", name.lexical()))?;
+        let mut d = self.root_dyn();
+        if !with_context {
+            d.item = None;
+            d.current = None;
+        }
+        let mut out = Out::document();
+        self.invoke(t, &d, &[], &mut out)?;
+        Ok(out.finish_tree())
+    }
+
+    /// Runs the transformation from the source document in `mode`.
+    pub fn run_mode(&self, mode: &QName) -> R<Tree> {
+        let d = self.root_dyn();
+        let mut out = Out::document();
+        let root = vec![Item::Node(NodeRef {
+            tree: self.source,
+            idx: 0,
+        })];
+        self.apply(&root, &d, Some(mode.clone()), &[], &mut out)?;
+        Ok(out.finish_tree())
+    }
+
+    /// The dynamic context for evaluating a standalone expression: the
+    /// source document as context item (or none), with `vars` bound.
+    pub fn standalone_dyn(&self, with_context: bool, vars: Vec<(QName, Seq)>) -> Dyn {
+        let mut d = self.root_dyn();
+        if !with_context {
+            d.item = None;
+            d.current = None;
+        }
+        for (n, v) in vars {
+            d = d.bind(n, v);
+        }
+        d
+    }
+
     pub fn var(&self, n: &QName, d: &Dyn) -> R<Seq> {
         if let Some(v) = d.lookup(n) {
             return Ok((*v).clone());
