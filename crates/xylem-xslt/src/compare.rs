@@ -89,7 +89,9 @@ pub fn renumber_generated_ids(text: &str) -> String {
     let mut docs: HashMap<&str, usize> = HashMap::new();
     let mut last = 0;
     let mut i = 0;
-    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.';
+    // A generated ID can be joined to other text (`continuedTable-d62e206`),
+    // so only a letter or digit next to it means it is part of a word.
+    let word = |c: u8| c.is_ascii_alphanumeric();
     while i < b.len() {
         if b[i] == b'd' && (i == 0 || !word(b[i - 1])) {
             let mut j = i + 1;
@@ -311,6 +313,11 @@ mod tests {
         assert_eq!(
             renumber_generated_ids("add12e3 d1e2x id9e9"),
             "add12e3 d1e2x id9e9"
+        );
+        // IDs joined to other text are still IDs.
+        assert_eq!(
+            renumber_generated_ids("continuedTable-d62e206 row_d62e9"),
+            "continuedTable-d1e206 row_d1e9"
         );
     }
 
