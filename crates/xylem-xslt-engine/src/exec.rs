@@ -809,9 +809,16 @@ impl<'s> Engine<'s> {
                     Some(f) => self.avt(f, d)?,
                     None => String::new(),
                 };
-                let re = crate::xsd_regex::XRegex::with_version(&self.avt(regex, d)?, &flags, self.xpath30())?;
+                let re = crate::xsd_regex::XRegex::with_version(
+                    &self.avt(regex, d)?,
+                    &flags,
+                    self.xpath30(),
+                )?;
                 if re.is_match("")? {
-                    return Err("XTDE1150: the regex of xsl:analyze-string matches a zero-length string".into());
+                    return Err(
+                        "XTDE1150: the regex of xsl:analyze-string matches a zero-length string"
+                            .into(),
+                    );
                 }
                 // Segments in order: (text, groups for a match / None).
                 let mut segs: Vec<(String, Option<Vec<String>>)> = Vec::new();

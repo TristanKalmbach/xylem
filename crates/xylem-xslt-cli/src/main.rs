@@ -99,15 +99,19 @@ fn transform(args: &[String]) -> Result<(), String> {
     let input = input.ok_or(USAGE)?;
     let ss = Stylesheet::compile(&stylesheet)?;
     let bytes = std::fs::read(&input).map_err(|e| format!("{}: {e}", input.display()))?;
-    let out = with_file_access(files, || transform_bytes(&ss, &bytes, &params, false))?;
-    let text = if serialize { out.serialized } else { out.text };
+    let mut out = with_file_access(files, || transform_bytes(&ss, &bytes, &params, false))?;
+    let text = if serialize {
+        std::mem::take(&mut out.serialized)
+    } else {
+        std::mem::take(&mut out.text)
+    };
     for m in &out.messages {
         eprintln!("message: {m}");
     }
     match output {
         Some(p) => {
             std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))?;
-            write_secondary(&p, &out.results, files)
+            out.write_secondary(&p, files)
         }
         None if !out.results.is_empty() => {
             Err("the stylesheet writes secondary results; give --output".into())
@@ -231,55 +235,31 @@ fn handle(req: &Request, cache: &mut HashMap<PathBuf, Cached>) -> serde_json::Va
     let result = with_file_access(!req.no_file_access, || {
         transform_bytes(ss, &bytes, &params, false)
     });
-    let out = match result {
+    let mut out = match result {
         Ok(o) => o,
         Err(e) => return fail(e),
     };
     let text = if req.serialize {
-        out.serialized
+        std::mem::take(&mut out.serialized)
     } else {
-        out.text
+        std::mem::take(&mut out.text)
     };
     let ms = started.elapsed().as_millis() as u64;
     match &req.output {
-        Some(p) => match std::fs::write(p, text) {
+        Some(p) => match std::fs::write(p, text)
+            .map_err(|e| format!("{}: {e}", p.display()))
+            .and_then(|()| out.write_secondary(p, !req.no_file_access))
+        {
             Ok(()) => {
                 serde_json::json!({"id": req.id, "ok": true, "ms": ms, "messages": out.messages})
             }
-            Err(e) => fail(format!("{}: {e}", p.display())),
+            Err(e) => fail(e),
         },
+        None if !out.results.is_empty() => {
+            fail("the stylesheet writes secondary results; give an output path".into())
+        }
         None => {
             serde_json::json!({"id": req.id, "ok": true, "ms": ms, "messages": out.messages, "output_text": text})
         }
     }
-}
-
-/// Writes `xsl:result-document` results next to the principal output.
-/// Hrefs must stay below the output's folder; with file access off there
-/// may be none.
-fn write_secondary(
-    principal: &std::path::Path,
-    results: &[(String, String)],
-    files: bool,
-) -> Result<(), String> {
-    use std::path::Component;
-    if results.is_empty() {
-        return Ok(());
-    }
-    if !files {
-        return Err("secondary results need file access".into());
-    }
-    let dir = principal.parent().unwrap_or(std::path::Path::new("."));
-    for (href, text) in results {
-        let rel = std::path::Path::new(href.strip_prefix("file:").unwrap_or(href));
-        if !rel.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)) {
-            return Err(format!("result-document href '{href}' leaves the output folder"));
-        }
-        let p = dir.join(rel);
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-        }
-        std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))?;
-    }
-    Ok(())
 }

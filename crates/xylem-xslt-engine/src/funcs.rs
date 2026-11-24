@@ -111,7 +111,10 @@ impl Engine<'_> {
                     let cp = match a {
                         Atomic::Int(i) => i,
                         o => o.to_string().trim().parse().map_err(|_| {
-                            format!("XPTY0004: codepoints-to-string needs integers, got '{}'", o.to_string())
+                            format!(
+                                "XPTY0004: codepoints-to-string needs integers, got '{}'",
+                                o.to_string()
+                            )
                         })?,
                     };
                     let c = u32::try_from(cp)
@@ -196,11 +199,19 @@ impl Engine<'_> {
                 str_(parts.join(&s(1)?))
             }
             ("matches", 2 | 3) => {
-                let re = regex(self.xpath30(), &s(1)?, if n == 3 { s(2)? } else { String::new() })?;
+                let re = regex(
+                    self.xpath30(),
+                    &s(1)?,
+                    if n == 3 { s(2)? } else { String::new() },
+                )?;
                 bool_(re.is_match(&s(0)?)?)
             }
             ("replace", 3 | 4) => {
-                let re = regex(self.xpath30(), &s(1)?, if n == 4 { s(3)? } else { String::new() })?;
+                let re = regex(
+                    self.xpath30(),
+                    &s(1)?,
+                    if n == 4 { s(3)? } else { String::new() },
+                )?;
                 no_empty_match(&re)?;
                 let rep = replacement(&s(2)?, re.groups())?;
                 str_(re.replace_all(&s(0)?, rep.as_str()).into_owned())
@@ -210,7 +221,11 @@ impl Engine<'_> {
                 if src.is_empty() {
                     return Ok(vec![]);
                 }
-                let re = regex(self.xpath30(), &s(1)?, if n == 3 { s(2)? } else { String::new() })?;
+                let re = regex(
+                    self.xpath30(),
+                    &s(1)?,
+                    if n == 3 { s(2)? } else { String::new() },
+                )?;
                 no_empty_match(&re)?;
                 Ok(re
                     .split(&src)?
@@ -591,13 +606,14 @@ impl Engine<'_> {
                     })
                 });
                 // Comments and processing instructions are not compared.
-                let kids = |t: &crate::tree::Tree, n: &crate::tree::TNode, tree: u32| -> Vec<NodeRef> {
-                    n.children
-                        .iter()
-                        .filter(|&&c| !matches!(t.node(c).kind, Kind::Comment | Kind::Pi))
-                        .map(|&idx| NodeRef { tree, idx })
-                        .collect()
-                };
+                let kids =
+                    |t: &crate::tree::Tree, n: &crate::tree::TNode, tree: u32| -> Vec<NodeRef> {
+                        n.children
+                            .iter()
+                            .filter(|&&c| !matches!(t.node(c).kind, Kind::Comment | Kind::Pi))
+                            .map(|&idx| NodeRef { tree, idx })
+                            .collect()
+                    };
                 let (ka, kb) = (kids(&tp, a, p.tree), kids(&tq, b, q.tree));
                 drop((tp, tq));
                 attrs_match
@@ -614,7 +630,10 @@ fn atomic_equal(p: &Atomic, q: &Atomic) -> bool {
     if p.is_numeric() && q.is_numeric() && p.to_f64().is_nan() && q.to_f64().is_nan() {
         return true;
     }
-    matches!(crate::eval::compare(p, q), Ok(Some(std::cmp::Ordering::Equal)))
+    matches!(
+        crate::eval::compare(p, q),
+        Ok(Some(std::cmp::Ordering::Equal))
+    )
 }
 
 /// Converts an XPath replacement string (`$1`, `\$`, `\\`) to the `regex`

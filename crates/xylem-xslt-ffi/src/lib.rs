@@ -186,6 +186,12 @@ pub unsafe extern "C" fn xylem_xslt_transform(
     }));
     drop(guard);
     let text = match result {
+        Ok(Ok(o)) if !o.results.is_empty() => {
+            set_error(
+                "the stylesheet writes secondary results (xsl:result-document), which the C API does not return",
+            );
+            return 2;
+        }
         Ok(Ok(o)) if flags & XYLEM_OUTPUT_SERIALIZE != 0 => o.serialized,
         Ok(Ok(o)) => o.text,
         Ok(Err(e)) => {

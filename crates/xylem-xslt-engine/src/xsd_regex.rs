@@ -388,7 +388,9 @@ impl Translator {
             self.pos += 1;
         }
         if !self.closed.contains(&n) {
-            return Err(format!("back-reference \\{n} to a group that is not closed"));
+            return Err(format!(
+                "back-reference \\{n} to a group that is not closed"
+            ));
         }
         self.uses_backrefs = true;
         // Wrap so that following digits are not read as part of the number.
@@ -425,7 +427,11 @@ impl Translator {
             }
             'p' | 'P' => self.property(c == 'P')?.into(),
             _ => {
-                let place = if in_class { " in a character class" } else { "" };
+                let place = if in_class {
+                    " in a character class"
+                } else {
+                    ""
+                };
                 return Err(format!("unknown escape '\\{c}'{place}"));
             }
         };
@@ -448,8 +454,8 @@ impl Translator {
         let name: String = self.src[st..self.pos].iter().collect();
         self.pos += 1;
         if let Some(block) = name.strip_prefix("Is") {
-            let ranges = block_ranges(block)
-                .ok_or_else(|| format!("unknown block name '{name}'"))?;
+            let ranges =
+                block_ranges(block).ok_or_else(|| format!("unknown block name '{name}'"))?;
             let mut set = String::new();
             for &(lo, hi) in ranges {
                 // Surrogates cannot occur in a string; leave them out.
@@ -461,7 +467,11 @@ impl Translator {
                 }
             }
             if set.is_empty() {
-                return Ok(if negated { "(?s:.)".into() } else { EMPTY_CLASS.into() });
+                return Ok(if negated {
+                    "(?s:.)".into()
+                } else {
+                    EMPTY_CLASS.into()
+                });
             }
             return Ok(format!("[{}{set}]", if negated { "^" } else { "" }));
         }
@@ -504,8 +514,10 @@ impl Translator {
             first = false;
             let lo = self.class_atom()?;
             match lo {
-                ClassAtom::Char(a) if self.peek() == Some('-') && self.peek_at(1) != Some(']')
-                    && self.peek_at(1) != Some('[') =>
+                ClassAtom::Char(a)
+                    if self.peek() == Some('-')
+                        && self.peek_at(1) != Some(']')
+                        && self.peek_at(1) != Some('[') =>
                 {
                     self.pos += 1;
                     let ClassAtom::Char(b) = self.class_atom()? else {
@@ -564,7 +576,8 @@ enum ClassAtom {
 }
 
 fn parse_bound(s: &str) -> T<u64> {
-    s.parse().map_err(|_| format!("quantifier bound {s} is too large"))
+    s.parse()
+        .map_err(|_| format!("quantifier bound {s} is too large"))
 }
 
 /// Whether `c` is an XML 1.0 `Char`.
@@ -602,8 +615,23 @@ fn push_literal(out: &mut String, c: char) {
 fn regex_syntax_meta(c: char) -> bool {
     matches!(
         c,
-        '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$'
-            | '#' | '&' | '-' | '~'
+        '\\' | '.'
+            | '+'
+            | '*'
+            | '?'
+            | '('
+            | ')'
+            | '|'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '^'
+            | '$'
+            | '#'
+            | '&'
+            | '-'
+            | '~'
     )
 }
 
@@ -663,9 +691,7 @@ fn block_ranges(name: &str) -> Option<&'static [(u32, u32)]> {
         "GeneralPunctuation" => &[(0x2000, 0x206F)],
         "SuperscriptsandSubscripts" => &[(0x2070, 0x209F)],
         "CurrencySymbols" => &[(0x20A0, 0x20CF)],
-        "CombiningMarksforSymbols" | "CombiningDiacriticalMarksforSymbols" => {
-            &[(0x20D0, 0x20FF)]
-        }
+        "CombiningMarksforSymbols" | "CombiningDiacriticalMarksforSymbols" => &[(0x20D0, 0x20FF)],
         "LetterlikeSymbols" => &[(0x2100, 0x214F)],
         "NumberForms" => &[(0x2150, 0x218F)],
         "Arrows" => &[(0x2190, 0x21FF)],
