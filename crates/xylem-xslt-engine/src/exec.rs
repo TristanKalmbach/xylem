@@ -1331,6 +1331,13 @@ impl Out {
         });
         if let Some(a) = existing {
             self.tree.nodes[a as usize].value = value;
+            // Spec note 12: the XSLT 1.0 host moves a replaced attribute
+            // to the end; the 2.0 host keeps its place.
+            if crate::value::compat() {
+                let attrs = &mut self.tree.nodes[p as usize].attrs;
+                attrs.retain(|&x| x != a);
+                attrs.push(a);
+            }
             return Ok(());
         }
         let mut n = TNode::new(Kind::Attribute, Some(p));

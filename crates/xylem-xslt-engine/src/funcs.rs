@@ -93,8 +93,10 @@ impl Engine<'_> {
             }
             ("string-length", 0 | 1) => int_(s_or_ctx(0)?.chars().count() as i64),
             ("normalize-space", 0 | 1) => str_(
+                // XML whitespace only: a no-break space is kept.
                 s_or_ctx(0)?
-                    .split_whitespace()
+                    .split(crate::tree::is_xml_space)
+                    .filter(|w| !w.is_empty())
                     .collect::<Vec<_>>()
                     .join(" "),
             ),

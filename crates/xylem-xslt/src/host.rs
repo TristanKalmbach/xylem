@@ -315,9 +315,6 @@ fn run_builtin(
         xslt: None,
         error: Some(error),
     };
-    if host.serialize {
-        return failed("The built-in engine cannot write xsl:output results yet; use the .NET host for this step.".into());
-    }
     let started = std::time::Instant::now();
     let ss = match xylem_xslt_engine::Stylesheet::compile(stylesheet) {
         Ok(s) => s,
@@ -354,7 +351,14 @@ fn run_builtin(
                         profile_path = Some(p);
                     }
                 }
-                match std::fs::write(output, o.host_bytes()) {
+                let bytes = if host.serialize {
+                    let mut b = vec![0xEF, 0xBB, 0xBF];
+                    b.extend_from_slice(o.serialized.as_bytes());
+                    b
+                } else {
+                    o.host_bytes()
+                };
+                match std::fs::write(output, bytes) {
                     Ok(()) => (true, None),
                     Err(e) => (false, Some(format!("{}: {e}", output.display()))),
                 }

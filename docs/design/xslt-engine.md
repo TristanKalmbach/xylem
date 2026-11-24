@@ -25,8 +25,9 @@ modules) and its output is identical, under the Check tool's own comparison
 
 292 of 292 outputs in total.
 
-The XSLT 1.0 FO-to-HTML stylesheet does not compile yet (its DTD declares
-entities the engine does not read). That result, from about 5,800 lines,
+The XSLT 1.0 FO-to-HTML stylesheet's HTML, written as its `xsl:output`
+asks, is byte-identical to the host's `--serialize` output for 60 of 60
+saved FO files. That result, from about 5,800 lines,
 is the main evidence that building is feasible and that the remaining work
 is mostly matching details rather than missing architecture. Neither
 existing crate ran any of the five synthetic cases (below).
@@ -263,7 +264,7 @@ first-item semantics for string functions) are a milestone of their own.
 | M0 | Prototype (this branch) | Templates, modes, parameters, variables, choose, for-each, XPath paths and predicates; the oracle suites run end to end |
 | M1 | Exact production output | Every saved output in every check suite identical without renumbering ids; the unverified spec notes probed; line numbers in errors |
 | M2 | Tools on the engine (started: Check, Time templates and Analyze run on it with engine `builtin`) | Check, Time templates, Analyze proofs and Publication preview can run on the engine, chosen in settings, with the .NET host as the fallback; results compared on every run while both exist |
-| M3 | XSLT 1.0 and `xsl:output` | FO-to-HTML stylesheet reproduces the host's `--serialize` output; xml/html/text serialization |
+| M3 | XSLT 1.0 and `xsl:output` (started: FO-to-HTML matches on 60 of 60 files) | FO-to-HTML stylesheet reproduces the host's `--serialize` output; xml/html/text serialization |
 | M4 | Breadth | QT3 XPath 2.0 subset ≥ 90 %, XSLT 2.0 subset of xslt30-test tracked; `for-each-group`, `analyze-string`, `result-document`, `next-match`, `apply-imports`, collations |
 | M5 | Retire the host | Default to the engine; the .NET host becomes an optional oracle for development |
 
@@ -344,6 +345,25 @@ named in brackets; notes marked *unverified* still need a probe.
     report a declaration after a byte order mark as a processing
     instruction), so the engine's tree copy drops and normalises them.
 
+11. **HTML output of the second step** [`html1`]. The host writes the
+    FO-to-HTML result through .NET's XSLT 1.0 processor into a string: the
+    doctype uses the root element's name (`<!DOCTYPE html PUBLIC ...>`), a
+    `<META http-equiv="Content-Type" content="text/html; charset=utf-16">`
+    is inserted as the first child of `head` (utf-16 because the target is
+    a string, whatever `encoding` says), void elements have no end tag, `&`
+    is escaped in attributes but `<` and `>` are not, non-ASCII characters
+    in URI attributes are %-escaped as UTF-8, `script` and `style` content
+    is written as is, and line feeds in other text become CR LF. The file
+    is then saved as UTF-8 with a byte order mark.
+12. **XSLT 1.0 rules** [`html1`]. Numbers are doubles written without an
+    exponent (`7 div 3` gives `2.3333333333333335`, `1 div 0` gives
+    `Infinity`); arithmetic converts strings with `number()`; comparisons
+    follow XPath 1.0 (a boolean on either side compares booleans, ordering
+    compares numbers). Setting an attribute that already exists moves it to
+    the end in the 1.0 host, while the 2.0 host keeps its place.
+    `normalize-space()` removes only space, tab, CR and LF, never a
+    no-break space (both hosts).
+
 ## Known gaps in the prototype
 
 - Regular expressions use the `regex` crate's dialect directly; XML Schema
@@ -358,10 +378,14 @@ named in brackets; notes marked *unverified* still need a probe.
 - `xsl:sort` ignores `case-order`, `lang` and `collation`.
 - `format-number()` handles `#`, `0`, `.`, `,` and literal affixes only;
   no percent, per-mille, exponent or `xsl:decimal-format`.
-- XSLT 1.0 mode only changes `xsl:value-of` to take the first item.
+- XSLT 1.0 mode covers what the FO-to-HTML stylesheet needs (first item
+  for strings, doubles, 1.0 comparisons); other 1.0 differences such as
+  `format-number` details and node-set functions on non-node values are
+  untested. The XML and text output methods are written but unverified
+  against the host; `indent="yes"` is ignored.
 - Not implemented: `xsl:for-each-group`, `xsl:analyze-string`,
   `xsl:result-document`, `xsl:next-match`, `xsl:apply-imports`,
-  `xsl:namespace`, `xsl:output` serialization, simplified stylesheets,
+  `xsl:namespace`, output indentation, simplified stylesheets,
   imports inside included modules, date/time and duration types, QNames as
   values, and most of F&O beyond the list in `funcs.rs`.
 - Errors give the template chain but no line numbers; dynamic type errors

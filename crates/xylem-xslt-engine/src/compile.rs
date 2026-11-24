@@ -127,6 +127,19 @@ pub enum Instr {
     },
 }
 
+/// The `xsl:output` settings.
+#[derive(Debug, Clone, Default)]
+pub struct OutputSpec {
+    pub method: Option<String>,
+    pub version: Option<String>,
+    pub encoding: Option<String>,
+    pub doctype_public: Option<String>,
+    pub doctype_system: Option<String>,
+    pub indent: bool,
+    pub omit_declaration: bool,
+    pub media_type: Option<String>,
+}
+
 /// A template's or function's declaration as written, for profiles.
 #[derive(Debug, Clone, Default)]
 pub struct Source {
@@ -190,6 +203,8 @@ pub struct Stylesheet {
     pub keys: HashMap<QName, Vec<Key>>,
     pub attr_sets: HashMap<QName, Vec<AttrSet>>,
     pub strip: Vec<(Option<String>, Option<String>, bool)>,
+    /// The `xsl:output` declarations merged (later ones win).
+    pub output: OutputSpec,
     pub base: PathBuf,
     /// Modules read besides the top one (imports and includes). The
     /// reference processor gives each a document number before the
@@ -560,7 +575,35 @@ impl Compiler {
         for d in el.child_els() {
             let Some(local) = d.xsl_local() else { continue };
             match local {
-                "import" | "output" | "decimal-format" | "namespace-alias" | "character-map" => {}
+                "import" | "decimal-format" | "namespace-alias" | "character-map" => {}
+                "output" => {
+                    let o = &mut self.ss.output;
+                    let get = |a: &str| d.attr(a).map(|v| v.trim().to_string());
+                    if let Some(v) = get("method") {
+                        o.method = Some(v);
+                    }
+                    if let Some(v) = get("version") {
+                        o.version = Some(v);
+                    }
+                    if let Some(v) = get("encoding") {
+                        o.encoding = Some(v);
+                    }
+                    if let Some(v) = get("doctype-public") {
+                        o.doctype_public = Some(v);
+                    }
+                    if let Some(v) = get("doctype-system") {
+                        o.doctype_system = Some(v);
+                    }
+                    if let Some(v) = get("indent") {
+                        o.indent = v == "yes";
+                    }
+                    if let Some(v) = get("omit-xml-declaration") {
+                        o.omit_declaration = v == "yes";
+                    }
+                    if let Some(v) = get("media-type") {
+                        o.media_type = Some(v);
+                    }
+                }
                 "include" => {
                     let href = path.parent().unwrap().join(d.req("href")?);
                     let href = std::fs::canonicalize(&href).unwrap_or(href);

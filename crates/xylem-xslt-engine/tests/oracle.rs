@@ -36,6 +36,7 @@ const CASES: &[&str] = &[
     "ids",
     "edge",
     "docs",
+    "html1",
 ];
 const PARAMS: &[(&str, &str)] = &[("mode", "final"), ("pageCount", "4")];
 
@@ -69,6 +70,13 @@ fn run_engine(
 ) -> Result<Vec<u8>, String> {
     let ss = Stylesheet::compile(stylesheet)?;
     let out = transform_file(&ss, input, params)?;
+    // A case folder holding a `serialize` file is the host's second step:
+    // the result written as `xsl:output` asks (UTF-8 with a BOM).
+    if stylesheet.with_file_name("serialize").exists() {
+        let mut b = vec![0xEF, 0xBB, 0xBF];
+        b.extend_from_slice(out.serialized.as_bytes());
+        return Ok(b);
+    }
     Ok(out.host_bytes())
 }
 
@@ -136,6 +144,8 @@ fn live_oracle() {
         } else {
             tmp.join(format!("{case}.xml"))
         };
+        let mut host = host.clone();
+        host.serialize = dir.join(case).join("serialize").exists();
         let run = host.run(&style, &[(input_of(case), out.clone())], &p, false);
         if let Some(e) = run.jobs.first().and_then(|j| j.error.clone()).or(run.error) {
             failures.push(format!("{case}: host failed: {e}"));

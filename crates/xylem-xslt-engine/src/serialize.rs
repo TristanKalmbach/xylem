@@ -129,3 +129,203 @@ fn escape(s: &str, attr: bool, out: &mut String) {
         }
     }
 }
+
+// ---- xsl:output ---------------------------------------------------------
+
+/// Elements written without an end tag by the HTML output method.
+const VOID: &[&str] = &[
+    "area", "base", "basefont", "br", "col", "frame", "hr", "img", "input", "isindex", "link",
+    "meta", "param",
+];
+
+/// Attributes whose values are URIs (non-ASCII characters are %-escaped).
+const URI_ATTRS: &[&str] = &[
+    "action",
+    "archive",
+    "background",
+    "cite",
+    "classid",
+    "codebase",
+    "data",
+    "datasrc",
+    "for",
+    "href",
+    "longdesc",
+    "profile",
+    "src",
+    "usemap",
+];
+
+/// Writes a result as its `xsl:output` asks, the way the reference host's
+/// second step (.NET's XSLT 1.0 processor writing to a string) does.
+///
+/// Observed details (spec note 11): the HTML method writes `<!DOCTYPE` with
+/// the root element's name, inserts a `META` content-type tag (charset
+/// `utf-16`, the host writing to a string) as the first child of `head`,
+/// leaves void elements unclosed, and writes line feeds in text as CR LF.
+pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
+    let root = t
+        .node(0)
+        .children
+        .iter()
+        .copied()
+        .find(|&c| t.node(c).kind == Kind::Element);
+    let method = o.method.clone().unwrap_or_else(|| {
+        let html = root
+            .and_then(|r| t.node(r).name.as_ref())
+            .is_some_and(|q| q.uri.is_empty() && q.local.eq_ignore_ascii_case("html"));
+        if html { "html".into() } else { "xml".into() }
+    });
+    let mut out = String::new();
+    match method.as_str() {
+        "text" => {
+            out = t.string_value(0);
+        }
+        "html" => {
+            if let Some(r) = root {
+                let name = t.node(r).name.as_ref().unwrap().lexical();
+                match (&o.doctype_public, &o.doctype_system) {
+                    (Some(p), Some(s)) => {
+                        out.push_str(&format!("<!DOCTYPE {name} PUBLIC \"{p}\" \"{s}\">"))
+                    }
+                    (Some(p), None) => out.push_str(&format!("<!DOCTYPE {name} PUBLIC \"{p}\">")),
+                    (None, Some(s)) => out.push_str(&format!("<!DOCTYPE {name} SYSTEM \"{s}\">")),
+                    _ => {}
+                }
+            }
+            let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];
+            for &c in &t.node(0).children {
+                html_node(t, c, &mut scope, &mut out, false);
+            }
+            return out;
+        }
+        _ => {
+            if !o.omit_declaration {
+                out.push_str("<?xml version=\"1.0\" encoding=\"utf-16\"?>");
+            }
+            if let (Some(r), Some(s)) = (root, &o.doctype_system) {
+                let name = t.node(r).name.as_ref().unwrap().lexical();
+                match &o.doctype_public {
+                    Some(p) => out.push_str(&format!("<!DOCTYPE {name} PUBLIC \"{p}\" \"{s}\">")),
+                    None => out.push_str(&format!("<!DOCTYPE {name} SYSTEM \"{s}\">")),
+                }
+            }
+            let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];
+            for &c in &t.node(0).children {
+                node(t, c, &mut scope, &mut out);
+            }
+        }
+    }
+    out.replace('\n', "\r\n")
+}
+
+fn html_node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String, raw: bool) {
+    let n = t.node(i);
+    match n.kind {
+        Kind::Text => {
+            if raw {
+                out.push_str(&n.value);
+            } else {
+                html_escape_text(&n.value, out);
+            }
+        }
+        Kind::Comment => {
+            out.push_str("<!--");
+            out.push_str(&n.value);
+            out.push_str("-->");
+        }
+        Kind::Pi => {
+            out.push_str("<?");
+            out.push_str(&n.name.as_ref().unwrap().local);
+            if !n.value.is_empty() {
+                out.push(' ');
+                out.push_str(&n.value);
+            }
+            out.push('>');
+        }
+        Kind::Element => {
+            let name = n.name.as_ref().unwrap();
+            if !name.uri.is_empty() {
+                // Elements in a namespace are written as XML.
+                node(t, i, scope, out);
+                return;
+            }
+            let depth = scope.len();
+            out.push('<');
+            out.push_str(&name.lexical());
+            for (p, u) in &n.ns {
+                if p.is_empty() || bound(scope, p) == Some(&**u) {
+                    continue;
+                }
+                out.push_str(" xmlns:");
+                out.push_str(p);
+                out.push_str("=\"");
+                escape(u, true, out);
+                out.push('"');
+                scope.push((p.clone(), u.clone()));
+            }
+            for &a in &n.attrs {
+                let an = t.node(a);
+                let q = an.name.as_ref().unwrap();
+                out.push(' ');
+                out.push_str(&q.lexical());
+                out.push_str("=\"");
+                let uri =
+                    q.uri.is_empty() && URI_ATTRS.iter().any(|u| q.local.eq_ignore_ascii_case(u));
+                html_escape_attr(&an.value, uri, out);
+                out.push('"');
+            }
+            out.push('>');
+            let local = name.local.to_ascii_lowercase();
+            if local == "head" {
+                out.push_str(
+                    "<META http-equiv=\"Content-Type\" content=\"text/html; charset=utf-16\">",
+                );
+            }
+            if VOID.contains(&local.as_str()) {
+                scope.truncate(depth);
+                return;
+            }
+            let raw = local == "script" || local == "style";
+            for &c in &n.children {
+                html_node(t, c, scope, out, raw);
+            }
+            out.push_str("</");
+            out.push_str(&name.lexical());
+            out.push('>');
+            scope.truncate(depth);
+        }
+        Kind::Document | Kind::Attribute => {}
+    }
+}
+
+fn html_escape_text(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '\n' => out.push_str("\r\n"),
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c => out.push(c),
+        }
+    }
+}
+
+fn html_escape_attr(s: &str, uri: bool, out: &mut String) {
+    let chars: Vec<char> = s.chars().collect();
+    for (k, &c) in chars.iter().enumerate() {
+        match c {
+            // `&{` starts a script macro in HTML 4 and is kept.
+            '&' if chars.get(k + 1) == Some(&'{') => out.push('&'),
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            c if uri && !c.is_ascii() => {
+                let mut b = [0u8; 4];
+                for byte in c.encode_utf8(&mut b).bytes() {
+                    out.push_str(&format!("%{byte:02X}"));
+                }
+            }
+            c => out.push(c),
+        }
+    }
+}

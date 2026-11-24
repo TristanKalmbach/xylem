@@ -384,6 +384,18 @@ impl Engine<'_> {
             | BinOp::GenLt
             | BinOp::GenLe
             | BinOp::GenGt
+            | BinOp::GenGe
+                if crate::value::compat() =>
+            {
+                let x = self.eval(a, d)?;
+                let y = self.eval(b, d)?;
+                bool_(self.compare_1(op, &x, &y)?)
+            }
+            BinOp::GenEq
+            | BinOp::GenNe
+            | BinOp::GenLt
+            | BinOp::GenLe
+            | BinOp::GenGt
             | BinOp::GenGe => {
                 let x = self.atomize(&self.eval(a, d)?);
                 let y = self.atomize(&self.eval(b, d)?);
@@ -446,7 +458,18 @@ impl Engine<'_> {
                 let y = self.atomize(&self.eval(b, d)?);
                 match (x.as_slice(), y.as_slice()) {
                     ([], _) | (_, []) => Ok(vec![]),
+                    // XPath 1.0: every operand is converted with number().
+                    ([p], [q]) if crate::value::compat() => Ok(vec![Item::Atomic(arith(
+                        op,
+                        &Atomic::Dbl(p.to_f64()),
+                        &Atomic::Dbl(q.to_f64()),
+                    )?)]),
                     ([p], [q]) => Ok(vec![Item::Atomic(arith(op, &numeric(p)?, &numeric(q)?)?)]),
+                    ([p, ..], [q, ..]) if crate::value::compat() => Ok(vec![Item::Atomic(arith(
+                        op,
+                        &Atomic::Dbl(p.to_f64()),
+                        &Atomic::Dbl(q.to_f64()),
+                    )?)]),
                     _ => Err("arithmetic needs single values".into()),
                 }
             }
@@ -471,6 +494,42 @@ impl Engine<'_> {
                 Ok(r.into_iter().map(Item::Node).collect())
             }
         }
+    }
+
+    /// XPath 1.0 comparison (§3.4): a boolean on either side compares
+    /// booleans; otherwise each pair of values compares as numbers when
+    /// either is a number or the operator is an ordering, else as strings.
+    fn compare_1(&self, op: BinOp, x: &Seq, y: &Seq) -> R<bool> {
+        let is_bool = |v: &Seq| matches!(v.as_slice(), [Item::Atomic(Atomic::Bool(_))]);
+        let ordering = !matches!(op, BinOp::GenEq | BinOp::GenNe);
+        let holds_f = |p: f64, q: f64| match op {
+            BinOp::GenEq => p == q,
+            BinOp::GenNe => p != q,
+            BinOp::GenLt => p < q,
+            BinOp::GenLe => p <= q,
+            BinOp::GenGt => p > q,
+            _ => p >= q,
+        };
+        if is_bool(x) || is_bool(y) {
+            let (p, q) = (self.ebv(x)? as u8 as f64, self.ebv(y)? as u8 as f64);
+            return Ok(holds_f(p, q));
+        }
+        let xa = self.atomize(x);
+        let ya = self.atomize(y);
+        for p in &xa {
+            for q in &ya {
+                let r = if ordering || p.is_numeric() || q.is_numeric() {
+                    holds_f(p.to_f64(), q.to_f64())
+                } else {
+                    let (s, t) = (p.to_string(), q.to_string());
+                    if op == BinOp::GenEq { s == t } else { s != t }
+                };
+                if r {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     pub fn instance_of(&self, v: &Seq, t: &SeqType) -> bool {

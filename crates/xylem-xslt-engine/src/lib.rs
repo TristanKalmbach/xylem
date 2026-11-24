@@ -26,7 +26,7 @@ pub mod xpath;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub use compile::{Source, Stylesheet};
+pub use compile::{OutputSpec, Source, Stylesheet};
 pub use exec::TemplateTime;
 
 /// One timed template or function.
@@ -42,6 +42,9 @@ pub struct Timed {
 pub struct Output {
     /// The principal result, written the way the reference host writes it.
     pub text: String,
+    /// The principal result written as the stylesheet's `xsl:output` asks,
+    /// the way the host's `--serialize` step writes it.
+    pub serialized: String,
     /// `xsl:message` output, in order.
     pub messages: Vec<String>,
     /// Every template and function that ran, when timing was asked for.
@@ -75,7 +78,8 @@ pub fn transform_bytes(
     let source = tree::from_dom(&doc, &ss.base.to_string_lossy(), ss)?;
     let engine = exec::Engine::new(ss, source, params.clone(), time);
     let started = std::time::Instant::now();
-    let result = engine.run()?;
+    let compat = ss.version.starts_with('1');
+    let result = value::with_compat(compat, || engine.run())?;
     let total_ms = started.elapsed().as_secs_f64() * 1000.0;
     let mut timing = Vec::new();
     if let Some(p) = &engine.timing {
@@ -98,7 +102,8 @@ pub fn transform_bytes(
         timing.retain(|t| t.time.calls > 0);
     }
     Ok(Output {
-        text: serialize::host_style(&result),
+        text: value::with_compat(compat, || serialize::host_style(&result)),
+        serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
         messages: engine.messages.borrow().clone(),
         timing,
         total_ms: if time { total_ms } else { 0.0 },

@@ -42,9 +42,9 @@ Instead of a program you can enter `builtin` (in the Engine field, as
 `xslt_host`, or as `--host builtin`) to use Xylem's own XSLT 2.0 engine,
 which needs no .NET or Saxon. It is new: it reproduces the publishing
 service's output on the stylesheets it has been tried with and can time
-templates (for Time templates and Analyze), but cannot yet write
-`xsl:output` results (the HTML step of Publication preview), and XSLT 1.0
-support is limited. Keep the program as the reference
+templates (for Time templates and Analyze) and write the HTML step of
+Publication preview; XSLT 1.0 support covers what the FO-to-HTML stylesheet
+uses. Keep the program as the reference
 while you try it. See [design/xslt-engine.md](design/xslt-engine.md).
 
 Like such a service, it runs a stylesheet whose root `version` is exactly

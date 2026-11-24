@@ -299,7 +299,23 @@ fn parse_entities(subset: &str) -> HashMap<String, Entity> {
     };
     while let Some(at) = rest.find("<!ENTITY") {
         rest = &rest[at + 8..];
-        let end = rest.find('>').unwrap_or(rest.len());
+        // The declaration ends at the first `>` outside a quoted value.
+        let mut quote = None;
+        let end = rest
+            .char_indices()
+            .find(|&(_, c)| match quote {
+                Some(q) if c == q => {
+                    quote = None;
+                    false
+                }
+                Some(_) => false,
+                None if c == '"' || c == '\'' => {
+                    quote = Some(c);
+                    false
+                }
+                None => c == '>',
+            })
+            .map_or(rest.len(), |(i, _)| i);
         let decl = rest[..end].trim_start();
         rest = &rest[end..];
         let Some(name) = decl.split_whitespace().next() else {

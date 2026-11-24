@@ -98,3 +98,23 @@ fn builtin_host_writes_profiles_like_the_dotnet_host() {
     assert!(p.templates.iter().all(|t| t.self_ms <= t.total_ms + 1e-9));
     let _ = std::fs::remove_dir_all(&out);
 }
+
+#[test]
+fn builtin_host_serializes_like_the_dotnet_host() {
+    let out = std::env::temp_dir().join(format!("xylem-builtin-html-{}", std::process::id()));
+    std::fs::create_dir_all(&out).unwrap();
+    let mut host = Host::builtin();
+    host.serialize = true;
+    let job = (cases().join("input.xml"), out.join("html1.html"));
+    let run = host.run(
+        &cases().join("html1").join("style.xsl"),
+        std::slice::from_ref(&job),
+        &BTreeMap::new(),
+        false,
+    );
+    assert!(run.jobs[0].ok, "{:?}", run.jobs[0].error);
+    assert_eq!(run.xslt.as_deref(), Some("1.0"));
+    let expected = std::fs::read(cases().join("html1").join("expected.xml")).unwrap();
+    assert_eq!(std::fs::read(&job.1).unwrap(), expected);
+    let _ = std::fs::remove_dir_all(&out);
+}

@@ -126,7 +126,9 @@ impl Atomic {
             Atomic::Str(s) | Atomic::Untyped(s) => s.to_string(),
             Atomic::Bool(b) => b.to_string(),
             Atomic::Int(i) => i.to_string(),
+            Atomic::Dec(d) if compat() => format_double_1(d.to_f64()),
             Atomic::Dec(d) => d.to_canonical(),
+            Atomic::Dbl(d) if compat() => format_double_1(*d),
             Atomic::Dbl(d) => format_double(*d),
         }
     }
@@ -181,6 +183,44 @@ pub fn parse_double(s: &str) -> f64 {
             }
         }
     }
+}
+
+thread_local! {
+    /// Set while an XSLT 1.0 stylesheet runs (backwards-compatible mode:
+    /// numbers are doubles written the XPath 1.0 way).
+    static COMPAT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether XPath 1.0 rules apply (see [`with_compat`]).
+pub fn compat() -> bool {
+    COMPAT.with(|c| c.get())
+}
+
+/// Runs `f` with XPath 1.0 rules switched on or off.
+pub fn with_compat<T>(on: bool, f: impl FnOnce() -> T) -> T {
+    let before = COMPAT.with(|c| c.replace(on));
+    let r = f();
+    COMPAT.with(|c| c.set(before));
+    r
+}
+
+/// XPath 1.0 `string()` of a number: no exponent, integers without a
+/// decimal point, `Infinity`, `-Infinity`, `NaN`.
+pub fn format_double_1(d: f64) -> String {
+    if d.is_nan() {
+        return "NaN".into();
+    }
+    if d.is_infinite() {
+        return if d > 0.0 {
+            "Infinity".into()
+        } else {
+            "-Infinity".into()
+        };
+    }
+    if d == 0.0 {
+        return "0".into();
+    }
+    format!("{d}")
 }
 
 /// Canonical `xs:double` → string (F&O 17.1.2): plain decimal notation for
