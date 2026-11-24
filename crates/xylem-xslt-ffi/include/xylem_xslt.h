@@ -20,7 +20,7 @@ extern "C" {
 
 typedef struct XylemStylesheet XylemStylesheet;
 
-/* The library version, such as "0.5.0". */
+/* The library version, such as "0.6.0". */
 const char *xylem_xslt_version(void);
 /* The last error on the calling thread; valid until the next call on it. */
 const char *xylem_xslt_last_error(void);
