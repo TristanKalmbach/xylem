@@ -27,6 +27,15 @@
 //! dictionary_dir = "dictionaries"
 //! dictionary_lang = "en_US"
 //! update_source = "//fileserver/tools/xylem"
+//!
+//! # Schemas the documents point to on a server, read from a local copy:
+//! [schema_locations]
+//! "https://docs.example.com/schemas/" = "schemas/"
+//!
+//! # A schema for documents with this root (when no package gives one):
+//! [[schema]]
+//! root = "frontMatter"
+//! schema = "schemas/front-matter.xsd"
 //! ```
 
 use serde::Deserialize;
@@ -61,6 +70,13 @@ pub struct TeamConfig {
     /// How to preview a publication: which stylesheets to run on which
     /// documents (File > Publication preview).
     pub preview: Vec<PreviewConfig>,
+    /// Schema locations on a server (or any URL prefix) mapped to local
+    /// folders or files, so documents that point at a server validate
+    /// against a local copy.
+    pub schema_locations: std::collections::BTreeMap<String, PathBuf>,
+    /// Schemas chosen by the document element (and optionally the schema
+    /// the document points to), for documents no package gives a schema.
+    pub schema: Vec<SchemaRule>,
     /// Where the configuration was read from (filled in by [`load`]).
     #[serde(skip)]
     pub source: Option<PathBuf>,
@@ -85,6 +101,11 @@ pub struct PreviewConfig {
     pub name: Option<String>,
     /// Document element name it applies to; any document when missing.
     pub root: Option<String>,
+    /// Glob against the file name of the schema the document points to
+    /// (`xsi:noNamespaceSchemaLocation`, `xsi:schemaLocation`, DOCTYPE).
+    pub schema_location: Option<String>,
+    /// Glob against the document's own file name.
+    pub file_name: Option<String>,
     pub stylesheet: PathBuf,
     /// A stylesheet turning the first one's output (XSL-FO) into HTML. When
     /// missing, the first stylesheet's output is opened as it is.
@@ -92,7 +113,102 @@ pub struct PreviewConfig {
     pub params: std::collections::BTreeMap<String, toml::Value>,
 }
 
+/// The facts about a document that previews and schema rules match on.
+#[derive(Debug, Default, Clone)]
+pub struct DocFacts {
+    pub root: String,
+    /// File names (last path part) of the schemas the document points to.
+    pub schema_files: Vec<String>,
+    pub file_name: Option<String>,
+}
+
+impl DocFacts {
+    pub fn of(doc: &xylem_dom::Document, path: Option<&Path>) -> DocFacts {
+        let root_el = doc.document_element();
+        let root = root_el
+            .and_then(|r| doc.name(r))
+            .unwrap_or_default()
+            .to_string();
+        let mut locations: Vec<String> = Vec::new();
+        if let Some(el) = root_el.and_then(|r| doc.element(r)) {
+            for a in &el.attrs {
+                match a.name.rsplit(':').next() {
+                    Some("noNamespaceSchemaLocation") if a.name.contains(':') => {
+                        locations.extend(a.value.split_whitespace().map(str::to_string))
+                    }
+                    Some("schemaLocation") if a.name.contains(':') => locations.extend(
+                        a.value
+                            .split_whitespace()
+                            .skip(1)
+                            .step_by(2)
+                            .map(str::to_string),
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(sys) = doc.doctype().and_then(|d| d.system_id.clone()) {
+            locations.push(sys);
+        }
+        DocFacts {
+            root,
+            schema_files: locations
+                .iter()
+                .filter_map(|l| l.rsplit(['/', '\\']).find(|p| !p.is_empty()))
+                .map(str::to_string)
+                .collect(),
+            file_name: path
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned()),
+        }
+    }
+
+    /// `root`, `schema_location` and `file_name` conditions all hold (a
+    /// missing one always does).
+    fn matches(&self, root: Option<&str>, schema: Option<&str>, file: Option<&str>) -> bool {
+        use xylem_s1000d::glob_match;
+        root.is_none_or(|r| r == self.root)
+            && schema.is_none_or(|g| self.schema_files.iter().any(|f| glob_match(g, f)))
+            && file.is_none_or(|g| self.file_name.as_deref().is_some_and(|f| glob_match(g, f)))
+    }
+}
+
+/// A schema for documents with a given root:
+///
+/// ```toml
+/// [[schema]]
+/// root = "frontMatter"                       # document element
+/// schema_location = "*Front_Matter*.xsd"     # optional: what it points to
+/// schema = "schemas/front-matter.xsd"        # .xsd or .dtd
+/// ```
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default)]
+pub struct SchemaRule {
+    pub root: Option<String>,
+    pub schema_location: Option<String>,
+    pub file_name: Option<String>,
+    pub schema: PathBuf,
+}
+
+impl SchemaRule {
+    pub fn applies_to(&self, facts: &DocFacts) -> bool {
+        facts.matches(
+            self.root.as_deref(),
+            self.schema_location.as_deref(),
+            self.file_name.as_deref(),
+        )
+    }
+}
+
 impl PreviewConfig {
+    pub fn applies_to(&self, facts: &DocFacts) -> bool {
+        facts.matches(
+            self.root.as_deref(),
+            self.schema_location.as_deref(),
+            self.file_name.as_deref(),
+        )
+    }
+
     /// Parameters as the stylesheet receives them.
     pub fn param_strings(&self) -> std::collections::BTreeMap<String, String> {
         self.params
@@ -120,6 +236,8 @@ const KNOWN_KEYS: &[&str] = &[
     "xslt_host",
     "xslt_allow_scripts",
     "preview",
+    "schema_locations",
+    "schema",
 ];
 const MAX_INCLUDES: usize = 4;
 
@@ -218,6 +336,12 @@ fn parse_one(path: &Path) -> Result<TeamConfig, String> {
     {
         resolve(p);
     }
+    for p in cfg.schema_locations.values_mut() {
+        resolve(p);
+    }
+    for s in &mut cfg.schema {
+        resolve(&mut s.schema);
+    }
     for p in &mut cfg.preview {
         resolve(&mut p.stylesheet);
         if let Some(h) = &mut p.html {
@@ -265,6 +389,57 @@ mod tests {
         let cfg = parse(&stub).unwrap();
         assert_eq!(cfg.package_dirs, vec![dir.join("doctypes")]);
         assert_eq!(cfg.source, Some(file.clone()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn schemas_and_previews_match_on_root_and_schema_location() {
+        let dir = std::env::temp_dir().join(format!("xylem-team-schema-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("xylem-team.toml");
+        std::fs::write(
+            &file,
+            r#"
+[schema_locations]
+"https://docs.example.com/schemas/" = "schemas"
+
+[[schema]]
+root = "frontMatter"
+schema = "schemas/front.xsd"
+
+[[preview]]
+root = "publication"
+schema_location = "*Cover*.xsd"
+stylesheet = "cover.xsl"
+
+[[preview]]
+root = "publication"
+stylesheet = "book.xsl"
+"#,
+        )
+        .unwrap();
+        let cfg = parse(&file).unwrap();
+        assert!(cfg.warnings.is_empty(), "{:?}", cfg.warnings);
+        assert_eq!(
+            cfg.schema_locations["https://docs.example.com/schemas/"],
+            dir.join("schemas")
+        );
+        assert_eq!(cfg.schema[0].schema, dir.join("schemas/front.xsd"));
+
+        let doc = |xml: &str| xylem_dom::Document::from_str(xml).unwrap();
+        let front = DocFacts::of(&doc("<frontMatter/>"), None);
+        assert!(cfg.schema[0].applies_to(&front));
+        let cover = DocFacts::of(
+            &doc(r#"<publication xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://docs.example.com/schemas/Book-Cover.xsd"/>"#),
+            None,
+        );
+        assert_eq!(cover.schema_files, vec!["Book-Cover.xsd".to_string()]);
+        let chosen = cfg.preview.iter().find(|p| p.applies_to(&cover)).unwrap();
+        assert_eq!(chosen.stylesheet, dir.join("cover.xsl"));
+        let book = DocFacts::of(&doc("<publication/>"), None);
+        let chosen = cfg.preview.iter().find(|p| p.applies_to(&book)).unwrap();
+        assert_eq!(chosen.stylesheet, dir.join("book.xsl"));
+        assert!(!cfg.schema[0].applies_to(&book));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

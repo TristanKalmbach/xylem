@@ -477,6 +477,16 @@ impl XylemApp {
         {
             crate::s1000d_ui::add_s1000d_catalog(&mut cat, &root);
         }
+        // Schema locations: the team's, then the user's (which win when
+        // both map the same location).
+        for (url, local) in &team.schema_locations {
+            cat.add_prefix(url, local);
+        }
+        for (url, local) in &settings.schema_locations {
+            if !url.trim().is_empty() {
+                cat.add_prefix(url.trim(), local);
+            }
+        }
         cat
     }
 
@@ -588,7 +598,7 @@ impl XylemApp {
         ds.repaint = Some(self.ctx.clone());
         ds.view = self.settings.default_view;
         ds.load_styles();
-        ds.load_grammar(&self.catalog);
+        ds.load_grammar(&self.catalog, &self.team.schema);
         for w in ds.style_warnings.iter().take(3) {
             log::warn!("{w}");
         }
@@ -662,7 +672,7 @@ impl XylemApp {
                 ds.inline_styles.clear();
                 let was_recovered = ds.grammar.is_none();
                 if was_recovered {
-                    ds.load_grammar(&self.catalog);
+                    ds.load_grammar(&self.catalog, &self.team.schema);
                 }
                 ds.canvas.invalidate();
                 true
@@ -1437,7 +1447,7 @@ impl XylemApp {
         ds.repaint = Some(self.ctx.clone());
         ds.view = self.settings.default_view;
         ds.load_styles();
-        ds.load_grammar(&self.catalog);
+        ds.load_grammar(&self.catalog, &self.team.schema);
         if let Some(g) = ds.grammar.clone() {
             let doc = &mut ds.editor.doc;
             let r = doc.document_element().unwrap();
@@ -4577,6 +4587,77 @@ impl XylemApp {
                             );
                         });
                         crate::ui::divider(ui);
+                        section(ui, "Stylesheets");
+                        let mut unused = false;
+                        form(ui, "prefs-stylesheets", |f| {
+                            f.row_with_hint(
+                                "Engine",
+                                "The program that runs stylesheets (SaxonDotnetHost.exe, see tools/saxon-dotnet). Used before the team's.",
+                                |ui| path_pref(ui, &mut self.settings.xslt_host, false, &mut unused),
+                            );
+                        });
+                        if let Some(team_host) = &self.team.xslt_host
+                            && self.settings.xslt_host.is_none()
+                        {
+                            crate::ui::muted(ui, format!("Team engine: {}", team_host.display()));
+                        }
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("Publication previews").strong());
+                        crate::ui::muted(
+                            ui,
+                            "Your own previews, tried before the team's. The first whose root and schema match the document is used.",
+                        );
+                        let mut remove_preview = None;
+                        for (i, pv) in self.settings.preview.iter_mut().enumerate() {
+                            egui::Frame::group(ui.style()).show(ui, |ui| {
+                                form(ui, &format!("prefs-preview-{i}"), |f| {
+                                    f.row("Name", |ui| {
+                                        crate::ui::text_field(ui, "Preview name", &mut pv.name, "Manual", 260.0);
+                                        if crate::ui::icon_button(ui, icon::X, "Remove this preview", None).clicked() {
+                                            remove_preview = Some(i);
+                                        }
+                                    });
+                                    f.row_with_hint("Root", "Document element; any when empty", |ui| {
+                                        crate::ui::text_field(ui, "Preview root", &mut pv.root, "publication", 260.0)
+                                    });
+                                    f.row_with_hint(
+                                        "Schema",
+                                        "Optional: the file name of the schema the document points to; * matches anything",
+                                        |ui| {
+                                            crate::ui::text_field(
+                                                ui,
+                                                "Preview schema",
+                                                &mut pv.schema_location,
+                                                "*Front_Matter*.xsd",
+                                                260.0,
+                                            )
+                                        },
+                                    );
+                                    f.row("Stylesheet", |ui| {
+                                        path_pref(ui, &mut pv.stylesheet, false, &mut unused)
+                                    });
+                                    f.row_with_hint("HTML step", "Optional: turns the output (XSL-FO) into HTML", |ui| {
+                                        path_pref(ui, &mut pv.html, false, &mut unused)
+                                    });
+                                    f.row_with_hint("Parameters", "name=value, separated by commas", |ui| {
+                                        crate::ui::text_field(
+                                            ui,
+                                            "Preview parameters",
+                                            &mut pv.params,
+                                            "mode=html",
+                                            260.0,
+                                        )
+                                    });
+                                });
+                            });
+                        }
+                        if let Some(i) = remove_preview {
+                            self.settings.preview.remove(i);
+                        }
+                        if crate::ui::button(ui, "Add preview").clicked() {
+                            self.settings.preview.push(Default::default());
+                        }
+                        crate::ui::divider(ui);
                         section(ui, "Document types");
                         match &self.team.source {
                             Some(src) => {
@@ -4642,6 +4723,45 @@ impl XylemApp {
                                 path_pref(ui, &mut self.settings.brex, false, &mut reload)
                             });
                         });
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("Schema locations").strong());
+                        crate::ui::muted(
+                            ui,
+                            "Documents that point to a schema on a server are validated against a local copy: a location (or the start of one, ending in /) and the file or folder to read instead.",
+                        );
+                        for (url, local) in &self.team.schema_locations {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(format!("{url}  →  {}", local.display())).color(p.text_muted));
+                                crate::ui::badge(ui, "team", Tone::Neutral);
+                            });
+                        }
+                        let mut remove_location = None;
+                        for (i, (url, local)) in self.settings.schema_locations.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                if crate::ui::text_field(ui, "Schema location", url, "https://server/schemas/", 230.0)
+                                    .lost_focus()
+                                {
+                                    reload = true;
+                                }
+                                let mut path = Some(local.clone()).filter(|p| !p.as_os_str().is_empty());
+                                let mut changed = false;
+                                path_pref(ui, &mut path, url.trim_end().ends_with('/'), &mut changed);
+                                if changed {
+                                    *local = path.unwrap_or_default();
+                                    reload = true;
+                                }
+                                if crate::ui::icon_button(ui, icon::X, "Remove this location", None).clicked() {
+                                    remove_location = Some(i);
+                                }
+                            });
+                        }
+                        if let Some(i) = remove_location {
+                            self.settings.schema_locations.remove(i);
+                            reload = true;
+                        }
+                        if crate::ui::button(ui, "Add location").clicked() {
+                            self.settings.schema_locations.push(Default::default());
+                        }
                     });
                 dialog_footer(ui, Some(("Done", true)), None, |_| {})
             });

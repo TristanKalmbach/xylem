@@ -196,7 +196,9 @@ translations. It is close, not exact: it is not split into pages like the
 PDF, and images load only where the browser can reach them.
 
 Previews are set up for everyone in the team configuration, one entry per
-kind of document, matched by the document's root element:
+kind of document, matched by the document's root element (and optionally
+by the schema it points to, `schema_location = "*Cover*.xsd"`, or its file
+name, `file_name = "*-cover.xml"`; the first entry that matches is used):
 
 ```toml
 xslt_host = "tools/SaxonDotnetHost.exe"
@@ -210,6 +212,10 @@ params = { output = "html" }
 ```
 
 Without `html`, the stylesheet's own output opens in Xylem.
+
+To try a preview without changing the team file, add one in File ›
+Preferences › Stylesheets. Your own entries are tried before the team's.
+The engine can be chosen there too.
 
 The `html` step runs the way a publishing service runs a second step on text
 it already has: the FO is read as it is and the HTML is written as that

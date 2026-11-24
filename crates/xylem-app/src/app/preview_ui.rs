@@ -65,23 +65,22 @@ impl XylemApp {
         let Some(ds) = self.docs.get(self.active) else {
             return;
         };
-        let root = ds
-            .editor
-            .doc
-            .document_element()
-            .and_then(|r| ds.editor.doc.name(r).map(str::to_string))
-            .unwrap_or_default();
+        let facts = crate::team::DocFacts::of(&ds.editor.doc, ds.path.as_deref());
+        // The user's own previews first, then the team's.
         let Some(cfg) = self
-            .team
+            .settings
             .preview
             .iter()
-            .find(|p| p.root.as_deref().is_none_or(|r| r == root))
-            .cloned()
+            .filter_map(|p| p.to_config())
+            .chain(self.team.preview.iter().cloned())
+            .find(|p| p.applies_to(&facts))
         else {
             return self.toast(
                 format!(
-                    "No publication preview is set up for <{root}> documents. It is set up for \
-                     everyone in the team configuration ([[preview]], see docs/stylesheet-check.md)."
+                    "No publication preview is set up for <{}> documents. Add one in File > \
+                     Preferences > Stylesheets, or for everyone in the team configuration \
+                     ([[preview]], see docs/stylesheet-check.md).",
+                    facts.root
                 ),
                 true,
             );
@@ -94,7 +93,7 @@ impl XylemApp {
             .or_else(|| std::env::var_os("XYLEM_XSLT_HOST").map(PathBuf::from));
         let Some(engine) = engine else {
             return self.toast(
-                "No stylesheet engine is set up (xslt_host in the team configuration).",
+                "No stylesheet engine is set up. Choose it in File > Preferences > Stylesheets (or xslt_host in the team configuration).",
                 true,
             );
         };

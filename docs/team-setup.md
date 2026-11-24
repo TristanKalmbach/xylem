@@ -42,7 +42,42 @@ root = "book"
 stylesheet = "stylesheets/book-to-fo.xsl"
 html = "stylesheets/fo-to-html.xsl"
 params = { output = "html" }
+
+[schema_locations]                       # schemas on a server, read locally
+"https://docs.example.com/schemas/" = "schemas/"
+
+[[schema]]                               # a schema by root element
+root = "frontMatter"
+schema = "schemas/front-matter.xsd"
 ```
+
+### Schemas on a server
+
+Documents often point to their schema by URL
+(`xsi:noNamespaceSchemaLocation="https://…/book.xsd"`). Xylem reads schemas
+only from files, so map the URL, or the start of it ending in `/`, to a
+local file or folder in `[schema_locations]`. The rest of the URL is
+looked up in that folder. Users can add their own mappings in File ›
+Preferences › Schemas; theirs win over the team's for the same location.
+Without a mapping, the Issues bar says the schema is on a server and could
+not be read, rather than reporting validation errors.
+
+### Different schemas for different documents
+
+A doctype package gives a schema to the documents it matches. For documents
+without one, `[[schema]]` entries choose a schema by the document element,
+and optionally by the file name of the schema the document points to
+(`schema_location = "*Cover*.xsd"`) or the document's own file name
+(`file_name = "*-cover.xml"`). The first entry that matches is used;
+otherwise the schema the document points to is used. This is how a
+publication, its front matter and its cover, each with a schema of its own,
+validate correctly when they are separate documents. A single document is
+validated against one schema; a part with its own schema must be a document
+of its own or be included by the main schema.
+
+`[[preview]]` entries take the same `schema_location` and `file_name` keys,
+so front matter or a cover can have a preview stylesheet of its own. The
+first entry that matches is used, so put the narrower ones first.
 
 Don't copy the shared file elsewhere: its relative paths would then point at
 folders that are not there. Use a one-line file that includes it instead:

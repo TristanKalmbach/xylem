@@ -278,9 +278,22 @@ impl DocState {
     }
 
     /// Loads the grammar: package schema first, then the document's own reference.
-    pub fn load_grammar(&mut self, catalog: &xylem_schema::Catalog) {
+    /// Loads the schema: the package's, else the first of `rules` that
+    /// applies (by root element and what the document points to), else the
+    /// one the document points to.
+    pub fn load_grammar(
+        &mut self,
+        catalog: &xylem_schema::Catalog,
+        rules: &[crate::team::SchemaRule],
+    ) {
         self.grammar = None;
-        let pkg_schema = self.package.resolved_files().schema;
+        let pkg_schema = self.package.resolved_files().schema.or_else(|| {
+            let facts = crate::team::DocFacts::of(&self.editor.doc, self.path.as_deref());
+            rules
+                .iter()
+                .find(|r| r.applies_to(&facts))
+                .map(|r| r.schema.clone())
+        });
         let result = match pkg_schema {
             Some(p) => {
                 let ext = p
@@ -290,9 +303,9 @@ impl DocState {
                     .to_ascii_lowercase();
                 Some(
                     if ext == "dtd" {
-                        Grammar::from_dtd(&p)
+                        Grammar::from_dtd_with_catalog(&p, catalog)
                     } else {
-                        Grammar::from_xsd(&p)
+                        Grammar::from_xsd_with_catalog(&p, catalog)
                     }
                     .map(|g| (g, p.display().to_string())),
                 )
@@ -307,7 +320,13 @@ impl DocState {
             }
             Some(Err(e)) => {
                 let msg = e.to_string();
-                self.grammar_status = if msg.contains("catalog") {
+                self.grammar_status = if msg.contains("remote locations") {
+                    // Not a validation error: the schema itself could not be read.
+                    format!(
+                        "Schema not loaded: the document points to a schema on a server ({}), and Xylem reads schemas only from files. Map that location to a local copy in File > Preferences > Schema locations (or schema_locations in the team configuration).",
+                        remote_location(&msg).unwrap_or("a URL")
+                    )
+                } else if msg.contains("catalog") {
                     format!(
                         "Schema not available: {msg}. Set the schema catalog or S1000D schema folder in File > Preferences."
                     )
@@ -749,4 +768,12 @@ pub fn skeleton_xml(s: &xylem_schema::Skeleton) -> String {
     }
     out.push_str(&format!("</{}>", s.name));
     out
+}
+
+/// The quoted location in an "cannot resolve '<url>' (remote locations …)"
+/// message.
+fn remote_location(msg: &str) -> Option<&str> {
+    let start = msg.find('\'')? + 1;
+    let end = start + msg[start..].find('\'')?;
+    Some(&msg[start..end])
 }

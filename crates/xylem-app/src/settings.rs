@@ -42,9 +42,56 @@ pub struct Settings {
     /// Name recorded on tracked changes and comments; empty means the
     /// login name.
     pub review_author: String,
-    /// Test suite and engine program last used by Check stylesheet output.
+    /// Test suite last used by Check stylesheet output.
     pub stylesheet_suite: Option<PathBuf>,
+    /// Program that runs stylesheets (Preferences, or the Check stylesheet
+    /// window's Engine field); used before the team's.
     pub xslt_host: Option<PathBuf>,
+    /// The user's own publication previews, tried before the team's.
+    pub preview: Vec<UserPreview>,
+    /// The user's own schema locations: a URL (or its start) and the local
+    /// file or folder to read instead. Used before the team's.
+    pub schema_locations: Vec<(String, PathBuf)>,
+}
+
+/// A publication preview set up in Preferences.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct UserPreview {
+    pub name: String,
+    /// Document element it applies to; any when empty.
+    pub root: String,
+    /// Glob against the file name of the schema the document points to.
+    pub schema_location: String,
+    pub stylesheet: Option<PathBuf>,
+    pub html: Option<PathBuf>,
+    /// Parameters as `name=value`, separated by commas or new lines.
+    pub params: String,
+}
+
+impl UserPreview {
+    /// As a preview configuration, once it names a stylesheet.
+    pub fn to_config(&self) -> Option<crate::team::PreviewConfig> {
+        let opt = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
+        Some(crate::team::PreviewConfig {
+            name: opt(&self.name),
+            root: opt(&self.root),
+            schema_location: opt(&self.schema_location),
+            file_name: None,
+            stylesheet: self.stylesheet.clone()?,
+            html: self.html.clone(),
+            params: self
+                .params
+                .split([',', '\n'])
+                .filter_map(|pair| {
+                    let (k, v) = pair.split_once('=')?;
+                    let k = k.trim();
+                    (!k.is_empty())
+                        .then(|| (k.to_string(), toml::Value::String(v.trim().to_string())))
+                })
+                .collect(),
+        })
+    }
 }
 
 impl Default for Settings {
@@ -76,6 +123,8 @@ impl Default for Settings {
             review_author: String::new(),
             stylesheet_suite: None,
             xslt_host: None,
+            preview: Vec::new(),
+            schema_locations: Vec::new(),
         }
     }
 }
@@ -124,5 +173,28 @@ impl Settings {
         self.recent_files.retain(|r| r != &p);
         self.recent_files.insert(0, p);
         self.recent_files.truncate(15);
+    }
+}
+
+#[cfg(test)]
+mod user_preview_tests {
+    use super::*;
+
+    #[test]
+    fn a_user_preview_becomes_a_preview_configuration() {
+        let mut p = UserPreview {
+            root: " publication ".into(),
+            params: "mode=html, pageCount = 0\nempty=".into(),
+            ..Default::default()
+        };
+        assert!(p.to_config().is_none(), "needs a stylesheet");
+        p.stylesheet = Some("top.xsl".into());
+        let c = p.to_config().unwrap();
+        assert_eq!(c.root.as_deref(), Some("publication"));
+        assert!(c.name.is_none());
+        let params = c.param_strings();
+        assert_eq!(params["mode"], "html");
+        assert_eq!(params["pageCount"], "0");
+        assert_eq!(params["empty"], "");
     }
 }
