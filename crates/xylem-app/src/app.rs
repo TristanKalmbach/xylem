@@ -4592,7 +4592,7 @@ impl XylemApp {
                         form(ui, "prefs-stylesheets", |f| {
                             f.row_with_hint(
                                 "Engine",
-                                "The program that runs stylesheets (SaxonDotnetHost.exe, see tools/saxon-dotnet). Used before the team's.",
+                                "The program that runs stylesheets (SaxonDotnetHost.exe, see tools/saxon-dotnet), or builtin. Used before the team's; Xylem's own engine when neither is set.",
                                 |ui| path_pref(ui, &mut self.settings.xslt_host, false, &mut unused),
                             );
                         });
@@ -4600,6 +4600,8 @@ impl XylemApp {
                             && self.settings.xslt_host.is_none()
                         {
                             crate::ui::muted(ui, format!("Team engine: {}", team_host.display()));
+                        } else if self.settings.xslt_host.is_none() {
+                            crate::ui::muted(ui, "Using Xylem's built-in engine.");
                         }
                         ui.add_space(6.0);
                         ui.label(RichText::new("Publication previews").strong());

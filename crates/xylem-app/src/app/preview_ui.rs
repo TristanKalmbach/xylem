@@ -90,13 +90,9 @@ impl XylemApp {
             .xslt_host
             .clone()
             .or_else(|| self.team.xslt_host.clone())
-            .or_else(|| std::env::var_os("XYLEM_XSLT_HOST").map(PathBuf::from));
-        let Some(engine) = engine else {
-            return self.toast(
-                "No stylesheet engine is set up. Choose it in File > Preferences > Stylesheets (or xslt_host in the team configuration).",
-                true,
-            );
-        };
+            .or_else(|| std::env::var_os("XYLEM_XSLT_HOST").map(PathBuf::from))
+            // Xylem's own engine unless another is chosen.
+            .unwrap_or_else(|| PathBuf::from(xylem_xslt::host::BUILTIN));
         let stem = crate::html_export::safe_file_stem(
             &ds.path
                 .as_ref()

@@ -46,8 +46,8 @@
 //! `--allow-scripts` lets XSLT 1.0 stylesheets run embedded scripts
 //! (`msxsl:script`); they are refused otherwise.
 //!
-//! The host defaults to `XYLEM_XSLT_HOST`; `--host builtin` uses Xylem's own
-//! engine instead of a program. Exit code 0 means every test gave
+//! The host is `--host`, else `XYLEM_XSLT_HOST`, else Xylem's own engine
+//! (`builtin`); pass a program such as `SaxonDotnetHost.exe` to use it instead. Exit code 0 means every test gave
 //! the same output.
 
 use std::path::PathBuf;
@@ -130,10 +130,7 @@ fn run() -> Result<bool, String> {
     let stylesheet = stylesheet
         .or_else(|| suite.stylesheet.clone())
         .ok_or("The suite names no stylesheet; pass --stylesheet.")?;
-    let mut host =
-        Host::new(host.ok_or(
-            "No host program: set XYLEM_XSLT_HOST or pass --host (a program, see tools/saxon-dotnet, or builtin).",
-        )?);
+    let mut host = host.map(Host::new).unwrap_or_else(Host::builtin);
     host.repeat = repeat.max(1);
     host.allow_scripts = allow_scripts;
     let baseline = match against.as_deref() {

@@ -182,7 +182,7 @@ impl XylemApp {
                 .or_else(|| self.team.xslt_host.clone())
                 .or_else(|| std::env::var_os("XYLEM_XSLT_HOST").map(PathBuf::from))
                 .map(|p| p.display().to_string())
-                .unwrap_or_default();
+                .unwrap_or_else(|| xylem_xslt::host::BUILTIN.to_string());
         }
         // The stylesheet being edited is the one to check.
         if let Some(path) = self.docs.get(self.active).and_then(|d| d.path.clone())

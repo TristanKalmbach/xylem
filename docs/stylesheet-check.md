@@ -38,9 +38,9 @@ Saxon-HE on .NET; build it with your copy of the Saxon assemblies (see its
 README). Point Xylem at it in the window's Engine field, or for everyone with
 `xslt_host` in the team configuration (see [team-setup.md](team-setup.md)).
 
-Instead of a program you can enter `builtin` (in the Engine field, as
-`xslt_host`, or as `--host builtin`) to use Xylem's own XSLT 2.0 engine,
-which needs no .NET or Saxon. It is new: it reproduces the publishing
+When no engine is chosen, Xylem uses its own XSLT 2.0 engine (`builtin`),
+which needs no .NET or Saxon. Choose a program in the Engine field, as
+`xslt_host`, or with `--host` to use it instead. It is new: it reproduces the publishing
 service's output on the stylesheets it has been tried with and can time
 templates (for Time templates and Analyze) and write the HTML step of
 Publication preview; XSLT 1.0 support covers what the FO-to-HTML stylesheet
@@ -101,7 +101,8 @@ xylem-xslt-check suite.toml [--stylesheet file.xsl]
                  [--host SaxonDotnetHost.exe | builtin] [--work folder]
 ```
 
-`--host` defaults to the `XYLEM_XSLT_HOST` environment variable. The exit
+`--host` defaults to the `XYLEM_XSLT_HOST` environment variable, and to
+Xylem's built-in engine when that is not set either. The exit
 code is 0 when every test gave the same output, so the check can run in a
 build.
 

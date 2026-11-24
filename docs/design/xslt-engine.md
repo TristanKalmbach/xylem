@@ -263,7 +263,7 @@ first-item semantics for string functions) are a milestone of their own.
 |---|---|---|
 | M0 | Prototype (this branch) | Templates, modes, parameters, variables, choose, for-each, XPath paths and predicates; the oracle suites run end to end |
 | M1 | Exact production output | Every saved output in every check suite identical without renumbering ids; the unverified spec notes probed; line numbers in errors |
-| M2 | Tools on the engine (started: Check, Time templates and Analyze run on it with engine `builtin`) | Check, Time templates, Analyze proofs and Publication preview can run on the engine, chosen in settings, with the .NET host as the fallback; results compared on every run while both exist |
+| M2 | Tools on the engine (done for Check, Time templates, Analyze and Publication preview; `builtin` is the default engine) | Check, Time templates, Analyze proofs and Publication preview can run on the engine, chosen in settings, with the .NET host as the fallback; results compared on every run while both exist |
 | M3 | XSLT 1.0 and `xsl:output` (started: FO-to-HTML matches on 60 of 60 files) | FO-to-HTML stylesheet reproduces the host's `--serialize` output; xml/html/text serialization |
 | M4 | Breadth | QT3 XPath 2.0 subset ≥ 90 %, XSLT 2.0 subset of xslt30-test tracked; `for-each-group`, `analyze-string`, `result-document`, `next-match`, `apply-imports`, collations |
 | M5 | Retire the host | Default to the engine; the .NET host becomes an optional oracle for development |
