@@ -139,6 +139,20 @@ ins { background:var(--ins); color:var(--ins-fg); text-decoration:none; }
             Outcome::Failed(e) => format!("<span class=\"bad\">failed</span> {}", esc(e)),
             Outcome::NoBaseline => "<span class=\"muted\">nothing to compare with</span>".into(),
         };
+        let result = match &r.engines {
+            None => result,
+            Some(crate::check::EngineComparison::Same) => {
+                format!("{result}<br><span class=\"muted\">same on both engines</span>")
+            }
+            Some(crate::check::EngineComparison::Different(c)) => format!(
+                "{result}<br><span class=\"bad\">engines differ in {} place{}</span>",
+                c.count,
+                if c.count == 1 { "" } else { "s" }
+            ),
+            Some(crate::check::EngineComparison::Failed(e)) => {
+                format!("{result}<br><span class=\"bad\">engines:</span> {}", esc(e))
+            }
+        };
         let time = match (r.ms, r.baseline_ms) {
             (Some(a), Some(b)) => format!("{a} ms (was {b} ms)"),
             (Some(a), None) => format!("{a} ms"),
@@ -251,9 +265,12 @@ mod tests {
                 baseline_ms: None,
                 output: Some(new),
                 baseline_output: Some(base),
+                engines: None,
+                reference_output: None,
             }],
             error: None,
             cancelled: false,
+            reference_engine: None,
         };
         let page = html(&report);
         assert!(page.contains("Manual &lt;1&gt;"));

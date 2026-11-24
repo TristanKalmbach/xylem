@@ -118,3 +118,63 @@ fn builtin_host_serializes_like_the_dotnet_host() {
     assert_eq!(std::fs::read(&job.1).unwrap(), expected);
     let _ = std::fs::remove_dir_all(&out);
 }
+
+#[test]
+fn compare_engines_reports_agreement_and_failures() {
+    use std::sync::atomic::AtomicBool;
+    use xylem_xslt::{Baseline, CheckEnv, EngineComparison, Suite, check, compare_engines};
+    let dir = std::env::temp_dir().join(format!("xylem-engines-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let suite_file = dir.join("suite.toml");
+    let input = cases().join("input.xml");
+    let expected = cases().join("basics").join("expected.xml");
+    std::fs::write(
+        &suite_file,
+        format!(
+            "[params]\nmode = \"final\"\npageCount = 4\n[[test]]\nname = \"basics\"\ninput = '{}'\nexpected = '{}'\n",
+            input.display(),
+            expected.display()
+        ),
+    )
+    .unwrap();
+    let suite = Suite::load(&suite_file).unwrap();
+    let style = cases().join("basics").join("style.xsl");
+    let cancel = AtomicBool::new(false);
+    let host = Host::builtin();
+    let mut progress = |_: String| {};
+    let run = |reference: &Host| {
+        let work = dir.join("work");
+        let mut progress = |_: String| {};
+        let mut report = check(
+            &suite,
+            &style,
+            &Baseline::Saved,
+            CheckEnv {
+                host: &host,
+                work: &work,
+                progress: &mut progress,
+                cancel: &cancel,
+            },
+        );
+        compare_engines(
+            &mut report,
+            &suite,
+            reference,
+            &work,
+            &mut progress,
+            &cancel,
+        );
+        report
+    };
+    let same = run(&Host::builtin());
+    assert_eq!(same.results[0].engines, Some(EngineComparison::Same));
+    assert!(same.engines_agree() && same.all_identical());
+    let missing = run(&Host::new(dir.join("no-such-engine.exe")));
+    assert!(matches!(
+        missing.results[0].engines,
+        Some(EngineComparison::Failed(_))
+    ));
+    assert!(!missing.engines_agree());
+    let _ = &mut progress;
+    let _ = std::fs::remove_dir_all(&dir);
+}

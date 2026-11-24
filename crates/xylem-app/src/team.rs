@@ -63,6 +63,9 @@ pub struct TeamConfig {
     /// Program that runs stylesheets for Check stylesheet output
     /// (`SaxonDotnetHost.exe`, see `tools/saxon-dotnet`).
     pub xslt_host: Option<PathBuf>,
+    /// A second engine Check stylesheet output compares with (say the .NET
+    /// host while teams move to the built-in engine).
+    pub xslt_reference: Option<PathBuf>,
     /// Let XSLT 1.0 stylesheets run embedded scripts (`msxsl:script`), as
     /// some publishing services allow. Off unless the team turns it on:
     /// scripts are code that runs on the author's machine.
@@ -234,6 +237,7 @@ const KNOWN_KEYS: &[&str] = &[
     "dictionary_lang",
     "update_source",
     "xslt_host",
+    "xslt_reference",
     "xslt_allow_scripts",
     "preview",
     "schema_locations",
@@ -330,6 +334,7 @@ fn parse_one(path: &Path) -> Result<TeamConfig, String> {
         &mut cfg.dictionary_dir,
         &mut cfg.update_source,
         &mut cfg.xslt_host,
+        &mut cfg.xslt_reference,
     ]
     .into_iter()
     .flatten()
@@ -430,7 +435,9 @@ stylesheet = "book.xsl"
         let front = DocFacts::of(&doc("<frontMatter/>"), None);
         assert!(cfg.schema[0].applies_to(&front));
         let cover = DocFacts::of(
-            &doc(r#"<publication xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://docs.example.com/schemas/Book-Cover.xsd"/>"#),
+            &doc(
+                r#"<publication xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://docs.example.com/schemas/Book-Cover.xsd"/>"#,
+            ),
             None,
         );
         assert_eq!(cover.schema_files, vec!["Book-Cover.xsd".to_string()]);

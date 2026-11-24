@@ -4595,6 +4595,11 @@ impl XylemApp {
                                 "The program that runs stylesheets (SaxonDotnetHost.exe, see tools/saxon-dotnet), or builtin. Used before the team's; Xylem's own engine when neither is set.",
                                 |ui| path_pref(ui, &mut self.settings.xslt_host, false, &mut unused),
                             );
+                            f.row_with_hint(
+                                "Compare with",
+                                "Optional second engine (say SaxonDotnetHost.exe). Check stylesheet output also runs it and reports any test whose output differs between the two.",
+                                |ui| path_pref(ui, &mut self.settings.xslt_reference, false, &mut unused),
+                            );
                         });
                         if let Some(team_host) = &self.team.xslt_host
                             && self.settings.xslt_host.is_none()

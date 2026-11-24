@@ -46,6 +46,17 @@ pub enum Outcome {
     Failed(String),
 }
 
+/// The same stylesheet's output on a second engine, compared with the
+/// engine under test (see [`compare_engines`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum EngineComparison {
+    /// Same output (after ignoring generated IDs).
+    Same,
+    Different(Comparison),
+    /// One engine failed, or an output could not be read.
+    Failed(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct TestResult {
     pub name: String,
@@ -56,6 +67,10 @@ pub struct TestResult {
     pub baseline_ms: Option<u64>,
     pub output: Option<PathBuf>,
     pub baseline_output: Option<PathBuf>,
+    /// The reference engine's verdict, when [`compare_engines`] ran.
+    pub engines: Option<EngineComparison>,
+    /// The reference engine's output, when it ran.
+    pub reference_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,9 +83,19 @@ pub struct CheckReport {
     /// Set when the check could not run at all.
     pub error: Option<String>,
     pub cancelled: bool,
+    /// The second engine the outputs were compared with, if any.
+    pub reference_engine: Option<PathBuf>,
 }
 
 impl CheckReport {
+    /// Whether every test gave the same output on both engines (true when
+    /// no second engine ran).
+    pub fn engines_agree(&self) -> bool {
+        self.results
+            .iter()
+            .all(|r| matches!(r.engines, None | Some(EngineComparison::Same)))
+    }
+
     pub fn all_identical(&self) -> bool {
         self.error.is_none()
             && !self.cancelled
@@ -152,6 +177,7 @@ pub fn check(suite: &Suite, stylesheet: &Path, baseline: &Baseline, env: CheckEn
         results: Vec::new(),
         error: None,
         cancelled: false,
+        reference_engine: None,
     };
     let tests = &suite.tests;
     let candidate_dir = env.work.join("candidate");
@@ -227,6 +253,8 @@ pub fn check(suite: &Suite, stylesheet: &Path, baseline: &Baseline, env: CheckEn
             baseline_ms: base_ran.as_ref().filter(|j| j.ok).map(|j| j.ms),
             output: ran.as_ref().filter(|j| j.ok).map(|j| j.output.clone()),
             baseline_output: None,
+            engines: None,
+            reference_output: None,
         };
         result.outcome = (|| {
             let ran = ran.ok_or("The stylesheet did not run.")?;
@@ -268,6 +296,80 @@ pub fn check(suite: &Suite, stylesheet: &Path, baseline: &Baseline, env: CheckEn
         report.results.push(result);
     }
     report
+}
+
+/// Runs the stylesheet under test on a second engine (`reference`) and
+/// records, per test, whether its output matches the first engine's. Used
+/// while two engines exist, to catch any difference between them early:
+/// say Xylem's built-in engine checked against the .NET host.
+pub fn compare_engines(
+    report: &mut CheckReport,
+    suite: &Suite,
+    reference: &Host,
+    work: &Path,
+    progress: &mut dyn FnMut(String),
+    cancel: &AtomicBool,
+) {
+    if report.error.is_some() || report.cancelled {
+        return;
+    }
+    let dir = work.join("reference");
+    let _ = std::fs::remove_dir_all(&dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        report.error = Some(format!("Could not create {}: {e}", dir.display()));
+        return;
+    }
+    report.reference_engine = Some(reference.program.clone());
+    progress(format!(
+        "Running the stylesheet on {}…",
+        reference.program.display()
+    ));
+    let runs = run_all(
+        reference,
+        &report.stylesheet,
+        &suite.tests,
+        &dir,
+        cancel,
+        false,
+    );
+    if cancel.load(Ordering::Relaxed) {
+        report.cancelled = true;
+        return;
+    }
+    for (result, run) in report.results.iter_mut().zip(runs) {
+        let verdict = match (run, &result.output) {
+            (None, _) => EngineComparison::Failed("The reference engine did not run.".into()),
+            (Some(r), _) if !r.ok => match &result.output {
+                // Both failing is agreement of a kind, but worth seeing.
+                None => EngineComparison::Failed(format!(
+                    "Both engines failed; the reference said: {}",
+                    r.error.unwrap_or_default()
+                )),
+                Some(_) => EngineComparison::Failed(format!(
+                    "Only the reference engine failed: {}",
+                    r.error.unwrap_or_default()
+                )),
+            },
+            (Some(_), None) => {
+                EngineComparison::Failed("Only the engine under test failed.".into())
+            }
+            (Some(r), Some(ours)) => {
+                result.reference_output = Some(r.output.clone());
+                match (std::fs::read(&r.output), std::fs::read(ours)) {
+                    (Ok(a), Ok(b)) => {
+                        let c = compare(&a, &b);
+                        if c.identical {
+                            EngineComparison::Same
+                        } else {
+                            EngineComparison::Different(c)
+                        }
+                    }
+                    (Err(e), _) | (_, Err(e)) => EngineComparison::Failed(e.to_string()),
+                }
+            }
+        };
+        result.engines = Some(verdict);
+    }
 }
 
 pub(crate) fn plural(n: usize) -> &'static str {

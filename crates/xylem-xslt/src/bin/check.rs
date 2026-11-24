@@ -5,7 +5,7 @@
 //! xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>]
 //!                  [--against saved | committed[:<rev>] | <other.xsl>]
 //!                  [--host <SaxonDotnetHost.exe> | builtin] [--allow-scripts] [--work <folder>]
-//!                  [--report <file.html>]
+//!                  [--report <file.html>] [--reference <program>]
 //! xylem-xslt-check <suite.toml> --profile [--top <n>] [--stylesheet ...]
 //! xylem-xslt-check <suite.toml> --analyze [--fix] [--scope <folder>]
 //!                  [--against ...] [--stylesheet ...] [--repeat <n>]
@@ -47,8 +47,10 @@
 //! (`msxsl:script`); they are refused otherwise.
 //!
 //! The host is `--host`, else `XYLEM_XSLT_HOST`, else Xylem's own engine
-//! (`builtin`); pass a program such as `SaxonDotnetHost.exe` to use it instead. Exit code 0 means every test gave
-//! the same output.
+//! (`builtin`); pass a program such as `SaxonDotnetHost.exe` to use it instead.
+//! `--reference <program>` also runs the stylesheet on a second engine and
+//! reports every test whose output differs between the two. Exit code 0
+//! means every test gave the same output (and the same on both engines).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -58,7 +60,7 @@ use xylem_xslt::check::CheckEnv;
 use xylem_xslt::{Baseline, Host, Outcome, Suite, check, profile, proof};
 
 const USAGE: &str = "Usage: xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>] \
-[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>|builtin] [--allow-scripts] [--work <folder>] [--report <file.html>] \
+[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>|builtin] [--allow-scripts] [--work <folder>] [--report <file.html>] [--reference <program>] \
 [--profile [--top <n>]] [--analyze [--fix] [--scope <folder>]] [--prove] [--repeat <n>]";
 
 fn main() -> ExitCode {
@@ -81,6 +83,7 @@ fn run() -> Result<bool, String> {
     let mut stylesheet = None;
     let mut against = None;
     let mut host = std::env::var_os("XYLEM_XSLT_HOST").map(PathBuf::from);
+    let mut reference: Option<PathBuf> = None;
     let mut allow_scripts = false;
     let mut work = None;
     let mut report_file: Option<PathBuf> = None;
@@ -97,6 +100,7 @@ fn run() -> Result<bool, String> {
             "--stylesheet" => stylesheet = Some(PathBuf::from(value("--stylesheet")?)),
             "--against" => against = Some(value("--against")?),
             "--host" => host = Some(PathBuf::from(value("--host")?)),
+            "--reference" => reference = Some(PathBuf::from(value("--reference")?)),
             "--allow-scripts" => allow_scripts = true,
             "--work" => work = Some(PathBuf::from(value("--work")?)),
             "--report" => report_file = Some(PathBuf::from(value("--report")?)),
@@ -202,7 +206,7 @@ fn run() -> Result<bool, String> {
     }
     println!("Checking {}", stylesheet.display());
     println!("against {}\n", baseline.describe());
-    let report = check(
+    let mut report = check(
         &suite,
         &stylesheet,
         &baseline,
@@ -213,6 +217,18 @@ fn run() -> Result<bool, String> {
             cancel: &cancel,
         },
     );
+    if let Some(r) = &reference {
+        let mut reference = Host::new(r);
+        reference.allow_scripts = allow_scripts;
+        xylem_xslt::compare_engines(
+            &mut report,
+            &suite,
+            &reference,
+            &work,
+            &mut progress,
+            &cancel,
+        );
+    }
     if let Some(e) = &report.error {
         return Err(e.clone());
     }
@@ -276,8 +292,42 @@ fn run() -> Result<bool, String> {
                 }
             }
         }
+        match &r.engines {
+            None | Some(xylem_xslt::EngineComparison::Same) => {}
+            Some(xylem_xslt::EngineComparison::Failed(e)) => {
+                println!("    ENGINES: {e}")
+            }
+            Some(xylem_xslt::EngineComparison::Different(c)) => {
+                println!(
+                    "    ENGINES DIFFER in {} place{}",
+                    c.count,
+                    if c.count == 1 { "" } else { "s" }
+                );
+                for d in &c.differences {
+                    println!("      at {}", d.path);
+                    println!("        reference: {}", d.baseline);
+                    println!("        this one:  {}", d.candidate);
+                }
+                if let (Some(a), Some(b)) = (&r.reference_output, &r.output) {
+                    println!("      outputs: {}  {}", a.display(), b.display());
+                }
+            }
+        }
     }
-    Ok(report.all_identical())
+    if let Some(r) = &report.reference_engine {
+        let agree = report
+            .results
+            .iter()
+            .filter(|t| matches!(t.engines, Some(xylem_xslt::EngineComparison::Same)))
+            .count();
+        println!(
+            "\nSame output on {} for {agree} of {} test{}.",
+            r.display(),
+            report.results.len(),
+            if report.results.len() == 1 { "" } else { "s" }
+        );
+    }
+    Ok(report.all_identical() && report.engines_agree())
 }
 
 fn print_profile(report: &xylem_xslt::ProfileReport, top: usize) -> Result<bool, String> {

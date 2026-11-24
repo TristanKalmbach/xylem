@@ -40,7 +40,13 @@ README). Point Xylem at it in the window's Engine field, or for everyone with
 
 When no engine is chosen, Xylem uses its own XSLT 2.0 engine (`builtin`),
 which needs no .NET or Saxon. Choose a program in the Engine field, as
-`xslt_host`, or with `--host` to use it instead. It is new: it reproduces the publishing
+`xslt_host`, or with `--host` to use it instead.
+
+To compare the two engines while you move from one to the other, set a
+second engine under **Preferences › Stylesheets › Compare with** (or
+`xslt_reference` in the team configuration, or `--reference <program>` on the
+command line). Check then runs the stylesheet on both and flags every test
+whose output differs between them; the exit code is non-zero if any does. It is new: it reproduces the publishing
 service's output on the stylesheets it has been tried with and can time
 templates (for Time templates and Analyze) and write the HTML step of
 Publication preview; XSLT 1.0 support covers what the FO-to-HTML stylesheet

@@ -24,8 +24,8 @@ pub mod xpath;
 
 pub use analyze::{Analysis, Applied, Finding, Rule, Severity, analyze, apply, revert};
 pub use check::{
-    Baseline, CheckEnv, CheckReport, Outcome, ProfileReport, TestProfile, TestResult, check,
-    profile,
+    Baseline, CheckEnv, CheckReport, EngineComparison, Outcome, ProfileReport, TestProfile,
+    TestResult, check, compare_engines, profile,
 };
 pub use compare::{Comparison, Difference, compare};
 pub use host::Host;

@@ -358,6 +358,19 @@ impl XylemApp {
                 Baseline::Stylesheet(PathBuf::from(st.other.trim()))
             }
         };
+        // A second engine to compare with, unless it is the one checking.
+        let reference = self
+            .settings
+            .xslt_reference
+            .clone()
+            .or_else(|| self.team.xslt_reference.clone())
+            .filter(|r| r.as_path() != host.program.as_path())
+            .map(|r| {
+                let mut h = Host::new(r);
+                h.allow_scripts = host.allow_scripts;
+                h
+            });
+        let st = &mut self.stylesheet_check;
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
@@ -369,7 +382,7 @@ impl XylemApp {
                 let _ = tx2.send(Event::Progress(s));
             };
             let work = work_dir();
-            let report = check(
+            let mut report = check(
                 &suite,
                 &stylesheet,
                 &baseline,
@@ -380,6 +393,16 @@ impl XylemApp {
                     cancel: &stop,
                 },
             );
+            if let Some(reference) = &reference {
+                xylem_xslt::compare_engines(
+                    &mut report,
+                    &suite,
+                    reference,
+                    &work,
+                    &mut progress,
+                    &stop,
+                );
+            }
             let _ = tx.send(Event::Done(Box::new(report)));
         });
     }
@@ -859,6 +882,19 @@ impl XylemApp {
                 .filter(|(n, _)| *n > 0)
                 .map(|(n, what)| format!("{n} {what}"))
                 .collect();
+                let mut parts = parts;
+                if r.reference_engine.is_some() {
+                    let differ = r
+                        .results
+                        .iter()
+                        .filter(|t| !matches!(t.engines, None | Some(xylem_xslt::EngineComparison::Same)))
+                        .count();
+                    parts.push(if differ == 0 {
+                        "same on both engines".to_string()
+                    } else {
+                        format!("{differ} differ between engines")
+                    });
+                }
                 let summary = if r.cancelled {
                     "Stopped".to_string()
                 } else {
@@ -954,6 +990,29 @@ impl XylemApp {
                             }
                         });
                     });
+                    match &r.engines {
+                        Some(xylem_xslt::EngineComparison::Different(c)) => {
+                            let place = c.differences.first().map(|d| format!(" (first at {})", d.path)).unwrap_or_default();
+                            crate::ui::notice(
+                                ui,
+                                crate::ui::Tone::Danger,
+                                format!(
+                                    "The two engines differ in {} place{}{place}.",
+                                    c.count,
+                                    if c.count == 1 { "" } else { "s" }
+                                ),
+                            );
+                            if let Some(out) = &r.reference_output
+                                && ui.link("Open the other engine's output").clicked()
+                            {
+                                actions.push(Action::Open(out.clone()));
+                            }
+                        }
+                        Some(xylem_xslt::EngineComparison::Failed(e)) => {
+                            crate::ui::notice(ui, crate::ui::Tone::Warning, format!("Engines: {e}"));
+                        }
+                        _ => {}
+                    }
                     match &r.outcome {
                         Outcome::Failed(e) => {
                             crate::ui::notice(ui, crate::ui::Tone::Warning, e.clone());

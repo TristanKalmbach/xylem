@@ -47,6 +47,9 @@ pub struct Settings {
     /// Program that runs stylesheets (Preferences, or the Check stylesheet
     /// window's Engine field); used before the team's.
     pub xslt_host: Option<PathBuf>,
+    /// A second engine Check stylesheet output also runs, to report any
+    /// test whose output differs between the two engines.
+    pub xslt_reference: Option<PathBuf>,
     /// The user's own publication previews, tried before the team's.
     pub preview: Vec<UserPreview>,
     /// The user's own schema locations: a URL (or its start) and the local
@@ -123,6 +126,7 @@ impl Default for Settings {
             review_author: String::new(),
             stylesheet_suite: None,
             xslt_host: None,
+            xslt_reference: None,
             preview: Vec::new(),
             schema_locations: Vec::new(),
         }
