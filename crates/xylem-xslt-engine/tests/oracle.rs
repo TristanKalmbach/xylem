@@ -35,6 +35,7 @@ const CASES: &[&str] = &[
     "imports",
     "ids",
     "edge",
+    "docs",
 ];
 const PARAMS: &[(&str, &str)] = &[("mode", "final"), ("pageCount", "4")];
 

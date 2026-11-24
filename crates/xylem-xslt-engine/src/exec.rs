@@ -82,6 +82,9 @@ pub struct Engine<'s> {
     keys: RefCell<HashMap<(QName, u32), Rc<KeyIndex>>>,
     docs: RefCell<HashMap<String, u32>>,
     pub messages: RefCell<Vec<String>>,
+    /// Variables visible to patterns: those in scope at an `xsl:number`
+    /// whose `count` / `from` patterns are being matched.
+    pattern_env: RefCell<Env>,
     pub timing: Option<RefCell<Vec<TemplateTime>>>,
     source: u32,
 }
@@ -103,6 +106,7 @@ impl<'s> Engine<'s> {
             keys: RefCell::default(),
             docs: RefCell::default(),
             messages: RefCell::default(),
+            pattern_env: RefCell::default(),
             timing: time.then(|| RefCell::new(vec![TemplateTime::default(); ss.templates.len()])),
             source: 0,
         }
@@ -286,6 +290,7 @@ impl<'s> Engine<'s> {
             item: None,
             pos: 1,
             size: 1,
+            env: self.pattern_env.borrow().clone(),
             ..self.root_dyn()
         };
         let holds = |ctx: NodeRef| -> R<bool> {
@@ -980,7 +985,10 @@ impl<'s> Engine<'s> {
                     _ => return Err("xsl:number needs a node".into()),
                 },
             };
-            self.number_of(node, n)?
+            let outer = self.pattern_env.replace(d.env.clone());
+            let r = self.number_of(node, n);
+            self.pattern_env.replace(outer);
+            r?
         };
         let fmt = self.avt(&n.format, d)?;
         Ok(crate::number::format_numbers(&nums, &fmt))

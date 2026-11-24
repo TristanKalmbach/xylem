@@ -233,7 +233,11 @@ impl Engine<'_> {
                     _ => 'e',
                 };
                 let number = t.node_number(x.idx);
-                str_(format!("d{}{kind}{number}", x.tree + 1))
+                let doc = x.tree + 1 + self.ss.extra_modules;
+                if t.node(x.idx).kind == Kind::Document {
+                    return str_(format!("d{doc}"));
+                }
+                str_(format!("d{doc}{kind}{number}"))
             }
             ("number", 0 | 1) => {
                 let v = if n == 0 {

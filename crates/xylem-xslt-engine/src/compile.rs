@@ -174,6 +174,10 @@ pub struct Stylesheet {
     pub attr_sets: HashMap<QName, Vec<AttrSet>>,
     pub strip: Vec<(Option<String>, Option<String>, bool)>,
     pub base: PathBuf,
+    /// Modules read besides the top one (imports and includes). The
+    /// reference processor gives each a document number before the
+    /// source document's (spec note 1).
+    pub extra_modules: u32,
 }
 
 impl StripSpace for Stylesheet {
@@ -452,6 +456,9 @@ impl Compiler {
             return Err(format!("{} includes itself", path.display()));
         }
         self.loading.push(path.clone());
+        if self.loading.len() > 1 {
+            self.ss.extra_modules += 1;
+        }
         let tree = load_tree(&path)?;
         let file = path.to_string_lossy().to_string();
         let root = tree
@@ -503,6 +510,7 @@ impl Compiler {
                         return Err(format!("{} includes itself", href.display()));
                     }
                     self.loading.push(href.clone());
+                    self.ss.extra_modules += 1;
                     let tree = load_tree(&href)?;
                     let file = href.to_string_lossy().to_string();
                     let root = tree

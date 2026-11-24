@@ -19,9 +19,11 @@ modules) and its output is identical, under the Check tool's own comparison
 - the saved output of **43 of 43** documents in the four check suites that
   have saved output matching the current stylesheets (Default 5,
   Bulletin 5, Service 31, NarrativeTroubleshooting 2); and
-- the live reference host's output for the other three stylesheets
-  (Operator, Parts, NarrativeParts) on a sample of real inputs (see the
-  conformance plan for the command; counts are in the hand-over notes).
+- the live reference host's output for the other three stylesheets on
+  83 real inputs each: **249 of 249** (Operator 83, Parts 83,
+  NarrativeParts 83).
+
+292 of 292 outputs in total.
 
 The XSLT 1.0 FO-to-HTML stylesheet does not compile yet (its DTD declares
 entities the engine does not read). That result, from about 5,800 lines,
@@ -295,8 +297,13 @@ named in brackets; notes marked *unverified* still need a probe.
    *element* child skips one number (children 12, 23, 34 and so on of an
    all-element parent; with text and comments mixed in, the skip waits for
    the next element). Found by probing parents with 10 to 34 children; it
-   explains every gap seen in real documents. Ids of attributes and
-   document nodes are not probed yet.
+   explains every gap seen in real documents. Document numbers [`docs`]:
+   every module the stylesheet imports or includes takes one before the
+   source document does (the top module does not), so with three extra
+   modules the source is `d4`; trees made while running (temporary trees,
+   `document()` results) follow in the order they are created, global
+   variables when first used. A document node's id is just `d<n>`. Ids of
+   attributes are not probed yet.
 2. **Parameters from the host** [`edge`]. The host (`tools/saxon-dotnet`)
    looks up a parameter's declared type ignoring case but sets the
    parameter under exactly the name given, so a name in different case has
