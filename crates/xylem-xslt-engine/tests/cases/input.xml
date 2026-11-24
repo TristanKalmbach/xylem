@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<book id="b1" lang="en">
+  <title>Pump Manual</title>
+  <chapter id="c1" n="3">
+    <title>Safety</title>
+    <para>Read <em>all</em> warnings.</para>
+    <warning level="high">Hot surface</warning>
+    <para>Second para.</para>
+    <section>
+      <title>Gloves</title>
+      <para>Wear gloves.</para>
+      <figure id="f1"><caption>Glove types</caption></figure>
+    </section>
+  </chapter>
+  <chapter id="c2" n="10">
+    <title>Operation</title>
+    <para>Start the pump.</para>
+    <figure id="f2"><caption>Panel</caption></figure>
+    <section>
+      <title>Startup</title>
+      <para>Press start.</para>
+      <para>Wait <qty unit="s">30</qty>.</para>
+      <figure id="f3"><caption>Gauge</caption></figure>
+    </section>
+    <section>
+      <title>Shutdown</title>
+      <para>Press stop.</para>
+    </section>
+  </chapter>
+  <appendix id="a1">
+    <title>Parts</title>
+    <part no="P-7" price="12.50">Seal</part>
+    <part no="P-2" price="3.25">Bolt</part>
+    <part no="P-11" price="100">Motor</part>
+    <part no="P-2b" price="3.25">Washer</part>
+  </appendix>
+  <!-- a comment -->
+</book>
