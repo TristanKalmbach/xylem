@@ -23,8 +23,33 @@ pub struct ReferencesState {
     /// For each file, the stylesheets that use it (finding them means
     /// reading every stylesheet in the folder, so it is done once).
     tops: Arc<Mutex<HashMap<String, Vec<PathBuf>>>>,
+    /// The last index built, reused while its files are unchanged.
+    index: Arc<Mutex<Option<CachedIndex>>>,
     /// References whose usages are listed.
     expanded: HashSet<usize>,
+}
+
+/// An index and what it was built from.
+struct CachedIndex {
+    tops: Vec<PathBuf>,
+    unsaved: HashMap<String, Vec<u8>>,
+    /// Every module's size and modification time when it was read.
+    files: Vec<(PathBuf, Option<(u64, std::time::SystemTime)>)>,
+    index: Arc<Index>,
+}
+
+fn file_stamp(p: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let m = std::fs::metadata(p).ok()?;
+    Some((m.len(), m.modified().ok()?))
+}
+
+impl CachedIndex {
+    /// Still right for these stylesheets and unsaved texts.
+    fn fits(&self, tops: &[PathBuf], unsaved: &HashMap<String, Vec<u8>>) -> bool {
+        self.tops == tops
+            && self.unsaved == *unsaved
+            && self.files.iter().all(|(p, stamp)| file_stamp(p) == *stamp)
+    }
 }
 
 struct Found {
@@ -104,6 +129,7 @@ impl XylemApp {
         let (tx, rx) = channel();
         st.job = Some(rx);
         let cache = st.tops.clone();
+        let index_cache = st.index.clone();
         std::thread::spawn(move || {
             let key = path_key(&path);
             let cached = cache.lock().ok().and_then(|c| c.get(&key).cloned());
@@ -114,8 +140,36 @@ impl XylemApp {
                 }
                 t
             });
-            let read = |p: &Path| unsaved.get(&path_key(p)).cloned();
-            let result = Index::build(&tops, &read).map(|index| {
+            let reuse = index_cache.lock().ok().and_then(|c| {
+                c.as_ref()
+                    .filter(|c| c.fits(&tops, &unsaved))
+                    .map(|c| c.index.clone())
+            });
+            let built = match reuse {
+                Some(index) => Ok(index),
+                None => {
+                    let read = |p: &Path| unsaved.get(&path_key(p)).cloned();
+                    Index::build(&tops, &read).map(|index| {
+                        let index = Arc::new(index);
+                        let files = index
+                            .stylesheet
+                            .modules
+                            .iter()
+                            .map(|m| (m.path.clone(), file_stamp(&m.path)))
+                            .collect();
+                        if let Ok(mut c) = index_cache.lock() {
+                            *c = Some(CachedIndex {
+                                tops: tops.clone(),
+                                unsaved: unsaved.clone(),
+                                files,
+                                index: index.clone(),
+                            });
+                        }
+                        index
+                    })
+                }
+            };
+            let result = built.map(|index| {
                 let hit = candidates
                     .iter()
                     .map(|(at, name)| (name, index.references_at(&path, *at)))
