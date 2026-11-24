@@ -115,6 +115,7 @@ fn run_all(
     tests: &[Test],
     out_dir: &Path,
     cancel: &AtomicBool,
+    profile: bool,
 ) -> Vec<Option<JobResult>> {
     let mut groups: BTreeMap<&BTreeMap<String, String>, Vec<usize>> = BTreeMap::new();
     for (i, t) in tests.iter().enumerate() {
@@ -134,7 +135,7 @@ fn run_all(
                 )
             })
             .collect();
-        let run = host.run(stylesheet, &jobs, params);
+        let run = host.run(stylesheet, &jobs, params, profile);
         for (&i, job) in members.iter().zip(run.jobs) {
             results[i] = Some(job);
         }
@@ -188,11 +189,25 @@ pub fn check(suite: &Suite, stylesheet: &Path, baseline: &Baseline, env: CheckEn
         tests.len(),
         plural(tests.len())
     ));
-    let candidate = run_all(env.host, stylesheet, tests, &candidate_dir, env.cancel);
+    let candidate = run_all(
+        env.host,
+        stylesheet,
+        tests,
+        &candidate_dir,
+        env.cancel,
+        false,
+    );
     let baseline_runs = match &baseline_sheet {
         Some(sheet) if !env.cancel.load(Ordering::Relaxed) => {
             (env.progress)(format!("Running {}…", baseline.describe()));
-            Some(run_all(env.host, sheet, tests, &baseline_dir, env.cancel))
+            Some(run_all(
+                env.host,
+                sheet,
+                tests,
+                &baseline_dir,
+                env.cancel,
+                false,
+            ))
         }
         _ => None,
     };
@@ -257,4 +272,71 @@ pub fn check(suite: &Suite, stylesheet: &Path, baseline: &Baseline, env: CheckEn
 
 pub(crate) fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
+}
+
+/// Timings for one test.
+#[derive(Debug, Clone)]
+pub struct TestProfile {
+    pub name: String,
+    pub profile: Result<crate::profile::Profile, String>,
+}
+
+/// Where a stylesheet spends its time on a suite.
+#[derive(Debug, Clone)]
+pub struct ProfileReport {
+    pub stylesheet: PathBuf,
+    pub tests: Vec<TestProfile>,
+    /// All tests added together.
+    pub combined: crate::profile::Profile,
+    pub error: Option<String>,
+    pub cancelled: bool,
+}
+
+/// Runs `stylesheet` on every test with timing on.
+pub fn profile(suite: &Suite, stylesheet: &Path, env: CheckEnv) -> ProfileReport {
+    let mut report = ProfileReport {
+        stylesheet: stylesheet.to_path_buf(),
+        tests: Vec::new(),
+        combined: Default::default(),
+        error: None,
+        cancelled: false,
+    };
+    let dir = env.work.join("profile");
+    let _ = std::fs::remove_dir_all(&dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        report.error = Some(format!("Could not create {}: {e}", dir.display()));
+        return report;
+    }
+    let n = suite.tests.len();
+    (env.progress)(format!("Timing the stylesheet on {n} test{}…", plural(n)));
+    let runs = run_all(env.host, stylesheet, &suite.tests, &dir, env.cancel, true);
+    if env.cancel.load(Ordering::Relaxed) {
+        report.cancelled = true;
+        return report;
+    }
+    let mut loaded = Vec::new();
+    for (test, run) in suite.tests.iter().zip(runs) {
+        let profile = match run {
+            None => Err("The stylesheet did not run.".to_string()),
+            Some(j) if !j.ok => Err(format!(
+                "The stylesheet failed: {}",
+                j.error.unwrap_or_else(|| "no reason given".into())
+            )),
+            Some(j) => match j.profile {
+                Some(p) => crate::profile::Profile::load(&p),
+                None => {
+                    Err("No timings were written (only XSLT 2.0 stylesheets can be timed).".into())
+                }
+            },
+        };
+        if let Ok(p) = &profile {
+            loaded.push(p.clone());
+        }
+        report.tests.push(TestProfile {
+            name: test.name.clone(),
+            profile,
+        });
+    }
+    report.combined = crate::profile::combine(&loaded);
+    report
 }

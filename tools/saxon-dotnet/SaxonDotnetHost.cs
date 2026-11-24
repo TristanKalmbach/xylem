@@ -19,7 +19,14 @@
 //
 // Usage:
 //   SaxonDotnetHost run --stylesheet <file.xsl> --job <input.xml>=<output>
-//                       [--job ...] [--param name=value ...]
+//                       [--job ...] [--param name=value ...] [--profile]
+//
+// --profile times every template and function (XSLT 2.0 only) and writes
+// <output>.profile.json next to each output: per template its kind, name or
+// match pattern, mode, file and line, how often it ran, the time spent in it
+// alone ("self_ms") and including what it called ("total_ms"). Timing hooks
+// slow the run down, so times are for comparing templates with each other;
+// the output itself is unchanged.
 //
 // Each job reads an input file and writes the output file. The stylesheet is
 // compiled once for all jobs. One line of JSON per job goes to standard
@@ -53,6 +60,7 @@ namespace Xylem.SaxonDotnet
     internal sealed class Options
     {
         public string Stylesheet;
+        public bool Profile;
         public readonly List<Job> Jobs = new List<Job>();
         public readonly List<KeyValuePair<string, string>> Params = new List<KeyValuePair<string, string>>();
     }
@@ -90,7 +98,7 @@ namespace Xylem.SaxonDotnet
             try
             {
                 transform = isXslt2
-                    ? (ITransform)new SaxonTransform(stylesheet)
+                    ? (ITransform)new SaxonTransform(stylesheet, options.Profile)
                     : new DotnetTransform(stylesheet);
             }
             catch (Exception e)
@@ -107,9 +115,10 @@ namespace Xylem.SaxonDotnet
                 var job = options.Jobs[i];
                 var clock = Stopwatch.StartNew();
                 string error = null;
+                string profile = options.Profile && isXslt2 ? Path.GetFullPath(job.Output) + ".profile.json" : null;
                 try
                 {
-                    var result = transform.Run(Path.GetFullPath(job.Input), options.Params);
+                    var result = transform.Run(Path.GetFullPath(job.Input), options.Params, profile);
                     var outputDir = Path.GetDirectoryName(Path.GetFullPath(job.Output));
                     if (!string.IsNullOrEmpty(outputDir))
                         Directory.CreateDirectory(outputDir);
@@ -129,6 +138,8 @@ namespace Xylem.SaxonDotnet
                     .Append(",\"output\":").Append(Json(job.Output))
                     .Append(",\"ok\":").Append(error == null ? "true" : "false")
                     .Append(",\"ms\":").Append(clock.ElapsedMilliseconds);
+                if (profile != null && error == null)
+                    line.Append(",\"profile\":").Append(Json(profile));
                 if (error != null)
                     line.Append(",\"error\":").Append(Json(error));
                 line.Append('}');
@@ -165,6 +176,9 @@ namespace Xylem.SaxonDotnet
                             i++;
                             break;
                         }
+                    case "--profile":
+                        options.Profile = true;
+                        break;
                     case "--param":
                         {
                             var pair = Require(args[i], value);
@@ -212,7 +226,7 @@ namespace Xylem.SaxonDotnet
             return string.Join(" / ", parts.Distinct());
         }
 
-        private static string Json(string s)
+        internal static string Json(string s)
         {
             var sb = new StringBuilder("\"");
             foreach (char c in s)
@@ -238,7 +252,7 @@ namespace Xylem.SaxonDotnet
 
     internal interface ITransform
     {
-        string Run(string inputPath, List<KeyValuePair<string, string>> parameters);
+        string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath);
     }
 
     /// <summary>XSLT 2.0 on Saxon-HE, as the host runs it.</summary>
@@ -246,18 +260,41 @@ namespace Xylem.SaxonDotnet
     {
         private readonly string _stylesheet;
         private readonly XsltExecutable _executable;
+        private readonly Processor _processor;
 
-        public SaxonTransform(string stylesheet)
+        /// <summary>
+        /// The stylesheet's own xsl:strip-space/xsl:preserve-space rules as a
+        /// document builder policy. The .NET API has this constructor but
+        /// does not make it public.
+        /// </summary>
+        private static WhitespacePolicy StylesheetWhitespace(XsltExecutable executable)
+        {
+            var prepared = typeof(XsltExecutable)
+                .GetProperty("Implementation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic)
+                .GetValue(executable, null);
+            var ctor = typeof(WhitespacePolicy).GetConstructor(
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public,
+                null, new[] { prepared.GetType() }, null);
+            if (ctor == null)
+                throw new InvalidOperationException("This Saxon version cannot strip whitespace as the stylesheet asks.");
+            return (WhitespacePolicy)ctor.Invoke(new[] { prepared });
+        }
+
+        public SaxonTransform(string stylesheet, bool profile)
         {
             _stylesheet = stylesheet;
             var processor = new Processor();
+            _processor = processor;
+            if (profile)
+                processor.Implementation.setCompileWithTracing(true);
             var compiler = processor.NewXsltCompiler();
             _executable = compiler.Compile(new Uri(stylesheet));
         }
 
-        public string Run(string inputPath, List<KeyValuePair<string, string>> parameters)
+        public string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath)
         {
             var declared = _executable.GetGlobalParameters();
+            TimingListener timing = null;
             var destination = new DomDestination();
             // The host saves its XDocument to a stream and hands Saxon those
             // bytes; the saved input file holds the same bytes.
@@ -265,11 +302,33 @@ namespace Xylem.SaxonDotnet
             {
                 var transformer = _executable.Load();
                 var stylesheetFolder = new FileInfo(_stylesheet).DirectoryName;
-                transformer.SetInputStream(input, new Uri(stylesheetFolder));
+                if (profilePath == null)
+                {
+                    transformer.SetInputStream(input, new Uri(stylesheetFolder));
+                }
+                else
+                {
+                    // With timing hooks compiled in, this Saxon version
+                    // evaluates global variables before a streamed input is
+                    // attached, so the tree is built first, the way the
+                    // transform itself would (whitespace stripped as the
+                    // stylesheet asks), keeping node numbers the same.
+                    var builder = _processor.NewDocumentBuilder();
+                    builder.BaseUri = new Uri(stylesheetFolder);
+                    builder.WhitespacePolicy = StylesheetWhitespace(_executable);
+                    transformer.InitialContextNode = builder.Build(input);
+                }
                 foreach (var arg in parameters)
                     SetParameter(transformer, declared, arg.Key, arg.Value);
+                if (profilePath != null)
+                {
+                    timing = new TimingListener();
+                    transformer.Implementation.addTraceListener(timing);
+                }
                 transformer.Run(destination);
             }
+            if (timing != null)
+                File.WriteAllText(profilePath, timing.ToJson(), new UTF8Encoding(false));
             return destination.XmlDocument.OuterXml;
         }
 
@@ -328,7 +387,7 @@ namespace Xylem.SaxonDotnet
                 _transform.Load(reader, settings, new XmlUrlResolver());
         }
 
-        public string Run(string inputPath, List<KeyValuePair<string, string>> parameters)
+        public string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath)
         {
             var args = new XsltArgumentList();
             foreach (var arg in parameters)
@@ -341,6 +400,129 @@ namespace Xylem.SaxonDotnet
             using (var writer = XmlWriter.Create(fo, new XmlWriterSettings { OmitXmlDeclaration = true }))
                 _transform.Transform(xmlReader, args, writer);
             return fo.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Times templates and functions. Saxon calls enter/leave around every
+    /// traced instruction; only templates and functions are recorded. A
+    /// template's own time excludes the templates and functions it called;
+    /// its total time counts recursive calls once.
+    /// </summary>
+    internal sealed class TimingListener : net.sf.saxon.lib.TraceListener
+    {
+        private const int XslTemplate = 200;
+        private const int XslFunction = 158;
+        private const int LocationTemplate = 2008;
+        private const int LocationFunction = 2065;
+
+        private sealed class Stat
+        {
+            public string Kind, Name, Match, Mode, File;
+            public int Line;
+            public long Calls, SelfTicks, TotalTicks;
+            public int Active;
+        }
+
+        private sealed class Frame
+        {
+            public Stat Stat;
+            public long Start, ChildTicks;
+        }
+
+        private readonly Dictionary<string, Stat> _stats = new Dictionary<string, Stat>();
+        private readonly Stack<Frame> _stack = new Stack<Frame>();
+        private readonly long _started = Stopwatch.GetTimestamp();
+        private long _finished;
+
+        private static bool Wanted(net.sf.saxon.trace.InstructionInfo info)
+        {
+            int t = info.getConstructType();
+            return t == XslTemplate || t == XslFunction || t == LocationTemplate || t == LocationFunction;
+        }
+
+        private static string Text(object o)
+        {
+            return o == null ? null : o.ToString();
+        }
+
+        public void enter(net.sf.saxon.trace.InstructionInfo info, net.sf.saxon.expr.XPathContext context)
+        {
+            if (!Wanted(info))
+                return;
+            string file = info.getSystemId();
+            int line = info.getLineNumber();
+            var name = info.getObjectName();
+            string key = file + "#" + line + "#" + info.getColumnNumber() + "#" + (name == null ? "" : name.getClarkName());
+            Stat stat;
+            if (!_stats.TryGetValue(key, out stat))
+            {
+                int t = info.getConstructType();
+                stat = new Stat
+                {
+                    Kind = t == XslFunction || t == LocationFunction ? "function" : "template",
+                    Name = name == null ? null : name.getDisplayName(),
+                    Match = Text(info.getProperty("match")),
+                    Mode = Text(info.getProperty("mode")),
+                    File = file,
+                    Line = line,
+                };
+                _stats[key] = stat;
+            }
+            stat.Calls++;
+            stat.Active++;
+            _stack.Push(new Frame { Stat = stat, Start = Stopwatch.GetTimestamp() });
+        }
+
+        public void leave(net.sf.saxon.trace.InstructionInfo info)
+        {
+            if (!Wanted(info) || _stack.Count == 0)
+                return;
+            var frame = _stack.Pop();
+            long elapsed = Stopwatch.GetTimestamp() - frame.Start;
+            frame.Stat.SelfTicks += elapsed - frame.ChildTicks;
+            frame.Stat.Active--;
+            if (frame.Stat.Active == 0)
+                frame.Stat.TotalTicks += elapsed;
+            if (_stack.Count > 0)
+                _stack.Peek().ChildTicks += elapsed;
+        }
+
+        public void open(net.sf.saxon.Controller controller) { }
+        public void close() { _finished = Stopwatch.GetTimestamp(); }
+        public void setOutputDestination(net.sf.saxon.lib.Logger logger) { }
+        public void startCurrentItem(net.sf.saxon.om.Item item) { }
+        public void endCurrentItem(net.sf.saxon.om.Item item) { }
+
+        private static string Ms(long ticks)
+        {
+            return (ticks * 1000.0 / Stopwatch.Frequency).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        public string ToJson()
+        {
+            long end = _finished != 0 ? _finished : Stopwatch.GetTimestamp();
+            var sb = new StringBuilder();
+            sb.Append("{\"total_ms\":").Append(Ms(end - _started)).Append(",\"templates\":[");
+            bool first = true;
+            foreach (var s in _stats.Values.OrderByDescending(x => x.SelfTicks))
+            {
+                if (!first)
+                    sb.Append(',');
+                first = false;
+                sb.Append("{\"kind\":").Append(Program.Json(s.Kind));
+                if (s.Name != null) sb.Append(",\"name\":").Append(Program.Json(s.Name));
+                if (s.Match != null) sb.Append(",\"match\":").Append(Program.Json(s.Match));
+                if (s.Mode != null) sb.Append(",\"mode\":").Append(Program.Json(s.Mode));
+                sb.Append(",\"file\":").Append(Program.Json(s.File ?? ""))
+                  .Append(",\"line\":").Append(s.Line)
+                  .Append(",\"calls\":").Append(s.Calls)
+                  .Append(",\"self_ms\":").Append(Ms(s.SelfTicks))
+                  .Append(",\"total_ms\":").Append(Ms(s.TotalTicks))
+                  .Append('}');
+            }
+            sb.Append("]}");
+            return sb.ToString();
         }
     }
 }

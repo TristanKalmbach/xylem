@@ -552,6 +552,7 @@ pub struct Dialog<'a> {
     width: f32,
     modal: bool,
     resizable: bool,
+    grow: bool,
 }
 
 impl<'a> Dialog<'a> {
@@ -562,6 +563,7 @@ impl<'a> Dialog<'a> {
             width: 420.0,
             modal: true,
             resizable: false,
+            grow: false,
         }
     }
 
@@ -572,6 +574,13 @@ impl<'a> Dialog<'a> {
 
     pub fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    /// A tool window whose height follows its contents (lists inside it
+    /// set their own maximum height) instead of a fixed default.
+    pub fn grow(mut self) -> Self {
+        self.grow = true;
         self
     }
 
@@ -635,11 +644,15 @@ impl<'a> Dialog<'a> {
             }
             Some(modal.inner)
         } else {
-            let r = egui::Window::new(self.title)
+            let mut window = egui::Window::new(self.title)
                 .id(self.id)
                 .title_bar(false)
                 .frame(frame)
-                .resizable(self.resizable)
+                .resizable(self.resizable);
+            if self.grow {
+                window = window.auto_sized();
+            }
+            let r = window
                 .default_pos(egui::pos2(
                     ctx.content_rect().center().x - width / 2.0 - space::XL,
                     ctx.content_rect().top() + 90.0,

@@ -43,6 +43,19 @@ of them. Each job prints one line of JSON (`ok`, time in `ms`, `error`), and a
 summary line follows with the compile time. The exit code is 0 only when every
 job worked.
 
+## Timing templates
+
+`--profile` times every template and function and writes
+`<output>.profile.json` next to each output: for each, its kind, name or
+match pattern, mode, file and line, how often it ran, the time spent in it
+alone (`self_ms`) and including what it called (`total_ms`). Only XSLT 2.0
+stylesheets can be timed.
+
+With timing compiled in, this Saxon version evaluates global variables
+before a streamed input is attached, so a profiled run builds the input tree
+first, stripping whitespace exactly as the stylesheet asks. The output is the
+same as an ordinary run's.
+
 ## Comparing output
 
 IDs made by `generate-id()` look like `d31e20`. Saxon numbers documents with a

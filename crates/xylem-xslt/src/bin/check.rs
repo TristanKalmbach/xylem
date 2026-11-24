@@ -5,7 +5,11 @@
 //! xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>]
 //!                  [--against saved | committed[:<rev>] | <other.xsl>]
 //!                  [--host <SaxonDotnetHost.exe>] [--work <folder>]
+//! xylem-xslt-check <suite.toml> --profile [--top <n>] [--stylesheet ...]
 //! ```
+//!
+//! `--profile` times every template and function on the suite instead of
+//! comparing output, and lists the `--top` (default 25) by own time.
 //!
 //! `--against` defaults to `committed` (the stylesheet as last committed to
 //! git) when the suite has no saved output, and to `saved` when it does.
@@ -16,10 +20,11 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
 use xylem_xslt::check::CheckEnv;
-use xylem_xslt::{Baseline, Host, Outcome, Suite, check};
+use xylem_xslt::{Baseline, Host, Outcome, Suite, check, profile};
 
 const USAGE: &str = "Usage: xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>] \
-[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>] [--work <folder>]";
+[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>] [--work <folder>] \
+[--profile [--top <n>]]";
 
 fn main() -> ExitCode {
     match run() {
@@ -39,6 +44,8 @@ fn run() -> Result<bool, String> {
     let mut against = None;
     let mut host = std::env::var_os("XYLEM_XSLT_HOST").map(PathBuf::from);
     let mut work = None;
+    let mut profiling = false;
+    let mut top = 25usize;
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().ok_or(format!("{name} needs a value.\n{USAGE}"));
         match a.as_str() {
@@ -46,6 +53,12 @@ fn run() -> Result<bool, String> {
             "--against" => against = Some(value("--against")?),
             "--host" => host = Some(PathBuf::from(value("--host")?)),
             "--work" => work = Some(PathBuf::from(value("--work")?)),
+            "--profile" => profiling = true,
+            "--top" => {
+                top = value("--top")?
+                    .parse()
+                    .map_err(|_| format!("--top takes a number.\n{USAGE}"))?
+            }
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return Ok(true);
@@ -78,6 +91,15 @@ fn run() -> Result<bool, String> {
     let work = work.unwrap_or_else(|| std::env::temp_dir().join("xylem-xslt").join("work"));
     let cancel = AtomicBool::new(false);
     let mut progress = |s: String| eprintln!("{s}");
+    if profiling {
+        let env = CheckEnv {
+            host: &host,
+            work: &work,
+            progress: &mut progress,
+            cancel: &cancel,
+        };
+        return print_profile(&profile(&suite, &stylesheet, env), top);
+    }
     println!("Checking {}", stylesheet.display());
     println!("against {}\n", baseline.describe());
     let report = check(
@@ -151,4 +173,50 @@ fn run() -> Result<bool, String> {
         }
     }
     Ok(report.all_identical())
+}
+
+fn print_profile(report: &xylem_xslt::ProfileReport, top: usize) -> Result<bool, String> {
+    if let Some(e) = &report.error {
+        return Err(e.clone());
+    }
+    println!("Timing {}\n", report.stylesheet.display());
+    let mut ok = true;
+    for t in &report.tests {
+        match &t.profile {
+            Ok(p) => println!("  {:>9.1} ms  {}", p.total_ms, t.name),
+            Err(e) => {
+                ok = false;
+                println!("  FAILED        {}: {e}", t.name)
+            }
+        }
+    }
+    let c = &report.combined;
+    let timed = c.timed_ms().max(f64::EPSILON);
+    println!(
+        "\n{} templates and functions, {:.1} ms in them. By own time:\n",
+        c.templates.len(),
+        c.timed_ms()
+    );
+    println!(
+        "  {:>9}  {:>9}  {:>9}  {:>5}  template",
+        "own ms", "total ms", "calls", "share"
+    );
+    for t in c.templates.iter().take(top) {
+        let file = t.path();
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        println!(
+            "  {:>9.1}  {:>9.1}  {:>9}  {:>4.0}%  {}  ({}:{})",
+            t.self_ms,
+            t.total_ms,
+            t.calls,
+            100.0 * t.self_ms / timed,
+            t.label(),
+            name,
+            t.line
+        );
+    }
+    Ok(ok)
 }

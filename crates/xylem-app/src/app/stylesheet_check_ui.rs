@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
-use xylem_xslt::{Baseline, CheckEnv, CheckReport, Host, Outcome, Suite, check};
+use xylem_xslt::{
+    Baseline, CheckEnv, CheckReport, Host, Outcome, ProfileReport, Suite, check, profile,
+};
 
 #[derive(Default, Clone, Copy, PartialEq)]
 enum Against {
@@ -25,6 +27,7 @@ enum Against {
 enum Event {
     Progress(String),
     Done(Box<CheckReport>),
+    Profiled(Box<ProfileReport>),
 }
 
 #[derive(Default)]
@@ -38,6 +41,8 @@ pub struct StylesheetCheckState {
     running: Option<(Receiver<Event>, Arc<AtomicBool>)>,
     progress: String,
     report: Option<CheckReport>,
+    /// The last Time templates run; shown instead of the check results.
+    profile: Option<ProfileReport>,
     error: Option<String>,
     /// Tests whose differences are shown.
     expanded: HashSet<usize>,
@@ -49,6 +54,8 @@ enum Action {
     Browse(Field),
     Open(PathBuf),
     ShowFolder(PathBuf),
+    Profile,
+    OpenAt(PathBuf, u32),
 }
 
 #[derive(Clone, Copy)]
@@ -112,6 +119,7 @@ impl XylemApp {
         let (close, _) = crate::ui::Dialog::new("Check stylesheet output")
             .width(720.0)
             .modeless()
+            .grow()
             .show(ctx, |ui| self.stylesheet_check_ui(ui, &mut actions));
         if close {
             self.stylesheet_check.open = false;
@@ -119,6 +127,8 @@ impl XylemApp {
         for a in actions {
             match a {
                 Action::Run => self.start_stylesheet_check(),
+                Action::Profile => self.start_stylesheet_profile(),
+                Action::OpenAt(path, line) => self.open_stylesheet_at(&path, line),
                 Action::Stop => {
                     if let Some((_, cancel)) = &self.stylesheet_check.running {
                         cancel.store(true, Ordering::Relaxed);
@@ -167,17 +177,20 @@ impl XylemApp {
         }
     }
 
-    fn start_stylesheet_check(&mut self) {
+    /// Reads the suite, the stylesheet and the engine from the window, or
+    /// shows what is missing.
+    fn prepare_check(&mut self) -> Option<(Suite, PathBuf, Host)> {
         let st = &mut self.stylesheet_check;
         st.error = None;
         st.report = None;
+        st.profile = None;
         st.expanded.clear();
         let suite_path = PathBuf::from(st.suite.trim());
         let suite = match Suite::load(&suite_path) {
             Ok(s) => s,
             Err(e) => {
                 st.error = Some(e);
-                return;
+                return None;
             }
         };
         let stylesheet = match st.stylesheet.trim() {
@@ -186,7 +199,7 @@ impl XylemApp {
                 None => {
                     st.error =
                         Some("Choose the stylesheet to check: the suite does not name one.".into());
-                    return;
+                    return None;
                 }
             },
             s => PathBuf::from(s),
@@ -197,8 +210,19 @@ impl XylemApp {
                  for xslt_host in the team configuration."
                     .into(),
             );
-            return;
+            return None;
         }
+        let host = Host::new(PathBuf::from(st.engine.trim()));
+        self.settings.stylesheet_suite = Some(suite_path);
+        self.settings.xslt_host = Some(host.program.clone());
+        Some((suite, stylesheet, host))
+    }
+
+    fn start_stylesheet_check(&mut self) {
+        let Some((suite, stylesheet, host)) = self.prepare_check() else {
+            return;
+        };
+        let st = &mut self.stylesheet_check;
         let baseline = match st.against {
             Against::Committed => Baseline::Committed { rev: "HEAD".into() },
             Against::Saved => Baseline::Saved,
@@ -210,9 +234,6 @@ impl XylemApp {
                 Baseline::Stylesheet(PathBuf::from(st.other.trim()))
             }
         };
-        let host = Host::new(PathBuf::from(st.engine.trim()));
-        self.settings.stylesheet_suite = Some(suite_path);
-        self.settings.xslt_host = Some(host.program.clone());
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
@@ -239,6 +260,89 @@ impl XylemApp {
         });
     }
 
+    fn start_stylesheet_profile(&mut self) {
+        let Some((suite, stylesheet, host)) = self.prepare_check() else {
+            return;
+        };
+        let st = &mut self.stylesheet_check;
+        let (tx, rx) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = cancel.clone();
+        st.progress = "Starting…".into();
+        st.running = Some((rx, cancel));
+        std::thread::spawn(move || {
+            let tx2 = tx.clone();
+            let mut progress = move |s: String| {
+                let _ = tx2.send(Event::Progress(s));
+            };
+            let work = work_dir();
+            let report = profile(
+                &suite,
+                &stylesheet,
+                CheckEnv {
+                    host: &host,
+                    work: &work,
+                    progress: &mut progress,
+                    cancel: &stop,
+                },
+            );
+            let _ = tx.send(Event::Profiled(Box::new(report)));
+        });
+    }
+
+    /// Opens a stylesheet with the template or function on `line` selected.
+    /// Saxon reports the line where the element's start tag ends, so the
+    /// template is the last `xsl:template` or `xsl:function` starting on or
+    /// before that line.
+    fn open_stylesheet_at(&mut self, path: &Path, line: u32) {
+        let key = crate::find_files::path_key(path);
+        let find = |docs: &[crate::doc::DocState]| {
+            docs.iter().position(|d| {
+                d.path
+                    .as_deref()
+                    .is_some_and(|p| crate::find_files::path_key(p) == key)
+            })
+        };
+        if find(&self.docs).is_none() {
+            self.open_path(path.to_path_buf());
+        }
+        let Some(i) = find(&self.docs) else {
+            return;
+        };
+        self.active = i;
+        let ds = &mut self.docs[i];
+        let doc = &ds.editor.doc;
+        let (xml, offsets) = doc.to_xml_with_offsets();
+        // Character offset where the reported line ends.
+        let mut line_end = xml.len();
+        let mut seen = 1u32;
+        for (at, c) in xml.char_indices() {
+            if c == '\n' {
+                if seen == line {
+                    line_end = at;
+                    break;
+                }
+                seen += 1;
+            }
+        }
+        let target = doc
+            .descendants(doc.root())
+            .filter(|&n| {
+                doc.name(n).is_some_and(|name| {
+                    let local = name.rsplit(':').next().unwrap_or(name);
+                    local == "template" || local == "function"
+                })
+            })
+            .filter(|&n| offsets.get(n.index()).is_some_and(|&o| o <= line_end))
+            .last();
+        if let Some(el) = target {
+            let p = xylem_edit::pos::first_editable(doc, &xylem_edit::NoRules, el);
+            ds.editor.set_caret(p);
+            ds.canvas.scroll_to_caret = true;
+            ds.canvas.request_focus = true;
+        }
+    }
+
     fn poll_stylesheet_check(&mut self, ctx: &egui::Context) {
         let st = &mut self.stylesheet_check;
         let Some((rx, _)) = &st.running else {
@@ -247,6 +351,12 @@ impl XylemApp {
         loop {
             match rx.try_recv() {
                 Ok(Event::Progress(p)) => st.progress = p,
+                Ok(Event::Profiled(report)) => {
+                    st.error = report.error.clone();
+                    st.profile = Some(*report);
+                    st.running = None;
+                    return;
+                }
                 Ok(Event::Done(report)) => {
                     st.error = report.error.clone();
                     // Differences open by default when there are few tests.
@@ -359,6 +469,17 @@ impl XylemApp {
             {
                 actions.push(Action::Run);
             }
+            if !busy
+                && ui
+                    .add_enabled_ui(!st.suite.trim().is_empty(), |ui| {
+                        crate::ui::button(ui, "Time templates")
+                    })
+                    .inner
+                    .on_hover_text("Run the stylesheet on every test with timing on, and list where the time goes")
+                    .clicked()
+            {
+                actions.push(Action::Profile);
+            }
             if let Some(r) = &st.report
                 && !busy
                 && r.error.is_none()
@@ -393,6 +514,12 @@ impl XylemApp {
         });
         if let Some(e) = &st.error {
             crate::ui::notice(ui, crate::ui::Tone::Danger, e.clone());
+        }
+        if let Some(prof) = &st.profile {
+            if prof.error.is_none() {
+                profile_ui(ui, prof, actions);
+            }
+            return;
         }
         let Some(report) = &st.report else {
             return;
@@ -509,4 +636,84 @@ impl XylemApp {
                 }
             });
     }
+}
+
+/// The Time templates results: a summary per test and the templates ranked
+/// by own time across all tests.
+fn profile_ui(ui: &mut egui::Ui, prof: &ProfileReport, actions: &mut Vec<Action>) {
+    crate::ui::divider(ui);
+    if prof.cancelled {
+        crate::ui::muted(ui, "Stopped.");
+        return;
+    }
+    for t in &prof.tests {
+        if let Err(e) = &t.profile {
+            crate::ui::notice(ui, crate::ui::Tone::Warning, format!("{}: {e}", t.name));
+        }
+    }
+    let c = &prof.combined;
+    let timed = c.timed_ms().max(f64::EPSILON);
+    let ok = prof.tests.iter().filter(|t| t.profile.is_ok()).count();
+    crate::ui::muted(
+        ui,
+        format!(
+            "{} templates and functions on {ok} test{}, {:.0} ms in them. Timing slows the run, so \
+             compare templates with each other. Click one to open it.",
+            c.templates.len(),
+            if ok == 1 { "" } else { "s" },
+            c.timed_ms()
+        ),
+    );
+    ui.add_space(4.0);
+    let pal = crate::ui::palette(ui.ctx());
+    let mono = egui::TextStyle::Monospace.resolve(ui.style());
+    egui::ScrollArea::vertical()
+        .id_salt("stylesheet-profile")
+        .auto_shrink([false, true])
+        .max_height(420.0)
+        .show(ui, |ui| {
+            egui::Grid::new("stylesheet-profile-grid")
+                .striped(true)
+                .num_columns(5)
+                .spacing([14.0, 4.0])
+                .show(ui, |ui| {
+                    for h in ["Own time", "Total", "Calls", "Share", "Template"] {
+                        ui.label(RichText::new(h).color(pal.text_muted).small());
+                    }
+                    ui.end_row();
+                    for t in c.templates.iter().take(200) {
+                        let share = t.self_ms / timed;
+                        ui.label(RichText::new(format!("{:.1} ms", t.self_ms)).font(mono.clone()));
+                        ui.label(
+                            RichText::new(format!("{:.1} ms", t.total_ms))
+                                .font(mono.clone())
+                                .color(pal.text_muted),
+                        );
+                        ui.label(RichText::new(t.calls.to_string()).font(mono.clone()));
+                        // A bar for the share, so the expensive ones stand out.
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(60.0, 10.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 2.0, pal.hover);
+                        let mut bar = rect;
+                        bar.set_width((rect.width() * share as f32).max(1.0));
+                        ui.painter().rect_filled(bar, 2.0, pal.accent);
+                        let file = t.path();
+                        let name = file
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        let r = ui
+                            .link(format!("{}   {}:{}", t.label(), name, t.line))
+                            .on_hover_text(format!(
+                                "{:.0}% of the time · {}",
+                                share * 100.0,
+                                file.display()
+                            ));
+                        if r.clicked() {
+                            actions.push(Action::OpenAt(file, t.line));
+                        }
+                        ui.end_row();
+                    }
+                });
+        });
 }

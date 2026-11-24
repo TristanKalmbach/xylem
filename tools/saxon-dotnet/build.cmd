@@ -24,7 +24,7 @@ if not exist "%HERE%bin" mkdir "%HERE%bin"
 copy /y "%SAXON%\*.dll" "%HERE%bin\" > nul
 "%CSC%" /nologo /target:exe /optimize+ /out:"%HERE%bin\SaxonDotnetHost.exe" ^
   /reference:"%HERE%bin\saxon9he-api.dll" /reference:"%HERE%bin\saxon9he.dll" ^
-  /reference:"%HERE%bin\IKVM.Runtime.dll" /reference:"%HERE%bin\IKVM.OpenJDK.Core.dll" ^
+  /reference:"%HERE%bin\IKVM.Runtime.dll" /reference:"%HERE%bin\IKVM.OpenJDK.Core.dll" /reference:"%HERE%bin\IKVM.OpenJDK.XML.API.dll" ^
   /reference:System.Xml.dll /reference:System.Xml.Linq.dll /reference:System.Core.dll ^
   "%HERE%SaxonDotnetHost.cs"
 exit /b %ERRORLEVEL%

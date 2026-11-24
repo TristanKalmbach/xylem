@@ -13,9 +13,14 @@ pub mod check;
 pub mod compare;
 pub mod git;
 pub mod host;
+pub mod profile;
 pub mod suite;
 
-pub use check::{Baseline, CheckEnv, CheckReport, Outcome, TestResult, check};
+pub use check::{
+    Baseline, CheckEnv, CheckReport, Outcome, ProfileReport, TestProfile, TestResult, check,
+    profile,
+};
 pub use compare::{Comparison, Difference, compare};
 pub use host::Host;
+pub use profile::{Profile, TemplateTime};
 pub use suite::{Suite, Test};

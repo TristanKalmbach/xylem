@@ -23,6 +23,8 @@ pub struct JobResult {
     /// Time the transform took, in milliseconds.
     pub ms: u64,
     pub error: Option<String>,
+    /// Timings written by a run with profiling on.
+    pub profile: Option<PathBuf>,
 }
 
 /// One run of the host: a stylesheet compiled once, applied to inputs.
@@ -44,6 +46,7 @@ struct Line {
     compile_ms: Option<u64>,
     compiled: Option<bool>,
     error: Option<String>,
+    profile: Option<PathBuf>,
 }
 
 impl Host {
@@ -53,12 +56,14 @@ impl Host {
         }
     }
 
-    /// Runs `stylesheet` on each `(input, output)` pair with `params`.
+    /// Runs `stylesheet` on each `(input, output)` pair with `params`;
+    /// with `profile`, also times every template and function.
     pub fn run(
         &self,
         stylesheet: &Path,
         jobs: &[(PathBuf, PathBuf)],
         params: &BTreeMap<String, String>,
+        profile: bool,
     ) -> Run {
         let mut cmd = Command::new(&self.program);
         cmd.arg("run").arg("--stylesheet").arg(stylesheet);
@@ -70,6 +75,9 @@ impl Host {
         }
         for (k, v) in params {
             cmd.arg("--param").arg(format!("{k}={v}"));
+        }
+        if profile {
+            cmd.arg("--profile");
         }
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -84,6 +92,7 @@ impl Host {
                     ok: false,
                     ms: 0,
                     error: Some(error.clone()),
+                    profile: None,
                 })
                 .collect(),
             compile_ms: None,
@@ -123,6 +132,7 @@ impl Host {
                     ok: l.ok == Some(true),
                     ms: l.ms.unwrap_or(0),
                     error: l.error,
+                    profile: l.profile,
                 });
             }
         }

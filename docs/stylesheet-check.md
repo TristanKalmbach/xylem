@@ -66,9 +66,24 @@ xylem-xslt-check suite.toml [--stylesheet file.xsl]
 code is 0 when every test gave the same output, so the check can run in a
 build.
 
+## Finding the slow templates
+
+**Time templates** in the same window runs the stylesheet on every test with
+timing switched on and lists its templates and functions by the time spent in
+each: its own time (excluding the templates it called), its total time
+(including them), how often it ran, and its share of the whole. Click one to
+open the stylesheet at that template.
+
+Timing slows the run down, so use the numbers to compare templates with each
+other, not to predict publishing time. A template with a large own time is
+where an optimisation pays off; check the change with **Run check**
+afterwards.
+
+From a terminal: `xylem-xslt-check suite.toml --profile [--top 25]`.
+
 ## Not yet
 
 - Which templates the tests never reached (a change there is not proven by
   the check).
-- Time spent per template, to find the slow ones.
+- Suggested fixes for slow patterns.
 - A preview of the result for authors.
