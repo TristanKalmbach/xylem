@@ -61,14 +61,45 @@ These are the first numbers for an engine built to reproduce a set of
 production stylesheets (which it does exactly), not general conformance.
 The largest groups of failures point at what to build next:
 
+## Result documents and the type system (2026-11-24)
+
+Added: `xsl:result-document` (secondary results in `Output::results`,
+written below the principal output's folder by the CLI and host; the C
+API refuses them), `deep-equal`, `doc-available`, `round-half-to-even`,
+`remove`, `insert-before`, `unordered`, `compare`, `codepoint-equal`,
+`encode-for-uri`, `iri-to-uri`, `escape-html-uri`, the QName functions,
+and a type layer: `src/datetime.rs` (all date/time types and durations:
+casts, canonical forms, comparison, arithmetic, component and timezone
+functions, `current-*`; the implicit timezone is UTC) and `src/types.rs`
+(derived integer and string types, `anyURI`, `float`, the type hierarchy
+for `instance of`). XPath 3.0 regex syntax (`(?:...)`, the `q` flag) is
+rejected for stylesheets below version 3.0. The XSLT runner checks
+`assert-result-document`.
+
+| Suite | Run | Passed | Rate |
+|---|---:|---:|---:|
+| QT3, XPath 2.0 | 15,054 | 14,045 | 93.3% |
+| XSLT 1.0 and 2.0 | 4,682 | 3,716 | 79.4% |
+
+| Set | Now |
+|---|---:|
+| `regex-syntax-xslt20` | 984 / 987 (3 depend on the Unicode version of `\w`, `\d`, `\c`) |
+| `regex-classes` | 89 / 120 (the rest compare against older Unicode tables) |
+
+The largest remaining groups:
+
 | Area | Failures | Notes |
 |---|---:|---|
-| Casts and `castable` | ~1,400 (QT3) | Only string, boolean, numeric types; no dates, durations, QNames, `anyURI`, derived integer types |
-| `deep-equal`, `compare`, collations | ~200 | Not implemented |
-| Numeric functions (`round-half-to-even`, `abs`, `min`, `max`, `sum`, `avg` on mixed types) | ~500 | Type promotion and float/decimal edge cases |
-| Dates, times, durations, `format-date` | ~250 | Not implemented |
-| `xsl:for-each-group`, `xsl:next-match` | ~100 | Not implemented |
-| `format-number`, `use-when`, `base-uri` | ~160 | Partial or missing |
+| Wrong output (`got ...`) | ~400 each suite | Mixed: number formatting, serialization details, edge cases |
+| Casts to `hexBinary`, `base64Binary`, `NOTATION` | ~310 (QT3) | Types not implemented |
+| Expected errors not raised | ~210 (QT3), ~100 (XSLT) | Type checks the engine does not make yet |
+| `xsl:next-match`, `xsl:apply-imports` | ~95 (XSLT) | Not implemented |
+| `xsl:for-each-group`, `xsl:perform-sort` | ~60 (XSLT) | Not implemented |
+| `base-uri`, `resolve-uri`, `static-base-uri`, `document-uri` | ~90 | Base URIs are file paths, not URIs |
+| `format-date`, `format-dateTime`, `format-time` | ~30 (XSLT) | Not implemented |
+| `xsl:document`, `xsl:namespace` | ~36 (XSLT) | Not implemented |
+| `normalize-unicode`, `trace`, `lang` | ~70 (QT3) | Not implemented |
+| Sets that crash | `function`, `call-template`, `error` (stack overflow on deep recursion), `unicode-90` (timeout) | Not counted in the totals |
 
 Re-run the commands above after engine changes and update this table.
 
@@ -96,9 +127,7 @@ that had passed).
 | `fn-matches` | | 145 / 150 |
 | `fn-replace` | | 79 / 81 |
 | `fn-tokenize` | | 43 / 49 |
-| `regex-classes` | 0 / 120 | 0 / 120 (blocked on `xsl:result-document`) |
+| `regex-classes` | 0 / 120 | 0 / 120 (then blocked on `xsl:result-document`; see below) |
 
-Remaining `regex-syntax-xslt20` failures: 38 tests expect `(?:...)` to be
-rejected (XPath 2.0); the engine accepts it as XPath 3.0 does. Three
-depend on the Unicode version of `\w`, `\d`, `\c`.
+(Superseded below: `(?:...)` is now rejected for stylesheets below 3.0.)
 
