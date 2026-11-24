@@ -94,10 +94,7 @@ impl<'s> Engine<'s> {
             trees: RefCell::new(vec![Rc::new(source)]),
             globals: RefCell::default(),
             evaluating: RefCell::default(),
-            params: params
-                .into_iter()
-                .map(|(k, v)| (k.to_lowercase(), v))
-                .collect(),
+            params: params.into_iter().collect(),
             rules: RefCell::default(),
             keys: RefCell::default(),
             docs: RefCell::default(),
@@ -165,15 +162,23 @@ impl<'s> Engine<'s> {
             ));
         }
         self.evaluating.borrow_mut().push(n.clone());
-        let supplied = is_param
-            .then(|| self.params.get(&n.local.to_lowercase()))
-            .flatten();
+        let supplied = is_param.then(|| self.params.get(&*n.local)).flatten();
         let v = match supplied {
+            // Spec note 2: the host passes a value as the declared atomic
+            // type (boolean, integer, decimal, double) or else as a string,
+            // under exactly the name given.
             Some(s) => {
-                let v = vec![Item::Atomic(Atomic::Untyped(s.as_str().into()))];
+                let v = vec![Item::Atomic(Atomic::str(s.as_str()))];
+                let numeric = |t: &crate::xpath::SeqType| {
+                    matches!(&t.item, crate::xpath::ItemType::Atomic(a)
+                        if matches!(a.as_str(), "boolean" | "integer" | "decimal" | "double" | "float"))
+                };
                 match &p.as_ {
-                    Some(t) => self.convert(v, t, &format!("parameter ${}", n.lexical()))?,
-                    None => v,
+                    Some(t) if numeric(t) => {
+                        let v = vec![Item::Atomic(Atomic::Untyped(s.as_str().into()))];
+                        self.convert(v, t, &format!("parameter ${}", n.lexical()))?
+                    }
+                    _ => v,
                 }
             }
             None => self.binding(p, &self.root_dyn())?,

@@ -225,8 +225,15 @@ impl Engine<'_> {
                     return str_(String::new());
                 };
                 // Document number then node number, like `d1e23`.
-                let number = self.tree(x.tree).node_number(x.idx);
-                str_(format!("d{}e{}", x.tree + 1, number))
+                let t = self.tree(x.tree);
+                let kind = match t.node(x.idx).kind {
+                    Kind::Text => 't',
+                    Kind::Comment => 'c',
+                    Kind::Pi => 'p',
+                    _ => 'e',
+                };
+                let number = t.node_number(x.idx);
+                str_(format!("d{}{kind}{number}", x.tree + 1))
             }
             ("number", 0 | 1) => {
                 let v = if n == 0 {

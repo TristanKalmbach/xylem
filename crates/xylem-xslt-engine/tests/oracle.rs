@@ -23,13 +23,31 @@ use std::path::{Path, PathBuf};
 use xylem_xslt::compare::compare;
 use xylem_xslt_engine::{Stylesheet, transform_file};
 
-const CASES: &[&str] = &["basics", "xpath2", "params", "numbering", "imports"];
+const CASES: &[&str] = &[
+    "basics",
+    "xpath2",
+    "params",
+    "numbering",
+    "imports",
+    "ids",
+    "edge",
+];
 const PARAMS: &[(&str, &str)] = &[("mode", "final"), ("pageCount", "4")];
 
 fn cases_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("cases")
+}
+
+/// A case's own `input.xml`, or the shared one.
+fn input_of(case: &str) -> PathBuf {
+    let own = cases_dir().join(case).join("input.xml");
+    if own.is_file() {
+        own
+    } else {
+        cases_dir().join("input.xml")
+    }
 }
 
 fn params() -> HashMap<String, String> {
@@ -69,7 +87,7 @@ fn cases_match_reference_output() {
     for case in CASES {
         let style = dir.join(case).join("style.xsl");
         let expected = std::fs::read(dir.join(case).join("expected.xml")).unwrap();
-        match run_engine(&style, &dir.join("input.xml"), &params()) {
+        match run_engine(&style, &input_of(case), &params()) {
             Ok(got) => {
                 let c = compare(&expected, &got);
                 if !c.identical {
@@ -113,13 +131,13 @@ fn live_oracle() {
         } else {
             tmp.join(format!("{case}.xml"))
         };
-        let run = host.run(&style, &[(dir.join("input.xml"), out.clone())], &p, false);
+        let run = host.run(&style, &[(input_of(case), out.clone())], &p, false);
         if let Some(e) = run.jobs.first().and_then(|j| j.error.clone()).or(run.error) {
             failures.push(format!("{case}: host failed: {e}"));
             continue;
         }
         let reference = std::fs::read(&out).unwrap();
-        let ours = run_engine(&style, &dir.join("input.xml"), &params()).unwrap_or_default();
+        let ours = run_engine(&style, &input_of(case), &params()).unwrap_or_default();
         let c = compare(&reference, &ours);
         if !c.identical {
             failures.push(format!("{case}: {}", describe(&c)));

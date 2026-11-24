@@ -1,0 +1,10 @@
+﻿<?xml version="1.0"?>
+<doc>
+  <para>first line
+second line</para>
+  <proc>
+    <step><para>a</para><step><para>a1</para></step><step><para>a2</para></step></step>
+    <step><para>b</para></step>
+  </proc>
+  <!-- note -->
+</doc>

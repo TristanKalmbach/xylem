@@ -106,13 +106,31 @@ impl Tree {
 
     /// The node's number for `generate-id()`: its position in document
     /// order counting every node except attributes, the document node
-    /// being 0. An attribute gets its element's number.
+    /// being 0, with the reference processor's skipped numbers. An
+    /// attribute gets its element's number.
     pub fn node_number(&self, i: u32) -> u32 {
         let nums = self.numbers.get_or_init(|| {
+            // Spec note 1: under each parent, once eleven children have
+            // been numbered since the last skip, the next element child
+            // skips one number.
+            let mut skip = vec![false; self.nodes.len()];
+            for n in &self.nodes {
+                let mut since = 0;
+                for &c in &n.children {
+                    if since >= 11 && self.node(c).kind == Kind::Element {
+                        skip[c as usize] = true;
+                        since = 0;
+                    }
+                    since += 1;
+                }
+            }
             let mut v = vec![0; self.nodes.len()];
             let mut next = 0;
             let mut stack = vec![0u32];
             while let Some(x) = stack.pop() {
+                if skip[x as usize] {
+                    next += 1;
+                }
                 v[x as usize] = next;
                 next += 1;
                 let n = self.node(x);
@@ -222,6 +240,11 @@ pub fn from_dom(doc: &Document, base: &str, strip: &dyn StripSpace) -> Result<Tr
     for &c in doc.children(doc.root()) {
         // Whitespace outside the document element is not part of the XDM.
         if matches!(doc.kind(c), NodeKind::Text(_) | NodeKind::CData(_)) {
+            continue;
+        }
+        // An XML declaration after a byte order mark can surface as a PI.
+        if matches!(doc.kind(c), NodeKind::Pi { target, .. } if target.eq_ignore_ascii_case("xml"))
+        {
             continue;
         }
         copy(doc, c, &mut t, 0, strip, false)?;

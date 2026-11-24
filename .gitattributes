@@ -1,2 +1,4 @@
 * text=auto eol=lf
 *.png binary
+# Stylesheet engine fixtures are compared byte for byte (some use CR LF).
+crates/xylem-xslt-engine/tests/cases/** -text

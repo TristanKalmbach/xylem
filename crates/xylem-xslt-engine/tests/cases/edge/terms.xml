@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE terms [
+  <!ENTITY shared SYSTEM "terms-shared.xml">
+  <!ENTITY brand "Acme">
+]>
+<terms>
+  <term key="warn">Warning</term>
+  &shared;
+  <term key="brand">&brand; pumps</term>
+</terms>

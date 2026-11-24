@@ -40,8 +40,9 @@ pub struct Output {
     pub timing: Vec<(String, TemplateTime)>,
 }
 
-/// Transforms an input file. Parameters are matched to global
-/// `xsl:param`s by name, ignoring case, and converted to their types.
+/// Transforms an input file. Parameters set the global `xsl:param` of
+/// exactly that name; values are converted to a declared boolean or
+/// numeric type and are strings otherwise, as the publishing host does.
 pub fn transform_file(
     ss: &Stylesheet,
     input: &Path,
