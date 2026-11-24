@@ -1,0 +1,21 @@
+[package]
+name = "xylem-xslt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Checks that a changed XSLT stylesheet still produces the same output, against saved output, a committed version or another stylesheet"
+keywords = ["xslt", "xsl-fo", "regression", "saxon"]
+categories = ["development-tools::testing"]
+readme = "../../README.md"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+similar = "2"
+toml = "0.9"
+
+[[bin]]
+name = "xylem-xslt-check"
+path = "src/bin/check.rs"

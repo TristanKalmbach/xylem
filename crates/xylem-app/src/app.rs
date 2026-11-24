@@ -19,6 +19,7 @@ use xylem_edit::{EditError, Pos, Rules, Selection};
 
 mod export_ui;
 mod find_files_ui;
+mod stylesheet_check_ui;
 
 /// Commands reachable from menus, the toolbar, shortcuts and context menus.
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +81,8 @@ pub enum Cmd {
     PreviousVersions,
     /// Help > Open log folder.
     OpenLogFolder,
+    /// Tools > Check stylesheet output (a script may name the suite file).
+    CheckStylesheet(String),
     CheckUpdates,
     ReloadPackages,
     S1000dInfo,
@@ -190,6 +193,7 @@ impl Cmd {
             "NewComment" => Cmd::NewComment,
             "PreviousVersions" => Cmd::PreviousVersions,
             "OpenLogFolder" => Cmd::OpenLogFolder,
+            "CheckStylesheet" => Cmd::CheckStylesheet(arg.to_string()),
             "InsertElement" => Cmd::InsertElement(arg.to_string()),
             "Surround" => Cmd::Surround(arg.to_string()),
             "Toggle" => Cmd::Toggle(arg.to_string()),
@@ -295,6 +299,7 @@ pub struct XylemApp {
     panel: PanelState,
     find: FindState,
     find_files: find_files_ui::FindFilesState,
+    stylesheet_check: stylesheet_check_ui::StylesheetCheckState,
     dialogs: Dialogs,
     toasts: Vec<(String, f64, bool)>,
     context_menu: Option<ContextMenu>,
@@ -386,6 +391,7 @@ impl XylemApp {
             panel: PanelState::default(),
             find: FindState::default(),
             find_files: Default::default(),
+            stylesheet_check: Default::default(),
             dialogs: Dialogs::default(),
             toasts: Vec::new(),
             context_menu: None,
@@ -1152,6 +1158,7 @@ impl XylemApp {
             }
             Cmd::About => self.dialogs.about = true,
             Cmd::PreviousVersions => self.dialogs.versions = true,
+            Cmd::CheckStylesheet(suite) => self.open_stylesheet_check(Some(suite)),
             Cmd::OpenLogFolder => {
                 if let Some(dir) = crate::logging::log_dir() {
                     let _ = std::fs::create_dir_all(&dir);
@@ -2220,6 +2227,15 @@ impl XylemApp {
                 }
                 if item(ui, true, Some(icon::LINK), "Check references", None) {
                     cmds.push(Cmd::CheckReferences);
+                }
+                if item(
+                    ui,
+                    true,
+                    Some(icon::CHECKS),
+                    "Check stylesheet output…",
+                    None,
+                ) {
+                    cmds.push(Cmd::CheckStylesheet(String::new()));
                 }
             });
             ui.menu_button("Review", |ui| self.review_menu(ui, has_doc, cmds));
@@ -4052,6 +4068,7 @@ impl XylemApp {
         use crate::ui::{Dialog, Tone, dialog_footer, form, icon, notice, palette, section};
         self.find_window(ctx);
         self.find_files_window(ctx);
+        self.stylesheet_check_window(ctx);
         let p = palette(ctx);
         if self.dialogs.about {
             let (x, close) = Dialog::new("About Xylem").width(380.0).show(ctx, |ui| {

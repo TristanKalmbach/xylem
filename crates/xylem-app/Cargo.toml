@@ -22,6 +22,7 @@ xylem-schema = { workspace = true }
 xylem-customize = { workspace = true }
 xylem-s1000d = { workspace = true }
 xylem-xpath = { workspace = true }
+xylem-xslt = { workspace = true }
 eframe = { version = "0.33", features = ["persistence"] }
 egui = "0.33"
 rfd = "0.18"

@@ -42,6 +42,9 @@ pub struct Settings {
     /// Name recorded on tracked changes and comments; empty means the
     /// login name.
     pub review_author: String,
+    /// Test suite and engine program last used by Check stylesheet output.
+    pub stylesheet_suite: Option<PathBuf>,
+    pub xslt_host: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -71,6 +74,8 @@ impl Default for Settings {
             find_files_pattern: crate::find_files::DEFAULT_PATTERN.into(),
             project_dir: None,
             review_author: String::new(),
+            stylesheet_suite: None,
+            xslt_host: None,
         }
     }
 }

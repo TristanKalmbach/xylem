@@ -17,6 +17,7 @@ xylem-s1000d = { path = "crates/xylem-s1000d", version = "0.3.1" }
 xylem-customize = { path = "crates/xylem-customize", version = "0.3.1" }
 xylem-xpath = { path = "crates/xylem-xpath", version = "0.3.1" }
 xylem-edit = { path = "crates/xylem-edit", version = "0.3.1" }
+xylem-xslt = { path = "crates/xylem-xslt", version = "0.3.1" }
 
 [profile.release]
 opt-level = 3

@@ -51,6 +51,9 @@ pub struct TeamConfig {
     /// Folder holding the current `xylem` executable and `version.txt`; see
     /// [`crate::install`].
     pub update_source: Option<PathBuf>,
+    /// Program that runs stylesheets for Check stylesheet output
+    /// (`SaxonDotnetHost.exe`, see `tools/saxon-dotnet`).
+    pub xslt_host: Option<PathBuf>,
     /// Where the configuration was read from (filled in by [`load`]).
     #[serde(skip)]
     pub source: Option<PathBuf>,
@@ -68,6 +71,7 @@ const KNOWN_KEYS: &[&str] = &[
     "dictionary_dir",
     "dictionary_lang",
     "update_source",
+    "xslt_host",
 ];
 const MAX_INCLUDES: usize = 4;
 
@@ -159,6 +163,7 @@ fn parse_one(path: &Path) -> Result<TeamConfig, String> {
         &mut cfg.brex,
         &mut cfg.dictionary_dir,
         &mut cfg.update_source,
+        &mut cfg.xslt_host,
     ]
     .into_iter()
     .flatten()
