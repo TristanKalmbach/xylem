@@ -13,9 +13,15 @@
 //     passed as strings.
 //   - The result goes to a .NET XmlDocument (DomDestination) and is written
 //     as its OuterXml, UTF-8 with a byte order mark. xsl:output is ignored.
-//   - Other stylesheets run on XslCompiledTransform with document() and
-//     scripts enabled, DTDs parsed, the input read from a string with no base
-//     URI, and the XML declaration omitted.
+//   - Other stylesheets run on XslCompiledTransform with document()
+//     enabled, DTDs parsed, the input re-read through an XDocument into a
+//     string with no base URI, and the XML declaration omitted. Embedded
+//     scripts (msxsl:script) are refused unless --allow-scripts is given.
+//
+// --serialize runs a stylesheet the way such a host runs a second step on
+// text it already has (XSL-FO to HTML, say): the input file is read as it
+// is, and the result is written as the stylesheet's xsl:output asks
+// (method, doctype, indentation) instead of as an XmlDocument.
 //
 // Usage:
 //   SaxonDotnetHost run --stylesheet <file.xsl> --job <input.xml>=<output>
@@ -72,6 +78,8 @@ namespace Xylem.SaxonDotnet
         public string Stylesheet;
         public bool Profile;
         public bool CompileOnly;
+        public bool Serialize;
+        public bool AllowScripts;
         public int Repeat = 1;
         public readonly List<string> Stylesheets = new List<string>();
         public readonly List<Job> Jobs = new List<Job>();
@@ -95,7 +103,7 @@ namespace Xylem.SaxonDotnet
             }
 
             if (options.CompileOnly)
-                return CompileAll(options.Stylesheets);
+                return CompileAll(options.Stylesheets, options.AllowScripts);
             var stylesheet = Path.GetFullPath(options.Stylesheet);
             bool isXslt2;
             try
@@ -114,7 +122,7 @@ namespace Xylem.SaxonDotnet
             {
                 transform = isXslt2
                     ? (ITransform)new SaxonTransform(stylesheet, options.Profile)
-                    : new DotnetTransform(stylesheet);
+                    : new DotnetTransform(stylesheet, options.AllowScripts);
             }
             catch (Exception e)
             {
@@ -137,7 +145,7 @@ namespace Xylem.SaxonDotnet
                     for (int r = 0; r < Math.Max(1, options.Repeat); r++)
                     {
                         var runClock = Stopwatch.StartNew();
-                        var result = transform.Run(Path.GetFullPath(job.Input), options.Params, profile);
+                        var result = transform.Run(Path.GetFullPath(job.Input), options.Params, profile, options.Serialize);
                         runClock.Stop();
                         runs.Add(runClock.ElapsedMilliseconds);
                         var outputDir = Path.GetDirectoryName(Path.GetFullPath(job.Output));
@@ -183,7 +191,7 @@ namespace Xylem.SaxonDotnet
         }
 
         /// <summary>Compiles each stylesheet as a run would.</summary>
-        private static int CompileAll(List<string> stylesheets)
+        private static int CompileAll(List<string> stylesheets, bool allowScripts)
         {
             int failed = 0;
             foreach (var s in stylesheets)
@@ -196,7 +204,7 @@ namespace Xylem.SaxonDotnet
                     if (IsXslt2(full))
                         new SaxonTransform(full, false);
                     else
-                        new DotnetTransform(full);
+                        new DotnetTransform(full, allowScripts);
                 }
                 catch (Exception e)
                 {
@@ -252,6 +260,12 @@ namespace Xylem.SaxonDotnet
                         }
                     case "--profile":
                         options.Profile = true;
+                        break;
+                    case "--serialize":
+                        options.Serialize = true;
+                        break;
+                    case "--allow-scripts":
+                        options.AllowScripts = true;
                         break;
                     case "--param":
                         {
@@ -328,7 +342,7 @@ namespace Xylem.SaxonDotnet
 
     internal interface ITransform
     {
-        string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath);
+        string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath, bool serialize);
     }
 
     /// <summary>XSLT 2.0 on Saxon-HE, as the host runs it.</summary>
@@ -367,11 +381,12 @@ namespace Xylem.SaxonDotnet
             _executable = compiler.Compile(new Uri(stylesheet));
         }
 
-        public string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath)
+        public string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath, bool serialize)
         {
             var declared = _executable.GetGlobalParameters();
             TimingListener timing = null;
             var destination = new DomDestination();
+            var text = new StringWriter();
             // The host saves its XDocument to a stream and hands Saxon those
             // bytes; the saved input file holds the same bytes.
             using (var input = new FileStream(inputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
@@ -401,11 +416,20 @@ namespace Xylem.SaxonDotnet
                     timing = new TimingListener();
                     transformer.Implementation.addTraceListener(timing);
                 }
-                transformer.Run(destination);
+                if (serialize)
+                {
+                    var serializer = new Serializer();
+                    serializer.SetOutputWriter(text);
+                    transformer.Run(serializer);
+                }
+                else
+                {
+                    transformer.Run(destination);
+                }
             }
             if (timing != null)
                 File.WriteAllText(profilePath, timing.ToJson(), new UTF8Encoding(false));
-            return destination.XmlDocument.OuterXml;
+            return serialize ? text.ToString() : destination.XmlDocument.OuterXml;
         }
 
         private static void SetParameter(XsltTransformer transformer, Dictionary<QName, XsltExecutable.ParameterDetails> declared, string name, string value)
@@ -455,19 +479,29 @@ namespace Xylem.SaxonDotnet
     {
         private readonly XslCompiledTransform _transform = new XslCompiledTransform();
 
-        public DotnetTransform(string stylesheet)
+        public DotnetTransform(string stylesheet, bool allowScripts)
         {
-            var settings = new XsltSettings(true, true);
+            var settings = new XsltSettings(true, allowScripts);
             using (var s = new FileStream(stylesheet, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var reader = XmlReader.Create(s, new XmlReaderSettings { DtdProcessing = DtdProcessing.Parse }, stylesheet))
                 _transform.Load(reader, settings, new XmlUrlResolver());
         }
 
-        public string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath)
+        public string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath, bool serialize)
         {
             var args = new XsltArgumentList();
             foreach (var arg in parameters)
                 args.AddParam(arg.Key, "", arg.Value);
+            if (serialize)
+            {
+                // A second step: the text is parsed as it is and the result
+                // goes to a TextWriter, so xsl:output applies.
+                var html = new StringWriter();
+                using (var stringReader = new StringReader(File.ReadAllText(inputPath)))
+                using (var xmlReader = XmlReader.Create(stringReader, new XmlReaderSettings { DtdProcessing = DtdProcessing.Parse }))
+                    _transform.Transform(xmlReader, args, html);
+                return html.ToString();
+            }
             // The host passes its XDocument as a string, so there is no base URI.
             var xml = XDocument.Load(inputPath).ToString();
             var fo = new StringBuilder();

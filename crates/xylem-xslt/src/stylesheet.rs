@@ -291,6 +291,30 @@ pub struct Stylesheet {
     pub warnings: Vec<String>,
 }
 
+impl Stylesheet {
+    /// Whether the top stylesheet runs on an XSLT 2.0 processor. The rule is
+    /// the host's (`tools/saxon-dotnet`): the root element's `version` is
+    /// exactly `2.0`; anything else runs on an XSLT 1.0 processor.
+    pub fn runs_as_xslt2(&self) -> bool {
+        self.modules.first().is_some_and(|m| {
+            m.doc
+                .document_element()
+                .and_then(|r| m.doc.attr(r, "version"))
+                == Some("2.0")
+        })
+    }
+}
+
+/// Whether the stylesheet at `path` runs on an XSLT 2.0 processor (see
+/// [`Stylesheet::runs_as_xslt2`]).
+pub fn runs_as_xslt2(path: &Path) -> Result<bool, String> {
+    let m = Module::load(path)?;
+    Ok(m.doc
+        .document_element()
+        .and_then(|r| m.doc.attr(r, "version"))
+        == Some("2.0"))
+}
+
 /// `a/b/../c` as `a/c`, without touching the file system.
 pub fn tidy(p: &Path) -> PathBuf {
     use std::path::Component;
@@ -392,8 +416,8 @@ mod tests {
     #[test]
     fn paths_are_tidied() {
         assert_eq!(
-            tidy(Path::new("C:/IA/Service/../default.xsl")),
-            PathBuf::from("C:/IA/default.xsl")
+            tidy(Path::new("C:/work/manual/../common.xsl")),
+            PathBuf::from("C:/work/common.xsl")
         );
         assert_eq!(tidy(Path::new("a/./b/../../c")), PathBuf::from("c"));
         assert_eq!(tidy(Path::new("../x")), PathBuf::from("../x"));

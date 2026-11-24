@@ -42,7 +42,12 @@ fn run_preview(
         return Ok(fo);
     };
     let html = dir.join(format!("{stem}.html"));
-    let second = host.run(html_sheet, &[(fo, html.clone())], &BTreeMap::new(), false);
+    // The second step runs as a publishing service runs it on text it
+    // already has: the FO is read as it is and the HTML written as the
+    // stylesheet's xsl:output asks.
+    let mut html_host = host.clone();
+    html_host.serialize = true;
+    let second = html_host.run(html_sheet, &[(fo, html.clone())], &BTreeMap::new(), false);
     if let Some(e) = second
         .error
         .or_else(|| second.jobs.first().and_then(|j| j.error.clone()))
@@ -107,7 +112,8 @@ impl XylemApp {
         if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&input, bytes)) {
             return self.toast(format!("Could not write the preview input: {e}"), true);
         }
-        let host = Host::new(engine);
+        let mut host = Host::new(engine);
+        host.allow_scripts = self.team.xslt_allow_scripts;
         let (tx, rx) = channel();
         self.preview.job = Some(rx);
         let name = cfg.name.clone().unwrap_or_else(|| "publication".into());

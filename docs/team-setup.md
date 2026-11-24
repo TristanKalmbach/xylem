@@ -35,6 +35,7 @@ dictionary_dir = "dictionaries"
 dictionary_lang = "en_US"
 update_source = "updates"
 xslt_host = "tools/SaxonDotnetHost.exe"   # for Tools › Check stylesheet output
+xslt_allow_scripts = false               # let XSLT 1.0 stylesheets run msxsl:script
 
 [[preview]]                              # File › Publication preview
 root = "book"

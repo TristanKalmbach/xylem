@@ -32,6 +32,13 @@ Saxon-HE on .NET; build it with your copy of the Saxon assemblies (see its
 README). Point Xylem at it in the window's Engine field, or for everyone with
 `xslt_host` in the team configuration (see [team-setup.md](team-setup.md)).
 
+Like such a service, it runs a stylesheet whose root `version` is exactly
+`2.0` on Saxon and any other on .NET's XSLT 1.0 processor
+(`XslCompiledTransform`). Embedded scripts in XSLT 1.0 stylesheets
+(`msxsl:script`) are refused unless the team configuration sets
+`xslt_allow_scripts = true`, or `--allow-scripts` is given on the command
+line.
+
 ## Test suites
 
 A suite is a TOML file listing the test inputs. Paths are relative to it.
@@ -81,6 +88,9 @@ afterwards.
 
 From a terminal: `xylem-xslt-check suite.toml --profile [--top 25]`.
 
+Only stylesheets that run on Saxon (XSLT 2.0) can be timed; for an XSLT 1.0
+stylesheet Time templates says so instead of running.
+
 ## Finding and fixing slow patterns
 
 **Analyze** times the stylesheet on the tests, then reads it and everything
@@ -121,11 +131,14 @@ of the expressions they rewrite and the lines they add, so the rest of each
 file stays byte for byte as it was. A file open in Xylem with unsaved
 changes is not touched.
 
+The fixes are XPath 2.0. On a stylesheet that runs on an XSLT 1.0 processor
+Analyze still lists what it finds, but as notes with nothing to apply.
+
 From a terminal:
 
 ```
 xylem-xslt-check suite.toml --analyze [--top 40]
-xylem-xslt-check suite.toml --analyze --fix --scope <IA folder> [--repeat 5]
+xylem-xslt-check suite.toml --analyze --fix --scope <stylesheets folder> [--repeat 5]
 ```
 
 `--repeat 5` times each test five times and reports the median, for
@@ -156,6 +169,10 @@ params = { output = "html" }
 ```
 
 Without `html`, the stylesheet's own output opens in Xylem.
+
+The `html` step runs the way a publishing service runs a second step on text
+it already has: the FO is read as it is and the HTML is written as that
+stylesheet's `xsl:output` asks (its doctype, HTML rather than XML syntax).
 
 ## Not yet
 

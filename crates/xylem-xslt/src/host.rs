@@ -14,6 +14,13 @@ pub struct Host {
     pub program: PathBuf,
     /// Runs per input; the median time is reported (timing runs only).
     pub repeat: u32,
+    /// Read the input as it is and write the result as the stylesheet's
+    /// `xsl:output` asks, as a second step on text a publishing service
+    /// already has (XSL-FO to HTML). Off: the result is written the way the
+    /// service saves a publishing stylesheet's output.
+    pub serialize: bool,
+    /// Let XSLT 1.0 stylesheets run embedded scripts (`msxsl:script`).
+    pub allow_scripts: bool,
 }
 
 /// Whether one stylesheet compiled.
@@ -42,6 +49,8 @@ pub struct JobResult {
 pub struct Run {
     pub jobs: Vec<JobResult>,
     pub compile_ms: Option<u64>,
+    /// The XSLT version the host ran the stylesheet as ("1.0" or "2.0").
+    pub xslt: Option<String>,
     /// Set when the stylesheet itself could not be compiled or the host
     /// could not run.
     pub error: Option<String>,
@@ -55,6 +64,7 @@ struct Line {
     ms: Option<u64>,
     compile_ms: Option<u64>,
     compiled: Option<bool>,
+    xslt: Option<String>,
     error: Option<String>,
     profile: Option<PathBuf>,
 }
@@ -64,6 +74,8 @@ impl Host {
         Host {
             program: program.into(),
             repeat: 1,
+            serialize: false,
+            allow_scripts: false,
         }
     }
 
@@ -87,6 +99,12 @@ impl Host {
         for (k, v) in params {
             cmd.arg("--param").arg(format!("{k}={v}"));
         }
+        if self.serialize {
+            cmd.arg("--serialize");
+        }
+        if self.allow_scripts {
+            cmd.arg("--allow-scripts");
+        }
         if profile {
             cmd.arg("--profile");
         } else if self.repeat > 1 {
@@ -109,6 +127,7 @@ impl Host {
                 })
                 .collect(),
             compile_ms: None,
+            xslt: None,
             error: Some(error),
         };
         let out = match cmd.output() {
@@ -122,6 +141,7 @@ impl Host {
         let mut run = Run {
             jobs: Vec::new(),
             compile_ms: None,
+            xslt: None,
             error: None,
         };
         for line in stdout.lines().filter(|l| l.trim_start().starts_with('{')) {
@@ -130,6 +150,7 @@ impl Host {
             };
             if l.summary == Some(true) {
                 run.compile_ms = l.compile_ms;
+                run.xslt = l.xslt;
                 if l.compiled == Some(false) {
                     run.error = Some(
                         l.error
@@ -180,6 +201,9 @@ impl Host {
         for chunk in stylesheets.chunks(20) {
             let mut cmd = Command::new(&self.program);
             cmd.arg("compile");
+            if self.allow_scripts {
+                cmd.arg("--allow-scripts");
+            }
             for s in chunk {
                 cmd.arg("--stylesheet").arg(s);
             }

@@ -307,6 +307,20 @@ pub fn profile(suite: &Suite, stylesheet: &Path, env: CheckEnv) -> ProfileReport
         report.error = Some(format!("Could not create {}: {e}", dir.display()));
         return report;
     }
+    match crate::stylesheet::runs_as_xslt2(stylesheet) {
+        Ok(true) => {}
+        Ok(false) => {
+            report.error = Some(
+                "Time templates works on XSLT 2.0 stylesheets only. This one runs on an XSLT 1.0 processor (its version is not 2.0)."
+                    .into(),
+            );
+            return report;
+        }
+        Err(e) => {
+            report.error = Some(e);
+            return report;
+        }
+    }
     let n = suite.tests.len();
     (env.progress)(format!("Timing the stylesheet on {n} test{}…", plural(n)));
     let runs = run_all(env.host, stylesheet, &suite.tests, &dir, env.cancel, true);

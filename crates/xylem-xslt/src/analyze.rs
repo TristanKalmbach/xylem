@@ -803,6 +803,25 @@ pub fn analyze(top: &Path, profile: Option<&Profile>) -> Result<Analysis, String
         scan.scan_module(mi);
     }
     let mut findings = scan.findings;
+    let mut warnings = sheet.warnings.clone();
+    if !sheet.runs_as_xslt2() {
+        // The rewrites use XPath 2.0, which an XSLT 1.0 processor rejects:
+        // keep what was found, as notes, and offer no edits.
+        for f in &mut findings {
+            if f.severity != Severity::Note {
+                f.severity = Severity::Note;
+                f.edits.clear();
+                f.detail = format!(
+                    "Not fixed automatically: this stylesheet runs on an XSLT 1.0 processor. {}",
+                    f.detail
+                );
+            }
+        }
+        warnings.push(
+            "This stylesheet runs on an XSLT 1.0 processor (its version is not 2.0), so fixes are shown as notes only."
+                .into(),
+        );
+    }
     // Fixes the tests reach first, then by time spent, then by kind.
     findings.sort_by(|a, b| {
         let reached = |f: &Finding| f.reached() == Some(false);
@@ -821,7 +840,7 @@ pub fn analyze(top: &Path, profile: Option<&Profile>) -> Result<Analysis, String
         top: top.to_path_buf(),
         modules: sheet.modules.iter().map(|m| m.path.clone()).collect(),
         findings,
-        warnings: sheet.warnings.clone(),
+        warnings,
         unreadable: scan.unreadable,
         with_entities: scan.with_entities,
         texts: sheet
@@ -949,6 +968,26 @@ mod tests {
 
     const HEAD: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:f="urn:f">"#;
+
+    #[test]
+    fn an_xslt_1_stylesheet_gets_notes_and_no_edits() {
+        let text = "<?xml version=\"1.0\"?>
+<xsl:stylesheet version=\"1.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">
+<xsl:template name=\"t\">
+<xsl:choose>
+<xsl:when test=\"item[@a = 'x']\">
+<xsl:value-of select=\"item[@a = 'x']/@b\"/>
+</xsl:when>
+</xsl:choose>
+</xsl:template>
+</xsl:stylesheet>
+";
+        let top = sheet("xslt1", &[("top.xsl", text)]);
+        let a = analyze(&top, None).unwrap();
+        assert!(!a.findings.is_empty());
+        assert!(a.findings.iter().all(|f| f.severity == Severity::Note && f.edits.is_empty()));
+        assert!(a.warnings.iter().any(|w| w.contains("XSLT 1.0")));
+    }
 
     #[test]
     fn a_repeated_lookup_is_computed_once() {

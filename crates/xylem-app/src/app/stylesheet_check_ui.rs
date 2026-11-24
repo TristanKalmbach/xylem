@@ -233,7 +233,8 @@ impl XylemApp {
             );
             return None;
         }
-        let host = Host::new(PathBuf::from(st.engine.trim()));
+        let mut host = Host::new(PathBuf::from(st.engine.trim()));
+        host.allow_scripts = self.team.xslt_allow_scripts;
         self.settings.stylesheet_suite = Some(suite_path);
         self.settings.xslt_host = Some(host.program.clone());
         Some((suite, stylesheet, host))
@@ -399,7 +400,8 @@ impl XylemApp {
         let scope = xylem_xslt::git::locate(&stylesheet)
             .ok()
             .and_then(|(top, rel)| rel.components().next().map(|c| top.join(c.as_os_str())));
-        let host = Host::new(PathBuf::from(st.engine.trim()));
+        let mut host = Host::new(PathBuf::from(st.engine.trim()));
+        host.allow_scripts = self.team.xslt_allow_scripts;
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();

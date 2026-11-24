@@ -54,6 +54,10 @@ pub struct TeamConfig {
     /// Program that runs stylesheets for Check stylesheet output
     /// (`SaxonDotnetHost.exe`, see `tools/saxon-dotnet`).
     pub xslt_host: Option<PathBuf>,
+    /// Let XSLT 1.0 stylesheets run embedded scripts (`msxsl:script`), as
+    /// some publishing services allow. Off unless the team turns it on:
+    /// scripts are code that runs on the author's machine.
+    pub xslt_allow_scripts: bool,
     /// How to preview a publication: which stylesheets to run on which
     /// documents (File > Publication preview).
     pub preview: Vec<PreviewConfig>,
@@ -114,6 +118,7 @@ const KNOWN_KEYS: &[&str] = &[
     "dictionary_lang",
     "update_source",
     "xslt_host",
+    "xslt_allow_scripts",
     "preview",
 ];
 const MAX_INCLUDES: usize = 4;

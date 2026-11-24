@@ -4,7 +4,7 @@
 //! ```text
 //! xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>]
 //!                  [--against saved | committed[:<rev>] | <other.xsl>]
-//!                  [--host <SaxonDotnetHost.exe>] [--work <folder>]
+//!                  [--host <SaxonDotnetHost.exe>] [--allow-scripts] [--work <folder>]
 //! xylem-xslt-check <suite.toml> --profile [--top <n>] [--stylesheet ...]
 //! xylem-xslt-check <suite.toml> --analyze [--fix] [--scope <folder>]
 //!                  [--against ...] [--stylesheet ...] [--repeat <n>]
@@ -29,6 +29,9 @@
 //!
 //! `--against` defaults to `committed` (the stylesheet as last committed to
 //! git) when the suite has no saved output, and to `saved` when it does.
+//! `--allow-scripts` lets XSLT 1.0 stylesheets run embedded scripts
+//! (`msxsl:script`); they are refused otherwise.
+//!
 //! The host defaults to `XYLEM_XSLT_HOST`. Exit code 0 means every test gave
 //! the same output.
 
@@ -40,7 +43,7 @@ use xylem_xslt::check::CheckEnv;
 use xylem_xslt::{Baseline, Host, Outcome, Suite, check, profile, proof};
 
 const USAGE: &str = "Usage: xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>] \
-[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>] [--work <folder>] \
+[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>] [--allow-scripts] [--work <folder>] \
 [--profile [--top <n>]] [--analyze [--fix] [--scope <folder>]] [--prove] [--repeat <n>]";
 
 fn main() -> ExitCode {
@@ -60,6 +63,7 @@ fn run() -> Result<bool, String> {
     let mut stylesheet = None;
     let mut against = None;
     let mut host = std::env::var_os("XYLEM_XSLT_HOST").map(PathBuf::from);
+    let mut allow_scripts = false;
     let mut work = None;
     let mut profiling = false;
     let mut analyzing = false;
@@ -74,6 +78,7 @@ fn run() -> Result<bool, String> {
             "--stylesheet" => stylesheet = Some(PathBuf::from(value("--stylesheet")?)),
             "--against" => against = Some(value("--against")?),
             "--host" => host = Some(PathBuf::from(value("--host")?)),
+            "--allow-scripts" => allow_scripts = true,
             "--work" => work = Some(PathBuf::from(value("--work")?)),
             "--profile" => profiling = true,
             "--analyze" => analyzing = true,
@@ -110,6 +115,7 @@ fn run() -> Result<bool, String> {
             "No host program: set XYLEM_XSLT_HOST or pass --host (see tools/saxon-dotnet).",
         )?);
     host.repeat = repeat.max(1);
+    host.allow_scripts = allow_scripts;
     let baseline = match against.as_deref() {
         None if suite.tests.iter().all(|t| t.expected.is_some()) => Baseline::Saved,
         None => Baseline::Committed { rev: "HEAD".into() },
@@ -334,6 +340,12 @@ fn run_analysis(
             ""
         }
     );
+    for w in &analysis.warnings {
+        println!("{w}");
+    }
+    if !analysis.warnings.is_empty() {
+        println!();
+    }
     let count = |sev: Severity| {
         analysis
             .findings

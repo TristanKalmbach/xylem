@@ -15,6 +15,16 @@ It copies these details of such a host:
   and converted to their declared types.
 - The result is written as the `OuterXml` of a .NET `XmlDocument`, UTF-8 with
   a byte order mark; `xsl:output` has no effect.
+- XSLT 1.0 stylesheets run with `document()` enabled and DTDs parsed. The
+  input is read into an `XDocument` and handed over as a string (so it has no
+  base URI), and the XML declaration is left out. Embedded scripts
+  (`msxsl:script`) are refused unless you pass `--allow-scripts`.
+
+`--serialize` runs a stylesheet the way such a service runs a second step on
+text it already has, such as XSL-FO to HTML: the input file is read as it is,
+and the result is written as the stylesheet's `xsl:output` asks (method,
+doctype, indentation) instead of as an `XmlDocument`. Xylem's publication
+preview uses it for its HTML step.
 
 ## Build
 
@@ -33,7 +43,7 @@ committed. Saxon-HE is published by Saxonica under the Mozilla Public License
 ## Run
 
 ```
-bin\SaxonDotnetHost.exe run --stylesheet stylesheetsook-to-fo.xsl ^
+bin\SaxonDotnetHost.exe run --stylesheet stylesheets\book-to-fo.xsl ^
     --job manual.xml=manual.fo ^
     --param draft=yes
 ```
