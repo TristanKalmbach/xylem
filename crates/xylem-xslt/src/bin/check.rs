@@ -8,7 +8,17 @@
 //! xylem-xslt-check <suite.toml> --profile [--top <n>] [--stylesheet ...]
 //! xylem-xslt-check <suite.toml> --analyze [--fix] [--scope <folder>]
 //!                  [--against ...] [--stylesheet ...] [--repeat <n>]
+//! xylem-xslt-check new-suite <folder> [--input <pattern>] [--expected <pattern>]
+//!                  [--stylesheet <file.xsl>] [--param name=value ...]
+//!                  [--out <suite.toml>] [--force]
 //! ```
+//!
+//! `new-suite` writes a suite for every file under `<folder>` matching the
+//! `--input` pattern (default `*.xml`), with the file next to it matching
+//! `--expected` (default `*.fo`) as its saved output. A pattern is a file name
+//! with one `*` standing for the part the two share, such as `*-input.xml`
+//! and `*.fo`. The suite goes to `<folder>/suite.toml` unless `--out` names
+//! another file; an existing file is kept unless `--force` is given.
 //!
 //! `--analyze` times the suite, then lists patterns in the stylesheet (and
 //! everything it includes or imports) that make it slow, with the time of the
@@ -58,6 +68,9 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<bool, String> {
+    if std::env::args().nth(1).as_deref() == Some("new-suite") {
+        return new_suite(std::env::args().skip(2));
+    }
     let mut args = std::env::args().skip(1);
     let mut suite_path = None;
     let mut stylesheet = None;
@@ -510,4 +523,94 @@ fn print_proof(
         }
     );
     Ok(p.passed())
+}
+
+const NEW_SUITE_USAGE: &str = "Usage: xylem-xslt-check new-suite <folder> [--input <pattern>] [--expected <pattern>] [--stylesheet <file.xsl>] [--param name=value ...] [--out <suite.toml>] [--force]";
+
+/// `new-suite`: writes a suite for the exports found under a folder.
+fn new_suite(mut args: impl Iterator<Item = String>) -> Result<bool, String> {
+    use std::collections::BTreeMap;
+    use xylem_xslt::suite::{NamePattern, find_tests, write_suite};
+    let mut folder = None;
+    let mut input = "*.xml".to_string();
+    let mut expected = "*.fo".to_string();
+    let mut stylesheet = None;
+    let mut params = BTreeMap::new();
+    let mut out = None;
+    let mut force = false;
+    while let Some(a) = args.next() {
+        let mut value = |name: &str| {
+            args.next()
+                .ok_or(format!("{name} needs a value.\n{NEW_SUITE_USAGE}"))
+        };
+        match a.as_str() {
+            "--input" => input = value("--input")?,
+            "--expected" => expected = value("--expected")?,
+            "--stylesheet" => stylesheet = Some(PathBuf::from(value("--stylesheet")?)),
+            "--out" => out = Some(PathBuf::from(value("--out")?)),
+            "--force" => force = true,
+            "--param" => {
+                let pair = value("--param")?;
+                let (k, v) = pair
+                    .split_once('=')
+                    .filter(|(k, _)| !k.is_empty())
+                    .ok_or(format!("--param takes name=value, got {pair}"))?;
+                params.insert(k.to_string(), v.to_string());
+            }
+            "-h" | "--help" => {
+                println!("{NEW_SUITE_USAGE}");
+                return Ok(true);
+            }
+            other if folder.is_none() && !other.starts_with("--") => {
+                folder = Some(PathBuf::from(other))
+            }
+            other => return Err(format!("Unknown argument: {other}\n{NEW_SUITE_USAGE}")),
+        }
+    }
+    let folder = folder.ok_or(NEW_SUITE_USAGE)?;
+    let tests = find_tests(
+        &folder,
+        &NamePattern::parse(&input)?,
+        &NamePattern::parse(&expected)?,
+    )?;
+    if tests.is_empty() {
+        return Err(format!(
+            "No files under {} match {input}.",
+            folder.display()
+        ));
+    }
+    let out = out.unwrap_or_else(|| folder.join("suite.toml"));
+    if out.exists() && !force {
+        return Err(format!(
+            "{} already exists; pass --force to replace it.",
+            out.display()
+        ));
+    }
+    let stylesheet = stylesheet.map(|s| std::path::absolute(&s).unwrap_or(s));
+    let out_abs = std::path::absolute(&out).unwrap_or(out.clone());
+    let tests: Vec<_> = tests
+        .into_iter()
+        .map(|(i, e)| {
+            (
+                std::path::absolute(&i).unwrap_or(i),
+                e.map(|e| std::path::absolute(&e).unwrap_or(e)),
+            )
+        })
+        .collect();
+    let folder_abs = std::path::absolute(&folder).unwrap_or(folder.clone());
+    let text = write_suite(
+        &out_abs,
+        &folder_abs,
+        stylesheet.as_deref(),
+        &params,
+        &tests,
+    );
+    std::fs::write(&out, text).map_err(|e| format!("Could not write {}: {e}", out.display()))?;
+    let with = tests.iter().filter(|t| t.1.is_some()).count();
+    println!(
+        "Wrote {} with {} tests ({with} with saved output).",
+        out.display(),
+        tests.len()
+    );
+    Ok(true)
 }

@@ -985,7 +985,11 @@ mod tests {
         let top = sheet("xslt1", &[("top.xsl", text)]);
         let a = analyze(&top, None).unwrap();
         assert!(!a.findings.is_empty());
-        assert!(a.findings.iter().all(|f| f.severity == Severity::Note && f.edits.is_empty()));
+        assert!(
+            a.findings
+                .iter()
+                .all(|f| f.severity == Severity::Note && f.edits.is_empty())
+        );
         assert!(a.warnings.iter().any(|w| w.contains("XSLT 1.0")));
     }
 

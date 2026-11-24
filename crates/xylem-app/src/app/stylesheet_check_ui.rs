@@ -57,6 +57,67 @@ pub struct StylesheetCheckState {
     proof: Option<Proof>,
     /// Notes are listed only on request.
     show_notes: bool,
+    /// The New suite form, while it is open.
+    new_suite: Option<NewSuite>,
+}
+
+/// Making a suite from a folder of saved publishing inputs and outputs.
+struct NewSuite {
+    folder: String,
+    input: String,
+    expected: String,
+}
+
+impl Default for NewSuite {
+    fn default() -> Self {
+        NewSuite {
+            folder: String::new(),
+            input: "*.xml".into(),
+            expected: "*.fo".into(),
+        }
+    }
+}
+
+/// The file a new suite is written to.
+const NEW_SUITE_FILE: &str = "xylem-tests.toml";
+
+/// Writes `<folder>/xylem-tests.toml` for the inputs found in `form.folder`;
+/// returns the file and the number of tests (and how many have saved output).
+fn create_suite(form: &NewSuite, stylesheet: &str) -> Result<(PathBuf, usize, usize), String> {
+    use xylem_xslt::suite::{NamePattern, find_tests, write_suite};
+    let folder = PathBuf::from(form.folder.trim());
+    if !folder.is_dir() {
+        return Err("Choose the folder that holds the saved inputs and outputs.".into());
+    }
+    let tests = find_tests(
+        &folder,
+        &NamePattern::parse(form.input.trim())?,
+        &NamePattern::parse(form.expected.trim())?,
+    )?;
+    if tests.is_empty() {
+        return Err(format!(
+            "No files in that folder match {}.",
+            form.input.trim()
+        ));
+    }
+    let path = folder.join(NEW_SUITE_FILE);
+    if path.exists() {
+        return Err(format!(
+            "{} already exists. Open it with Browse…, or remove it first.",
+            path.display()
+        ));
+    }
+    let stylesheet = Some(PathBuf::from(stylesheet.trim())).filter(|p| !p.as_os_str().is_empty());
+    let text = write_suite(
+        &path,
+        &folder,
+        stylesheet.as_deref(),
+        &Default::default(),
+        &tests,
+    );
+    std::fs::write(&path, text).map_err(|e| format!("Could not write {}: {e}", path.display()))?;
+    let with = tests.iter().filter(|t| t.1.is_some()).count();
+    Ok((path, tests.len(), with))
 }
 
 enum Action {
@@ -71,6 +132,10 @@ enum Action {
     /// Apply these findings' fixes (indices into the analysis).
     Apply(Vec<usize>),
     Undo,
+    /// Open or close the New suite form.
+    ToggleNewSuite,
+    BrowseNewSuiteFolder,
+    CreateSuite,
 }
 
 #[derive(Clone, Copy)]
@@ -147,6 +212,40 @@ impl XylemApp {
                 Action::Analyze => self.start_stylesheet_analysis(),
                 Action::Apply(which) => self.apply_fixes(&which),
                 Action::Undo => self.undo_fixes(),
+                Action::ToggleNewSuite => {
+                    let st = &mut self.stylesheet_check;
+                    st.new_suite = match st.new_suite.take() {
+                        Some(_) => None,
+                        None => Some(NewSuite::default()),
+                    };
+                }
+                Action::BrowseNewSuiteFolder => {
+                    if let Some(p) =
+                        crate::script::file_dialog(|| rfd::FileDialog::new().pick_folder())
+                        && let Some(form) = &mut self.stylesheet_check.new_suite
+                    {
+                        form.folder = p.display().to_string();
+                    }
+                }
+                Action::CreateSuite => {
+                    let st = &mut self.stylesheet_check;
+                    let Some(form) = &st.new_suite else { continue };
+                    match create_suite(form, &st.stylesheet) {
+                        Ok((path, n, with)) => {
+                            st.suite = path.display().to_string();
+                            st.new_suite = None;
+                            st.error = None;
+                            self.toast(
+                                format!(
+                                    "Made a suite of {n} test{} ({with} with saved output). Add the stylesheet's parameters to it if it needs any.",
+                                    if n == 1 { "" } else { "s" }
+                                ),
+                                false,
+                            );
+                        }
+                        Err(e) => st.error = Some(e),
+                    }
+                }
                 Action::Stop => {
                     if let Some((_, cancel)) = &self.stylesheet_check.running {
                         cancel.store(true, Ordering::Relaxed);
@@ -561,15 +660,67 @@ impl XylemApp {
         };
         crate::ui::form(ui, "stylesheet-check-form", |f| {
             f.row("Test suite", |ui| {
-                path_row(
-                    ui,
-                    "Test suite",
-                    &mut st.suite,
-                    "xylem-tests.toml",
-                    Field::Suite,
-                    actions,
-                )
+                ui.horizontal(|ui| {
+                    crate::ui::text_field(
+                        ui,
+                        "Test suite",
+                        &mut st.suite,
+                        "xylem-tests.toml",
+                        field_w - 150.0,
+                    );
+                    if crate::ui::button(ui, "Browse…").clicked() {
+                        actions.push(Action::Browse(Field::Suite));
+                    }
+                    if crate::ui::button(ui, "New…")
+                        .on_hover_text(
+                            "Make a suite from a folder of saved publishing inputs and outputs",
+                        )
+                        .clicked()
+                    {
+                        actions.push(Action::ToggleNewSuite);
+                    }
+                });
             });
+            if let Some(form) = &mut st.new_suite {
+                f.row("From folder", |ui| {
+                    ui.horizontal(|ui| {
+                        crate::ui::text_field(
+                            ui,
+                            "Folder",
+                            &mut form.folder,
+                            "Folder of saved inputs and outputs",
+                            field_w - 90.0,
+                        );
+                        if crate::ui::button(ui, "Browse…").clicked() {
+                            actions.push(Action::BrowseNewSuiteFolder);
+                        }
+                    });
+                });
+                f.row("Inputs", |ui| {
+                    ui.horizontal(|ui| {
+                        crate::ui::text_field(ui, "Input files", &mut form.input, "*.xml", 150.0);
+                        crate::ui::muted(ui, "Saved output");
+                        crate::ui::text_field(
+                            ui,
+                            "Saved output files",
+                            &mut form.expected,
+                            "*.fo",
+                            150.0,
+                        );
+                    });
+                });
+                f.row("", |ui| {
+                    ui.horizontal(|ui| {
+                        if crate::ui::primary_button(ui, "Create suite").clicked() {
+                            actions.push(Action::CreateSuite);
+                        }
+                        crate::ui::muted(
+                            ui,
+                            "* stands for the part an input and its output share. Includes subfolders.",
+                        );
+                    });
+                });
+            }
             f.row("Stylesheet", |ui| {
                 path_row(
                     ui,
@@ -1150,5 +1301,38 @@ fn proof_ui(ui: &mut egui::Ui, st: &StylesheetCheckState, busy: bool, actions: &
     }
     for e in &p.errors {
         crate::ui::notice(ui, crate::ui::Tone::Warning, e.clone());
+    }
+}
+
+#[cfg(test)]
+mod new_suite_tests {
+    use super::*;
+
+    #[test]
+    fn a_suite_is_made_once_from_a_folder() {
+        let dir = std::env::temp_dir().join("xylem-app-new-suite");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["one.xml", "one.fo", "two.xml"] {
+            std::fs::write(dir.join(f), "<x/>").unwrap();
+        }
+        let form = NewSuite {
+            folder: dir.display().to_string(),
+            ..Default::default()
+        };
+        let (path, n, with) = create_suite(&form, "").unwrap();
+        assert_eq!((n, with), (2, 1));
+        let suite = Suite::load(&path).unwrap();
+        assert_eq!(
+            suite.tests[0].expected.as_deref(),
+            Some(dir.join("one.fo").as_path())
+        );
+        assert!(suite.stylesheet.is_none());
+        // An existing suite is not replaced.
+        assert!(
+            create_suite(&form, "")
+                .unwrap_err()
+                .contains("already exists")
+        );
     }
 }

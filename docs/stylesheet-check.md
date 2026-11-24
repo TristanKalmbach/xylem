@@ -61,6 +61,23 @@ Pick inputs that exercise the stylesheet well: a large publication, and one
 of each kind the stylesheet handles. Keep suites with real content out of
 public repositories.
 
+### Making a suite from saved publications
+
+A publishing system often keeps each publication's input and the output it
+made side by side. **New…** next to the suite field makes a suite from such a
+folder (and its subfolders): give a pattern for the inputs and one for the
+saved outputs, with `*` standing for the part they share. For inputs named
+`manual-input.xml` with outputs named `manual.fo`, that is `*-input.xml` and
+`*.fo`. Inputs without a matching output are listed without one. The suite
+is written as `xylem-tests.toml` in that folder, using the stylesheet in the
+window; add the stylesheet's parameters to it by hand.
+
+From a terminal:
+
+```
+xylem-xslt-check new-suite <folder> --input "*-input.xml" --expected "*.fo"     --stylesheet stylesheets/book-to-fo.xsl --param mode=final [--out suite.toml]
+```
+
 ## From a terminal
 
 ```
