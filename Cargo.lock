@@ -4279,7 +4279,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xylem-app"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4305,7 +4305,7 @@ dependencies = [
 
 [[package]]
 name = "xylem-customize"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "glob",
  "serde",
@@ -4316,18 +4316,18 @@ dependencies = [
 
 [[package]]
 name = "xylem-dom"
-version = "0.4.1"
+version = "0.5.0"
 
 [[package]]
 name = "xylem-edit"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "xylem-dom",
 ]
 
 [[package]]
 name = "xylem-s1000d"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "xylem-dom",
  "xylem-schema",
@@ -4336,7 +4336,7 @@ dependencies = [
 
 [[package]]
 name = "xylem-schema"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "regex",
  "serde",
@@ -4346,21 +4346,21 @@ dependencies = [
 
 [[package]]
 name = "xylem-style"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "xylem-dom",
 ]
 
 [[package]]
 name = "xylem-xpath"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "xylem-dom",
 ]
 
 [[package]]
 name = "xylem-xslt"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4372,7 +4372,7 @@ dependencies = [
 
 [[package]]
 name = "xylem-xslt-engine"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "regex",
  "xylem-dom",
