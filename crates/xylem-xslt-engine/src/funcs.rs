@@ -372,6 +372,72 @@ impl Engine<'_> {
                     o => Atomic::Dbl(f(o.to_f64())),
                 })])
             }
+            ("round-half-to-even", 1 | 2) => {
+                let v = self.atomize(&arg(0)?);
+                let Some(a) = v.first() else {
+                    return Ok(vec![]);
+                };
+                let p = if n == 2 {
+                    match self.atomize(&arg(1)?).first() {
+                        Some(Atomic::Int(i)) => *i,
+                        Some(o) => o.to_f64() as i64,
+                        None => 0,
+                    }
+                } else {
+                    0
+                };
+                Ok(vec![Item::Atomic(round_half_even(&numeric_of(a), p))])
+            }
+            ("remove", 2) => {
+                let mut v = arg(0)?;
+                let k = self.atomize(&arg(1)?).first().map_or(0.0, Atomic::to_f64);
+                if k >= 1.0 && (k as usize) <= v.len() {
+                    v.remove(k as usize - 1);
+                }
+                Ok(v)
+            }
+            ("insert-before", 3) => {
+                let mut v = arg(0)?;
+                let k = self.atomize(&arg(1)?).first().map_or(0.0, Atomic::to_f64);
+                let at = (k.max(1.0) as usize - 1).min(v.len());
+                let ins = arg(2)?;
+                v.splice(at..at, ins);
+                Ok(v)
+            }
+            ("unordered", 1) => arg(0),
+            ("compare", 2 | 3) | ("codepoint-equal", 2) => {
+                let (x, y) = (self.atomize(&arg(0)?), self.atomize(&arg(1)?));
+                let (Some(x), Some(y)) = (x.first(), y.first()) else {
+                    return Ok(vec![]);
+                };
+                let o = x.to_string().cmp(&y.to_string());
+                if &*name.local == "codepoint-equal" {
+                    bool_(o == std::cmp::Ordering::Equal)
+                } else {
+                    int_(o as i64)
+                }
+            }
+            ("encode-for-uri" | "iri-to-uri" | "escape-html-uri", 1) => {
+                let keep: fn(char) -> bool = match &*name.local {
+                    "encode-for-uri" => |c| c.is_ascii_alphanumeric() || "-_.~".contains(c),
+                    "iri-to-uri" => |c| {
+                        c.is_ascii() && !c.is_ascii_control() && !" <>\"{}|\\^`".contains(c)
+                    },
+                    _ => |c| c.is_ascii() && (' '..='~').contains(&c),
+                };
+                let mut out = String::new();
+                for c in s(0)?.chars() {
+                    if keep(c) {
+                        out.push(c);
+                    } else {
+                        let mut b = [0; 4];
+                        for x in c.encode_utf8(&mut b).bytes() {
+                            out.push_str(&format!("%{x:02X}"));
+                        }
+                    }
+                }
+                str_(out)
+            }
             ("distinct-values", 1) => {
                 let mut out: Vec<Atomic> = Vec::new();
                 for a in self.atomize(&arg(0)?) {
@@ -689,6 +755,55 @@ fn replacement(r: &str, groups: usize) -> R<String> {
         }
     }
     Ok(out)
+}
+
+/// `fn:round-half-to-even` at `p` decimal places (negative: tens, ...).
+fn round_half_even(a: &Atomic, p: i64) -> Atomic {
+    // Rounds an integer count of units to a multiple of `unit`, ties to even.
+    fn to_even(x: i128, unit: i128) -> i128 {
+        let (q, r) = (x.div_euclid(unit), x.rem_euclid(unit));
+        let q = match (2 * r).cmp(&unit) {
+            std::cmp::Ordering::Greater => q + 1,
+            std::cmp::Ordering::Equal if q % 2 != 0 => q + 1,
+            _ => q,
+        };
+        q * unit
+    }
+    match a {
+        Atomic::Int(i) if p < 0 => {
+            let unit = 10i128.checked_pow((-p) as u32).unwrap_or(i128::MAX);
+            Atomic::Int(i64::try_from(to_even(*i as i128, unit)).unwrap_or(0))
+        }
+        Atomic::Int(i) => Atomic::Int(*i),
+        Atomic::Dec(d) => {
+            let digits = 18 - p;
+            if digits <= 0 {
+                return Atomic::Dec(*d);
+            }
+            match 10i128.checked_pow(digits as u32) {
+                Some(unit) => Atomic::Dec(Decimal(to_even(d.0, unit))),
+                None => Atomic::Dec(Decimal(0)),
+            }
+        }
+        o => {
+            let x = o.to_f64();
+            if !x.is_finite() || x == 0.0 {
+                return Atomic::Dbl(x);
+            }
+            // Round the decimal expansion, not the binary value.
+            let Some(d) = Decimal::from_f64(x) else {
+                let f = 10f64.powi(p as i32);
+                return Atomic::Dbl((x * f).round_ties_even() / f);
+            };
+            match round_half_even(&Atomic::Dec(d), p) {
+                Atomic::Dec(r) => {
+                    let v = r.to_f64();
+                    Atomic::Dbl(if v == 0.0 { 0.0f64.copysign(x) } else { v })
+                }
+                other => other,
+            }
+        }
+    }
 }
 
 fn numeric_of(a: &Atomic) -> Atomic {
