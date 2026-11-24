@@ -19,6 +19,7 @@ use xylem_edit::{EditError, Pos, Rules, Selection};
 
 mod export_ui;
 mod find_files_ui;
+mod preview_ui;
 mod stylesheet_check_ui;
 
 /// Commands reachable from menus, the toolbar, shortcuts and context menus.
@@ -43,6 +44,8 @@ pub enum Cmd {
     FindInFiles,
     ExportHtml,
     PrintPreview,
+    /// File > Publication preview: the publishing stylesheets on the document.
+    PublicationPreview,
     View(View),
     ZoomIn,
     ZoomOut,
@@ -145,6 +148,7 @@ impl Cmd {
             "FindInFiles" => Cmd::FindInFiles,
             "ExportHtml" => Cmd::ExportHtml,
             "PrintPreview" => Cmd::PrintPreview,
+            "PublicationPreview" => Cmd::PublicationPreview,
             "ZoomIn" => Cmd::ZoomIn,
             "ZoomOut" => Cmd::ZoomOut,
             "ZoomReset" => Cmd::ZoomReset,
@@ -300,6 +304,7 @@ pub struct XylemApp {
     find: FindState,
     find_files: find_files_ui::FindFilesState,
     stylesheet_check: stylesheet_check_ui::StylesheetCheckState,
+    preview: preview_ui::PreviewState,
     dialogs: Dialogs,
     toasts: Vec<(String, f64, bool)>,
     context_menu: Option<ContextMenu>,
@@ -392,6 +397,7 @@ impl XylemApp {
             find: FindState::default(),
             find_files: Default::default(),
             stylesheet_check: Default::default(),
+            preview: Default::default(),
             dialogs: Dialogs::default(),
             toasts: Vec::new(),
             context_menu: None,
@@ -880,6 +886,7 @@ impl XylemApp {
             Cmd::FindInFiles => self.open_find_in_files(),
             Cmd::ExportHtml => self.export_html(),
             Cmd::PrintPreview => self.print_preview(),
+            Cmd::PublicationPreview => self.publication_preview(),
             Cmd::View(v) => self.set_view(v),
             Cmd::ZoomIn => self.settings.zoom = (self.settings.zoom + 0.1).min(3.0),
             Cmd::ZoomOut => self.settings.zoom = (self.settings.zoom - 0.1).max(0.5),
@@ -1814,6 +1821,12 @@ impl XylemApp {
             if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F7)) {
                 cmds.push(Cmd::Validate);
             }
+            if i.consume_shortcut(&KeyboardShortcut::new(
+                Modifiers::COMMAND | Modifiers::SHIFT,
+                Key::F5,
+            )) {
+                cmds.push(Cmd::PublicationPreview);
+            }
             if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F5)) {
                 cmds.push(Cmd::View(View::TagsOn));
             }
@@ -1947,6 +1960,15 @@ impl XylemApp {
                 }
                 if item(ui, has_doc, Some(icon::PRINTER), "Print preview", None) {
                     cmds.push(Cmd::PrintPreview);
+                }
+                if item(
+                    ui,
+                    has_doc,
+                    Some(icon::BOOK_OPEN),
+                    "Publication preview",
+                    Some("Ctrl+Shift+F5"),
+                ) {
+                    cmds.push(Cmd::PublicationPreview);
                 }
                 ui.separator();
                 if item(ui, true, None, "Import XMAX customization…", None) {
@@ -4069,6 +4091,7 @@ impl XylemApp {
         self.find_window(ctx);
         self.find_files_window(ctx);
         self.stylesheet_check_window(ctx);
+        self.poll_preview(ctx);
         let p = palette(ctx);
         if self.dialogs.about {
             let (x, close) = Dialog::new("About Xylem").width(380.0).show(ctx, |ui| {
@@ -5143,6 +5166,7 @@ impl XylemApp {
                     ("Ctrl+F", "Find and replace"),
                     ("F3 / Shift+F3", "Find next, find previous"),
                     ("Ctrl+Shift+F", "Find in files"),
+                    ("Ctrl+Shift+F5", "Publication preview"),
                 ],
             ),
             (

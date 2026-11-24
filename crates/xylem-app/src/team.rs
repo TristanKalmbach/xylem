@@ -54,12 +54,54 @@ pub struct TeamConfig {
     /// Program that runs stylesheets for Check stylesheet output
     /// (`SaxonDotnetHost.exe`, see `tools/saxon-dotnet`).
     pub xslt_host: Option<PathBuf>,
+    /// How to preview a publication: which stylesheets to run on which
+    /// documents (File > Publication preview).
+    pub preview: Vec<PreviewConfig>,
     /// Where the configuration was read from (filled in by [`load`]).
     #[serde(skip)]
     pub source: Option<PathBuf>,
     /// Problems worth showing the user (unknown keys, unreadable includes).
     #[serde(skip)]
     pub warnings: Vec<String>,
+}
+
+/// One way to preview publications:
+///
+/// ```toml
+/// [[preview]]
+/// name = "Manual"                          # shown when several match
+/// root = "book"                            # document element it applies to
+/// stylesheet = "stylesheets/book-to-fo.xsl"
+/// html = "stylesheets/fo-to-html.xsl"      # XSL-FO to HTML
+/// params = { output = "html" }
+/// ```
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default)]
+pub struct PreviewConfig {
+    pub name: Option<String>,
+    /// Document element name it applies to; any document when missing.
+    pub root: Option<String>,
+    pub stylesheet: PathBuf,
+    /// A stylesheet turning the first one's output (XSL-FO) into HTML. When
+    /// missing, the first stylesheet's output is opened as it is.
+    pub html: Option<PathBuf>,
+    pub params: std::collections::BTreeMap<String, toml::Value>,
+}
+
+impl PreviewConfig {
+    /// Parameters as the stylesheet receives them.
+    pub fn param_strings(&self) -> std::collections::BTreeMap<String, String> {
+        self.params
+            .iter()
+            .map(|(k, v)| {
+                let s = match v {
+                    toml::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                (k.clone(), s)
+            })
+            .collect()
+    }
 }
 
 const KNOWN_KEYS: &[&str] = &[
@@ -72,6 +114,7 @@ const KNOWN_KEYS: &[&str] = &[
     "dictionary_lang",
     "update_source",
     "xslt_host",
+    "preview",
 ];
 const MAX_INCLUDES: usize = 4;
 
@@ -169,6 +212,12 @@ fn parse_one(path: &Path) -> Result<TeamConfig, String> {
     .flatten()
     {
         resolve(p);
+    }
+    for p in &mut cfg.preview {
+        resolve(&mut p.stylesheet);
+        if let Some(h) = &mut p.html {
+            resolve(h);
+        }
     }
     cfg.source = Some(path.to_path_buf());
     Ok(cfg)

@@ -131,9 +131,38 @@ xylem-xslt-check suite.toml --analyze --fix --scope <IA folder> [--repeat 5]
 `--repeat 5` times each test five times and reports the median, for
 comparing speed before and after.
 
+## Publication preview for authors
+
+**File › Publication preview** (Ctrl+Shift+F5) runs the publishing
+stylesheets on the document as it is in the editor, unsaved edits included,
+and opens the result in the browser. With a stylesheet that turns XSL-FO into
+HTML (such as a publishing system's own FO-to-HTML stylesheet) the preview is
+a readable page with the real content, numbering, boilerplate and
+translations. It is close, not exact: it is not split into pages like the
+PDF, and images load only where the browser can reach them.
+
+Previews are set up for everyone in the team configuration, one entry per
+kind of document, matched by the document's root element:
+
+```toml
+xslt_host = "tools/SaxonDotnetHost.exe"
+
+[[preview]]
+name = "Manual"
+root = "book"
+stylesheet = "stylesheets/book-to-fo.xsl"
+html = "stylesheets/fo-to-html.xsl"
+params = { output = "html" }
+```
+
+Without `html`, the stylesheet's own output opens in Xylem.
+
 ## Not yet
 
-- A preview of the result for authors.
-- Fixes for numbering (`xsl:number level="any"` run many times for the same
-  element) and for searches through translation and configuration lists:
-  both need a judgement call today, and are reported as notes.
+- Previews of single modules: the stylesheets expect a whole publication
+  (as the publishing system assembles it), so today the preview works on
+  publication documents.
+- An exact, paginated preview (a PDF from the publishing server).
+- Automatic fixes for numbering and for searches through lists held in
+  variables: both need a judgement call, so Analyze reports them as notes.
+  `xylem-xslt-check --prove` checks such a change made by hand.

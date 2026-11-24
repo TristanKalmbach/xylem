@@ -35,6 +35,12 @@ dictionary_dir = "dictionaries"
 dictionary_lang = "en_US"
 update_source = "updates"
 xslt_host = "tools/SaxonDotnetHost.exe"   # for Tools › Check stylesheet output
+
+[[preview]]                              # File › Publication preview
+root = "book"
+stylesheet = "stylesheets/book-to-fo.xsl"
+html = "stylesheets/fo-to-html.xsl"
+params = { output = "html" }
 ```
 
 Don't copy the shared file elsewhere: its relative paths would then point at
