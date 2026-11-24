@@ -6,3 +6,6 @@
 
 # Lock files Xylem leaves next to open documents
 .~lock.*#
+
+# Built helper programs and their copied assemblies
+tools/*/bin/
