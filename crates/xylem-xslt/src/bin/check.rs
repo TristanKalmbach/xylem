@@ -5,6 +5,7 @@
 //! xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>]
 //!                  [--against saved | committed[:<rev>] | <other.xsl>]
 //!                  [--host <SaxonDotnetHost.exe>] [--allow-scripts] [--work <folder>]
+//!                  [--report <file.html>]
 //! xylem-xslt-check <suite.toml> --profile [--top <n>] [--stylesheet ...]
 //! xylem-xslt-check <suite.toml> --analyze [--fix] [--scope <folder>]
 //!                  [--against ...] [--stylesheet ...] [--repeat <n>]
@@ -34,6 +35,9 @@
 //! `--repeat <n>` runs each input n times when checking and reports the median
 //! time, for comparing speed before and after.
 //!
+//! `--report <file.html>` also writes the check's results as a page: every
+//! test, and each difference with the text around it.
+//!
 //! `--profile` times every template and function on the suite instead of
 //! comparing output, and lists the `--top` (default 25) by own time.
 //!
@@ -53,7 +57,7 @@ use xylem_xslt::check::CheckEnv;
 use xylem_xslt::{Baseline, Host, Outcome, Suite, check, profile, proof};
 
 const USAGE: &str = "Usage: xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>] \
-[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>] [--allow-scripts] [--work <folder>] \
+[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>] [--allow-scripts] [--work <folder>] [--report <file.html>] \
 [--profile [--top <n>]] [--analyze [--fix] [--scope <folder>]] [--prove] [--repeat <n>]";
 
 fn main() -> ExitCode {
@@ -78,6 +82,7 @@ fn run() -> Result<bool, String> {
     let mut host = std::env::var_os("XYLEM_XSLT_HOST").map(PathBuf::from);
     let mut allow_scripts = false;
     let mut work = None;
+    let mut report_file: Option<PathBuf> = None;
     let mut profiling = false;
     let mut analyzing = false;
     let mut fixing = false;
@@ -93,6 +98,7 @@ fn run() -> Result<bool, String> {
             "--host" => host = Some(PathBuf::from(value("--host")?)),
             "--allow-scripts" => allow_scripts = true,
             "--work" => work = Some(PathBuf::from(value("--work")?)),
+            "--report" => report_file = Some(PathBuf::from(value("--report")?)),
             "--profile" => profiling = true,
             "--analyze" => analyzing = true,
             "--fix" => fixing = true,
@@ -211,6 +217,11 @@ fn run() -> Result<bool, String> {
     );
     if let Some(e) = &report.error {
         return Err(e.clone());
+    }
+    if let Some(file) = &report_file {
+        std::fs::write(file, xylem_xslt::report::html(&report))
+            .map_err(|e| format!("Could not write {}: {e}", file.display()))?;
+        println!("Report written to {}\n", file.display());
     }
     if let Some(c) = &report.baseline_commit {
         println!("(commit {})\n", &c[..c.len().min(12)]);

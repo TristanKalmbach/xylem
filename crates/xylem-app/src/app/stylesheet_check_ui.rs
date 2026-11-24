@@ -132,6 +132,8 @@ enum Action {
     /// Apply these findings' fixes (indices into the analysis).
     Apply(Vec<usize>),
     Undo,
+    /// Write the check's results as a page and open it in the browser.
+    OpenReport,
     /// Open or close the New suite form.
     ToggleNewSuite,
     BrowseNewSuiteFolder,
@@ -212,6 +214,7 @@ impl XylemApp {
                 Action::Analyze => self.start_stylesheet_analysis(),
                 Action::Apply(which) => self.apply_fixes(&which),
                 Action::Undo => self.undo_fixes(),
+                Action::OpenReport => self.open_check_report(),
                 Action::ToggleNewSuite => {
                     let st = &mut self.stylesheet_check;
                     st.new_suite = match st.new_suite.take() {
@@ -545,6 +548,33 @@ impl XylemApp {
     /// Saxon reports the line where the element's start tag ends, so the
     /// template is the last `xsl:template` or `xsl:function` starting on or
     /// before that line.
+    fn open_check_report(&mut self) {
+        let Some(report) = &self.stylesheet_check.report else {
+            return;
+        };
+        let path = work_dir().join("report.html");
+        let written = std::fs::create_dir_all(work_dir())
+            .and_then(|_| std::fs::write(&path, xylem_xslt::report::html(report)));
+        if let Err(e) = written {
+            return self.toast(format!("Could not write the report: {e}"), true);
+        }
+        let headless = self.script.is_some()
+            || self.screenshot.is_some()
+            || std::env::var_os("XYLEM_NO_BROWSER").is_some();
+        if headless {
+            return self.toast(format!("Report written to {}", path.display()), false);
+        }
+        if let Err(e) = crate::html_export::open_in_browser(&path) {
+            self.toast(
+                format!(
+                    "Could not open a browser ({e}); the report is {}",
+                    path.display()
+                ),
+                true,
+            );
+        }
+    }
+
     pub(super) fn open_stylesheet_at(&mut self, path: &Path, line: u32) {
         let key = crate::find_files::path_key(path);
         let find = |docs: &[crate::doc::DocState]| {
@@ -867,7 +897,17 @@ impl XylemApp {
             Some(c) => format!("{} ({})", report.baseline.describe(), &c[..c.len().min(10)]),
             None => report.baseline.describe(),
         };
-        crate::ui::muted(ui, format!("Compared with {against}"));
+        ui.horizontal(|ui| {
+            crate::ui::muted(ui, format!("Compared with {against}"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if crate::ui::button(ui, "Open report")
+                    .on_hover_text("Every test, and each difference with the text around it, as a page in your browser")
+                    .clicked()
+                {
+                    actions.push(Action::OpenReport);
+                }
+            });
+        });
         ui.add_space(4.0);
         let pal = crate::ui::palette(ui.ctx());
         let mono = egui::TextStyle::Monospace.resolve(ui.style());

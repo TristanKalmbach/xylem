@@ -23,6 +23,12 @@ order mark, and the document number inside IDs made by `generate-id()`
 difference is listed with the element it is in, the nearest `id` around it,
 and the text before and after.
 
+**Open report** writes the results as a page and opens it in the browser:
+every test with its result and time, and for each test that changed, every
+place it changed, with the unchanged text around it and what was removed and
+added highlighted. It is a single file, so it can be saved or sent with the
+change. From a terminal: `xylem-xslt-check suite.toml --report check.html`.
+
 ## The engine
 
 Stylesheets run in a separate program that behaves like the publishing

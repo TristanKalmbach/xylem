@@ -46,8 +46,11 @@ pub struct Difference {
     pub path: String,
     /// The `id` of the nearest enclosing element that has one.
     pub near_id: Option<String>,
-    /// Character offset in the normalised baseline.
+    /// Byte offset in the normalised baseline.
     pub offset: usize,
+    /// Byte length of the changed text in the normalised baseline (which
+    /// `baseline` may shorten).
+    pub baseline_len: usize,
     pub baseline: String,
     pub candidate: String,
 }
@@ -283,6 +286,7 @@ pub fn compare(baseline: &[u8], candidate: &[u8]) -> Comparison {
             path,
             near_id,
             offset,
+            baseline_len: ta[r.0..r.1].iter().map(|t| t.len()).sum(),
             baseline: excerpt(&ta[r.0..r.1]),
             candidate: excerpt(&tb[r.2..r.3]),
         })

@@ -17,6 +17,7 @@ pub mod host;
 pub mod navigate;
 pub mod profile;
 pub mod proof;
+pub mod report;
 pub mod stylesheet;
 pub mod suite;
 pub mod xpath;
