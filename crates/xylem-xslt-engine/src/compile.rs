@@ -84,6 +84,14 @@ pub enum Instr {
     Variable(Param),
     Choose(Vec<(Expr, Vec<Instr>)>, Vec<Instr>),
     If(Expr, Vec<Instr>),
+    /// `xsl:analyze-string`.
+    AnalyzeString {
+        select: Expr,
+        regex: Avt,
+        flags: Option<Avt>,
+        matching: Vec<Instr>,
+        non_matching: Vec<Instr>,
+    },
     ForEach {
         select: Expr,
         sorts: Vec<Sort>,
@@ -885,6 +893,24 @@ impl Compiler {
                 Instr::Choose(whens, other)
             }
             "if" => Instr::If(e.expr(e.req("test")?)?, self.body(e)?),
+            "analyze-string" => {
+                let mut matching = Vec::new();
+                let mut non_matching = Vec::new();
+                for c in e.child_els() {
+                    if c.is_xsl("matching-substring") {
+                        matching = self.body(c)?;
+                    } else if c.is_xsl("non-matching-substring") {
+                        non_matching = self.body(c)?;
+                    }
+                }
+                Instr::AnalyzeString {
+                    select: e.expr(e.req("select")?)?,
+                    regex: e.avt(e.req("regex")?)?,
+                    flags: e.attr("flags").map(|s| e.avt(s)).transpose()?,
+                    matching,
+                    non_matching,
+                }
+            }
             "for-each" => Instr::ForEach {
                 select: e.expr(e.req("select")?)?,
                 sorts: self.sorts(e)?,

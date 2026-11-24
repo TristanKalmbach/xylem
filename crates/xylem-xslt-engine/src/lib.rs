@@ -23,6 +23,7 @@ mod serialize;
 mod tree;
 mod value;
 pub mod xpath;
+pub(crate) mod xsd_regex;
 
 use std::collections::HashMap;
 use std::path::Path;

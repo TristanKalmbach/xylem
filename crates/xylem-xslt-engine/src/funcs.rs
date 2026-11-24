@@ -6,6 +6,7 @@ use crate::exec::{Dyn, Engine};
 use crate::tree::{Kind, NodeRef, QName};
 use crate::value::{Atomic, Decimal, Item, Seq};
 use crate::xpath::{Expr, FN_NS, XS_NS};
+use crate::xsd_regex::XRegex;
 
 /// `round()` semantics: halves round towards positive infinity.
 pub fn round_half_up(x: f64) -> f64 {
@@ -91,6 +92,37 @@ impl Engine<'_> {
                 }
                 str_(out)
             }
+            ("regex-group", 1) => {
+                let k = match self.atomize(&arg(0)?).first() {
+                    Some(Atomic::Int(i)) => *i,
+                    Some(o) => o.to_string().trim().parse().unwrap_or(-1),
+                    None => -1,
+                };
+                let g = usize::try_from(k).ok().and_then(|k| d.groups.get(k));
+                str_(g.cloned().unwrap_or_default())
+            }
+            ("string-to-codepoints", 1) => Ok(s(0)?
+                .chars()
+                .map(|c| Item::Atomic(Atomic::Int(c as i64)))
+                .collect()),
+            ("codepoints-to-string", 1) => {
+                let mut out = String::new();
+                for a in self.atomize(&arg(0)?) {
+                    let cp = match a {
+                        Atomic::Int(i) => i,
+                        o => o.to_string().trim().parse().map_err(|_| {
+                            format!("XPTY0004: codepoints-to-string needs integers, got '{}'", o.to_string())
+                        })?,
+                    };
+                    let c = u32::try_from(cp)
+                        .ok()
+                        .and_then(char::from_u32)
+                        .filter(|&c| crate::xsd_regex::is_xml_char(c))
+                        .ok_or_else(|| format!("FOCH0001: {cp} is not a valid XML character"))?;
+                    out.push(c);
+                }
+                str_(out)
+            }
             ("string-length", 0 | 1) => int_(s_or_ctx(0)?.chars().count() as i64),
             ("normalize-space", 0 | 1) => str_(
                 // XML whitespace only: a no-break space is kept.
@@ -165,11 +197,12 @@ impl Engine<'_> {
             }
             ("matches", 2 | 3) => {
                 let re = regex(&s(1)?, if n == 3 { s(2)? } else { String::new() })?;
-                bool_(re.is_match(&s(0)?))
+                bool_(re.is_match(&s(0)?)?)
             }
             ("replace", 3 | 4) => {
                 let re = regex(&s(1)?, if n == 4 { s(3)? } else { String::new() })?;
-                let rep = replacement(&s(2)?)?;
+                no_empty_match(&re)?;
+                let rep = replacement(&s(2)?, re.groups())?;
                 str_(re.replace_all(&s(0)?, rep.as_str()).into_owned())
             }
             ("tokenize", 2 | 3) => {
@@ -178,8 +211,10 @@ impl Engine<'_> {
                     return Ok(vec![]);
                 }
                 let re = regex(&s(1)?, if n == 3 { s(2)? } else { String::new() })?;
+                no_empty_match(&re)?;
                 Ok(re
-                    .split(&src)
+                    .split(&src)?
+                    .into_iter()
                     .map(|p| Item::Atomic(Atomic::str(p)))
                     .collect())
             }
@@ -505,7 +540,10 @@ impl Engine<'_> {
 
 /// Converts an XPath replacement string (`$1`, `\$`, `\\`) to the `regex`
 /// crate's syntax (`${1}`, `$$`, `\`).
-fn replacement(r: &str) -> R<String> {
+///
+/// A reference `$NN` uses as many digits as name an existing group; a
+/// reference to a group that does not exist is replaced by nothing.
+fn replacement(r: &str, groups: usize) -> R<String> {
     let c: Vec<char> = r.chars().collect();
     let mut out = String::new();
     let mut i = 0;
@@ -529,10 +567,22 @@ fn replacement(r: &str) -> R<String> {
                 if j == st {
                     return Err(bad());
                 }
-                out.push_str("${");
-                out.extend(&c[st..j]);
-                out.push('}');
-                i = j;
+                // The first digit always counts; further ones only while
+                // they still name an existing group.
+                let mut n = c[st].to_digit(10).unwrap_or(0) as usize;
+                let mut k = st + 1;
+                while k < j {
+                    let longer = n * 10 + c[k].to_digit(10).unwrap_or(0) as usize;
+                    if longer > groups {
+                        break;
+                    }
+                    n = longer;
+                    k += 1;
+                }
+                if n <= groups {
+                    out.push_str(&format!("${{{n}}}"));
+                }
+                i = k;
             }
             ch => {
                 out.push(ch);
@@ -550,29 +600,15 @@ fn numeric_of(a: &Atomic) -> Atomic {
     }
 }
 
-/// Builds a regex from an XPath pattern and flags (s, m, i, x).
-///
-/// XPath regexes are XML Schema regexes plus anchors and back-references;
-/// the common subset maps directly onto the `regex` crate's syntax.
-fn regex(pattern: &str, flags: String) -> R<regex::Regex> {
-    let mut b = regex::RegexBuilder::new(pattern);
-    for f in flags.chars() {
-        match f {
-            's' => {
-                b.dot_matches_new_line(true);
-            }
-            'm' => {
-                b.multi_line(true);
-            }
-            'i' => {
-                b.case_insensitive(true);
-            }
-            'x' => {
-                b.ignore_whitespace(true);
-            }
-            _ => return Err(format!("unknown regex flag '{f}'")),
-        }
+/// Builds a regex from an XPath pattern and flags (s, m, i, x, q).
+fn regex(pattern: &str, flags: String) -> R<XRegex> {
+    XRegex::new(pattern, &flags)
+}
+
+/// `fn:replace` and `fn:tokenize` reject patterns that match "".
+fn no_empty_match(re: &XRegex) -> R<()> {
+    if re.is_match("")? {
+        return Err("FORX0003: the regular expression matches a zero-length string".into());
     }
-    b.build()
-        .map_err(|e| format!("invalid regular expression '{pattern}': {e}"))
+    Ok(())
 }

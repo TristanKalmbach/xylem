@@ -13,6 +13,7 @@ publish = false
 [dependencies]
 xylem-dom = { workspace = true }
 regex = "1"
+fancy-regex = "0.20"
 
 [dev-dependencies]
 xylem-xslt = { workspace = true }

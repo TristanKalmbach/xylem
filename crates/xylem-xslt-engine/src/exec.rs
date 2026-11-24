@@ -32,6 +32,9 @@ pub struct Dyn {
     pub current: Option<Item>,
     pub mode: Option<QName>,
     pub tunnel: Tunnel,
+    /// `regex-group()`: the captured groups of the current
+    /// `xsl:matching-substring` (group 0 is the whole match).
+    pub groups: Rc<Vec<String>>,
 }
 
 impl Dyn {
@@ -174,6 +177,7 @@ impl<'s> Engine<'s> {
             current: Some(item),
             mode: None,
             tunnel: Rc::default(),
+            groups: Rc::default(),
         }
     }
 
@@ -770,6 +774,52 @@ impl<'s> Engine<'s> {
             Instr::If(test, body) => {
                 if self.ebv(&self.eval(test, d)?)? {
                     self.body(body, d, out)?;
+                }
+            }
+            Instr::AnalyzeString {
+                select,
+                regex,
+                flags,
+                matching,
+                non_matching,
+            } => {
+                let input = self.joined(&self.eval(select, d)?, " ");
+                let flags = match flags {
+                    Some(f) => self.avt(f, d)?,
+                    None => String::new(),
+                };
+                let re = crate::xsd_regex::XRegex::new(&self.avt(regex, d)?, &flags)?;
+                if re.is_match("")? {
+                    return Err("XTDE1150: the regex of xsl:analyze-string matches a zero-length string".into());
+                }
+                // Segments in order: (text, groups for a match / None).
+                let mut segs: Vec<(String, Option<Vec<String>>)> = Vec::new();
+                let mut at = 0;
+                for (st, en, groups) in re.captures(&input)? {
+                    if st > at {
+                        segs.push((input[at..st].to_string(), None));
+                    }
+                    segs.push((input[st..en].to_string(), Some(groups)));
+                    at = en;
+                }
+                if at < input.len() {
+                    segs.push((input[at..].to_string(), None));
+                }
+                let size = segs.len();
+                for (k, (text, groups)) in segs.into_iter().enumerate() {
+                    let it = Item::Atomic(Atomic::str(text));
+                    let mut nd = d.focus(it.clone(), k + 1, size);
+                    nd.current = Some(it);
+                    match groups {
+                        Some(g) => {
+                            nd.groups = Rc::new(g);
+                            self.body(matching, &nd, out)?;
+                        }
+                        None => {
+                            nd.groups = Rc::default();
+                            self.body(non_matching, &nd, out)?;
+                        }
+                    }
                 }
             }
             Instr::ForEach {

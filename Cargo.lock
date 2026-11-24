@@ -1143,6 +1143,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy-regex"
+version = "0.20.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a2e16b9a584b602f1e0e5e22c30ca0906786088c27500653e432d086def8b53"
+dependencies = [
+ "bit-set",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4392,6 +4403,7 @@ dependencies = [
 name = "xylem-xslt-engine"
 version = "0.5.0"
 dependencies = [
+ "fancy-regex",
  "regex",
  "xylem-dom",
  "xylem-xslt",

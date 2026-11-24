@@ -63,12 +63,42 @@ The largest groups of failures point at what to build next:
 
 | Area | Failures | Notes |
 |---|---:|---|
-| XML Schema regular expressions | ~815 (XSLT) | Patterns go to the `regex` crate unchanged; XSD syntax (`\i`, `\c`, class subtraction, `$` handling) is not translated |
 | Casts and `castable` | ~1,400 (QT3) | Only string, boolean, numeric types; no dates, durations, QNames, `anyURI`, derived integer types |
 | `deep-equal`, `compare`, collations | ~200 | Not implemented |
 | Numeric functions (`round-half-to-even`, `abs`, `min`, `max`, `sum`, `avg` on mixed types) | ~500 | Type promotion and float/decimal edge cases |
 | Dates, times, durations, `format-date` | ~250 | Not implemented |
-| `xsl:for-each-group`, `xsl:analyze-string`, `xsl:next-match` | ~100 | Not implemented |
+| `xsl:for-each-group`, `xsl:next-match` | ~100 | Not implemented |
 | `format-number`, `use-when`, `base-uri` | ~160 | Partial or missing |
 
 Re-run the commands above after engine changes and update this table.
+
+## After XML Schema regex translation (2026-11-24)
+
+`src/xsd_regex.rs` parses XPath / XML Schema regex syntax and translates
+it for the `regex` crate: `\i \I \c \C`, `\s \d \w` with schema meanings,
+class subtraction, `\p{Is...}` block names, `.` excluding CR/LF, string
+anchors, the `s m i x q` flags, and `FORX0002` for invalid patterns.
+Patterns with back-references run on `fancy-regex`. `xsl:analyze-string`,
+`regex-group`, `string-to-codepoints` and `codepoints-to-string` were
+added, and the XSLT runner now takes an assertion's effective boolean
+value (it previously required an `xs:boolean`, failing ~410 regex tests
+that had passed).
+
+| Suite | Run | Passed | Rate |
+|---|---:|---:|---:|
+| QT3, XPath 2.0 | 14,956 | 8,862 | 59.3% |
+| XSLT 1.0 and 2.0 | 4,682 | 3,427 | 73.2% |
+
+| Set | Before | After |
+|---|---:|---:|
+| `regex-syntax-xslt20` | 292 / 987 | 946 / 987 |
+| `regex` | 35 / 49 | 48 / 49 |
+| `fn-matches` | | 145 / 150 |
+| `fn-replace` | | 79 / 81 |
+| `fn-tokenize` | | 43 / 49 |
+| `regex-classes` | 0 / 120 | 0 / 120 (blocked on `xsl:result-document`) |
+
+Remaining `regex-syntax-xslt20` failures: 38 tests expect `(?:...)` to be
+rejected (XPath 2.0); the engine accepts it as XPath 3.0 does. Three
+depend on the Unicode version of `\w`, `\d`, `\c`.
+
