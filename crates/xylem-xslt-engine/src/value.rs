@@ -106,6 +106,15 @@ pub enum Atomic {
     Int(i64),
     Dec(Decimal),
     Dbl(f64),
+    /// A value of a derived built-in type (or `xs:anyURI`, `xs:float`):
+    /// the type's local name and the value of its primitive base.
+    Sub(&'static str, Rc<Atomic>),
+    /// A date/time value (`xs:dateTime`, `xs:date`, ..., `xs:gDay`).
+    Time(Rc<crate::datetime::DateTime>),
+    /// A duration (`xs:duration` and its two subtypes).
+    Dur(Rc<crate::datetime::Duration>),
+    /// An `xs:QName`: namespace URI, prefix, local name.
+    QName(Rc<(Rc<str>, Rc<str>, Rc<str>)>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -120,9 +129,23 @@ impl Atomic {
     pub fn str(s: impl Into<Rc<str>>) -> Atomic {
         Atomic::Str(s.into())
     }
+    /// The value with any derived-type annotation removed: what the
+    /// primitive operations (arithmetic, comparison) work on.
+    pub fn prim(&self) -> Atomic {
+        match self {
+            Atomic::Sub(_, v) => v.prim(),
+            o => o.clone(),
+        }
+    }
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         match self {
+            Atomic::Sub("float", v) => format_float(v.to_f64()),
+            Atomic::Sub(_, v) => v.to_string(),
+            Atomic::Time(t) => t.to_canonical(),
+            Atomic::Dur(d) => d.to_canonical(),
+            Atomic::QName(q) if q.1.is_empty() => q.2.to_string(),
+            Atomic::QName(q) => format!("{}:{}", q.1, q.2),
             Atomic::Str(s) | Atomic::Untyped(s) => s.to_string(),
             Atomic::Bool(b) => b.to_string(),
             Atomic::Int(i) => i.to_string(),
@@ -133,10 +156,16 @@ impl Atomic {
         }
     }
     pub fn is_numeric(&self) -> bool {
-        matches!(self, Atomic::Int(_) | Atomic::Dec(_) | Atomic::Dbl(_))
+        match self {
+            Atomic::Sub(_, v) => v.is_numeric(),
+            o => matches!(o, Atomic::Int(_) | Atomic::Dec(_) | Atomic::Dbl(_)),
+        }
     }
     pub fn is_stringlike(&self) -> bool {
-        matches!(self, Atomic::Str(_) | Atomic::Untyped(_))
+        match self {
+            Atomic::Sub(_, v) => v.is_stringlike(),
+            o => matches!(o, Atomic::Str(_) | Atomic::Untyped(_)),
+        }
     }
     pub fn to_f64(&self) -> f64 {
         match self {
@@ -151,6 +180,8 @@ impl Atomic {
                 }
             }
             Atomic::Str(s) | Atomic::Untyped(s) => parse_double(s),
+            Atomic::Sub(_, v) => v.to_f64(),
+            Atomic::Time(_) | Atomic::Dur(_) | Atomic::QName(_) => f64::NAN,
         }
     }
     pub fn type_name(&self) -> &'static str {
@@ -161,8 +192,53 @@ impl Atomic {
             Atomic::Int(_) => "xs:integer",
             Atomic::Dec(_) => "xs:decimal",
             Atomic::Dbl(_) => "xs:double",
+            Atomic::Sub(t, _) => sub_type_name(t),
+            Atomic::Time(t) => match t.kind {
+                crate::datetime::DtKind::DateTime => "xs:dateTime",
+                crate::datetime::DtKind::Date => "xs:date",
+                crate::datetime::DtKind::Time => "xs:time",
+                crate::datetime::DtKind::GYearMonth => "xs:gYearMonth",
+                crate::datetime::DtKind::GYear => "xs:gYear",
+                crate::datetime::DtKind::GMonthDay => "xs:gMonthDay",
+                crate::datetime::DtKind::GDay => "xs:gDay",
+                crate::datetime::DtKind::GMonth => "xs:gMonth",
+            },
+            Atomic::Dur(d) => match d.kind {
+                crate::datetime::DurKind::Duration => "xs:duration",
+                crate::datetime::DurKind::YearMonth => "xs:yearMonthDuration",
+                crate::datetime::DurKind::DayTime => "xs:dayTimeDuration",
+            },
+            Atomic::QName(_) => "xs:QName",
         }
     }
+}
+
+/// `xs:` names of the derived types, for [`Atomic::type_name`].
+fn sub_type_name(t: &str) -> &'static str {
+    const NAMES: &[&str] = &[
+        "xs:nonPositiveInteger", "xs:negativeInteger", "xs:long", "xs:int", "xs:short",
+        "xs:byte", "xs:nonNegativeInteger", "xs:unsignedLong", "xs:unsignedInt",
+        "xs:unsignedShort", "xs:unsignedByte", "xs:positiveInteger", "xs:normalizedString",
+        "xs:token", "xs:language", "xs:NMTOKEN", "xs:Name", "xs:NCName", "xs:ID", "xs:IDREF",
+        "xs:ENTITY", "xs:anyURI", "xs:float",
+    ];
+    NAMES.iter().copied().find(|n| &n[3..] == t).unwrap_or("xs:anyAtomicType")
+}
+
+/// Canonical `xs:float` → string: like doubles, with float precision.
+pub fn format_float(d: f64) -> String {
+    let f = d as f32;
+    if !f.is_finite() || f == 0.0 {
+        return format_double(d);
+    }
+    let a = f.abs();
+    if (1e-6..1e6).contains(&a) {
+        return format!("{f}");
+    }
+    let s = format!("{f:e}");
+    let (m, e) = s.split_once('e').unwrap_or((&s, "0"));
+    let m = if m.contains('.') { m.to_string() } else { format!("{m}.0") };
+    format!("{m}E{e}")
 }
 
 /// XPath `number()` / cast to `xs:double` of a string (NaN when invalid).
@@ -278,6 +354,9 @@ pub fn format_double(d: f64) -> String {
 
 /// Numeric comparison where any operand is a double, else exact.
 pub fn cmp_numeric(a: &Atomic, b: &Atomic) -> Option<Ordering> {
+    if matches!(a, Atomic::Sub(..)) || matches!(b, Atomic::Sub(..)) {
+        return cmp_numeric(&a.prim(), &b.prim());
+    }
     match (a, b) {
         (Atomic::Int(x), Atomic::Int(y)) => Some(x.cmp(y)),
         (Atomic::Dbl(_), _) | (_, Atomic::Dbl(_)) => a.to_f64().partial_cmp(&b.to_f64()),
@@ -292,5 +371,7 @@ pub fn to_dec(a: &Atomic) -> Option<Decimal> {
         Atomic::Dbl(d) => Decimal::from_f64(*d),
         Atomic::Str(s) | Atomic::Untyped(s) => Decimal::parse(s),
         Atomic::Bool(b) => Some(Decimal::from_int(*b as i64)),
+        Atomic::Sub(_, v) => to_dec(v),
+        Atomic::Time(_) | Atomic::Dur(_) | Atomic::QName(_) => None,
     }
 }

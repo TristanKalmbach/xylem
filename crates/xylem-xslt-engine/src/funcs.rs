@@ -7,6 +7,7 @@ use crate::tree::{Kind, NodeRef, QName};
 use crate::value::{Atomic, Decimal, Item, Seq};
 use crate::xpath::{Expr, FN_NS, XS_NS};
 use crate::xsd_regex::XRegex;
+use std::rc::Rc;
 
 /// `round()` semantics: halves round towards positive infinity.
 pub fn round_half_up(x: f64) -> f64 {
@@ -371,6 +372,94 @@ impl Engine<'_> {
                     Atomic::Dec(x) => Atomic::Dec(Decimal::from_f64(f(x.to_f64())).unwrap_or(x)),
                     o => Atomic::Dbl(f(o.to_f64())),
                 })])
+            }
+            ("current-dateTime" | "current-date" | "current-time", 0) => {
+                let now = crate::datetime::now();
+                let kind = match &*name.local {
+                    "current-date" => crate::datetime::DtKind::Date,
+                    "current-time" => crate::datetime::DtKind::Time,
+                    _ => crate::datetime::DtKind::DateTime,
+                };
+                let v = now.convert(kind).unwrap_or(now);
+                Ok(vec![Item::Atomic(Atomic::Time(Rc::new(v)))])
+            }
+            ("implicit-timezone", 0) => Ok(vec![Item::Atomic(crate::datetime::tz_duration(
+                crate::datetime::IMPLICIT_TZ,
+            ))]),
+            ("dateTime", 2) => {
+                let (x, y) = (self.atomize(&arg(0)?), self.atomize(&arg(1)?));
+                let (Some(x), Some(y)) = (x.first(), y.first()) else {
+                    return Ok(vec![]);
+                };
+                let d = cast(x, "date")?;
+                let t = cast(y, "time")?;
+                let (Atomic::Time(d), Atomic::Time(t)) = (&d, &t) else {
+                    return Err("XPTY0004: dateTime() needs a date and a time".into());
+                };
+                let v = crate::datetime::combine(d, t)?;
+                Ok(vec![Item::Atomic(Atomic::Time(Rc::new(v)))])
+            }
+            ("adjust-dateTime-to-timezone" | "adjust-date-to-timezone" | "adjust-time-to-timezone", 1 | 2) => {
+                let v = self.atomize(&arg(0)?);
+                let Some(Atomic::Time(t)) = v.first() else {
+                    return if v.is_empty() {
+                        Ok(vec![])
+                    } else {
+                        Err("XPTY0004: adjust-*-to-timezone needs a date/time".into())
+                    };
+                };
+                let tz = if n == 2 {
+                    match self.atomize(&arg(1)?).first() {
+                        None => None,
+                        Some(Atomic::Dur(d)) => Some(crate::datetime::duration_tz(d)?),
+                        Some(_) => return Err("XPTY0004: the timezone must be a dayTimeDuration".into()),
+                    }
+                } else {
+                    Some(crate::datetime::IMPLICIT_TZ)
+                };
+                Ok(vec![Item::Atomic(Atomic::Time(Rc::new(t.adjust(tz))))])
+            }
+            (f, 1) if component_fn(f).is_some() => {
+                let v = self.atomize(&arg(0)?);
+                let Some(a) = v.first() else {
+                    return Ok(vec![]);
+                };
+                let (which, want) = component_fn(f).unwrap_or_default();
+                if !crate::types::instance(a, want) {
+                    return Err(format!("XPTY0004: {f}() needs an xs:{want}, got {}", a.type_name()));
+                }
+                Ok(crate::datetime::component(a, which).map(Item::Atomic).into_iter().collect())
+            }
+            ("QName", 2) => {
+                let uri = s(0)?;
+                let lex = s(1)?;
+                let (prefix, local) = lex.split_once(':').unwrap_or(("", &lex));
+                if local.is_empty() || (!prefix.is_empty() && uri.is_empty()) {
+                    return Err(format!("FOCA0002: invalid QName '{lex}'"));
+                }
+                Ok(vec![Item::Atomic(Atomic::QName(Rc::new((
+                    uri.as_str().into(),
+                    prefix.into(),
+                    local.into(),
+                ))))])
+            }
+            ("local-name-from-QName" | "prefix-from-QName" | "namespace-uri-from-QName", 1) => {
+                let v = self.atomize(&arg(0)?);
+                let Some(a) = v.first() else {
+                    return Ok(vec![]);
+                };
+                let Atomic::QName(q) = a else {
+                    return Err(format!("XPTY0004: {}() needs an xs:QName", name.local));
+                };
+                match &*name.local {
+                    "local-name-from-QName" => str_(q.2.to_string()),
+                    "namespace-uri-from-QName" => Ok(vec![Item::Atomic(Atomic::Sub(
+                        "anyURI",
+                        Rc::new(Atomic::str(q.0.clone())),
+                    ))]),
+                    _ if q.1.is_empty() => Ok(vec![]),
+                    _ => str_(q.1.to_string()),
+                }
             }
             ("round-half-to-even", 1 | 2) => {
                 let v = self.atomize(&arg(0)?);
@@ -757,6 +846,34 @@ fn replacement(r: &str, groups: usize) -> R<String> {
     Ok(out)
 }
 
+/// The component accessors: function name to (component, argument type).
+fn component_fn(f: &str) -> Option<(&'static str, &'static str)> {
+    Some(match f {
+        "year-from-dateTime" => ("year", "dateTime"),
+        "month-from-dateTime" => ("month", "dateTime"),
+        "day-from-dateTime" => ("day", "dateTime"),
+        "hours-from-dateTime" => ("hours", "dateTime"),
+        "minutes-from-dateTime" => ("minutes", "dateTime"),
+        "seconds-from-dateTime" => ("seconds", "dateTime"),
+        "timezone-from-dateTime" => ("timezone", "dateTime"),
+        "year-from-date" => ("year", "date"),
+        "month-from-date" => ("month", "date"),
+        "day-from-date" => ("day", "date"),
+        "timezone-from-date" => ("timezone", "date"),
+        "hours-from-time" => ("hours", "time"),
+        "minutes-from-time" => ("minutes", "time"),
+        "seconds-from-time" => ("seconds", "time"),
+        "timezone-from-time" => ("timezone", "time"),
+        "years-from-duration" => ("years", "duration"),
+        "months-from-duration" => ("months", "duration"),
+        "days-from-duration" => ("days", "duration"),
+        "hours-from-duration" => ("hours", "duration"),
+        "minutes-from-duration" => ("minutes", "duration"),
+        "seconds-from-duration" => ("seconds", "duration"),
+        _ => return None,
+    })
+}
+
 /// `fn:round-half-to-even` at `p` decimal places (negative: tens, ...).
 fn round_half_even(a: &Atomic, p: i64) -> Atomic {
     // Rounds an integer count of units to a multiple of `unit`, ties to even.
@@ -808,6 +925,8 @@ fn round_half_even(a: &Atomic, p: i64) -> Atomic {
 
 fn numeric_of(a: &Atomic) -> Atomic {
     match a {
+        Atomic::Sub("float", _) => a.clone(),
+        Atomic::Sub(..) => numeric_of(&a.prim()),
         Atomic::Untyped(s) | Atomic::Str(s) => Atomic::Dbl(crate::value::parse_double(s)),
         o => o.clone(),
     }
