@@ -127,6 +127,18 @@ pub enum Instr {
     },
 }
 
+/// A template's or function's declaration as written, for profiles.
+#[derive(Debug, Clone, Default)]
+pub struct Source {
+    /// The module's path.
+    pub file: String,
+    /// Line where the declaration's start tag ends.
+    pub line: u32,
+    pub name: Option<String>,
+    pub pattern: Option<String>,
+    pub mode: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct Template {
     pub id: usize,
@@ -141,10 +153,15 @@ pub struct Template {
     pub prec: usize,
     /// Where the rule is declared, for reports (`file:line`).
     pub location: String,
+    pub source: Source,
 }
 
 #[derive(Debug)]
 pub struct Function {
+    /// Index among the stylesheet's functions (for timing).
+    pub id: usize,
+    /// Where it is declared, for profiles.
+    pub source: Source,
     pub name: QName,
     pub params: Vec<Param>,
     pub body: Vec<Instr>,
@@ -230,7 +247,36 @@ fn load_tree(path: &Path) -> Result<Tree, String> {
             false
         }
     }
-    tree::from_dom(&doc, &path.to_string_lossy(), &Keep)
+    // Lines as the reference processor reports them: where each element's
+    // start tag ends, counted in the file's text (or its re-serialised
+    // form when the parser does not keep it byte for byte).
+    let rest = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+    let (serialised, offsets) = doc.to_xml_with_offsets();
+    let text = match std::str::from_utf8(rest) {
+        Ok(t) if t == serialised => t.to_string(),
+        _ => serialised,
+    };
+    let mut starts = vec![0usize];
+    starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
+    let tb = text.as_bytes();
+    let lines: Vec<u32> = offsets
+        .iter()
+        .map(|&o| {
+            let mut i = o;
+            let mut quote = None;
+            while i < tb.len() {
+                match (quote, tb[i]) {
+                    (None, b'"' | b'\'') => quote = Some(tb[i]),
+                    (Some(q), c) if c == q => quote = None,
+                    (None, b'>') => break,
+                    _ => {}
+                }
+                i += 1;
+            }
+            starts.partition_point(|&s| s <= i) as u32
+        })
+        .collect();
+    tree::from_dom_lines(&doc, &path.to_string_lossy(), &Keep, Some(&lines))
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -243,6 +289,18 @@ struct El<'a> {
 }
 
 impl<'a> El<'a> {
+    /// The declaration's file, line and identifying attributes.
+    fn source(&self) -> Source {
+        let file = self.file.strip_prefix(r"\\?\").unwrap_or(self.file);
+        Source {
+            file: file.to_string(),
+            line: self.t.lines.get(self.i as usize).copied().unwrap_or(0),
+            name: self.attr("name").map(str::to_string),
+            pattern: self.attr("match").map(str::to_string),
+            mode: self.attr("mode").map(str::to_string),
+        }
+    }
+
     fn name(&self) -> &QName {
         self.t.node(self.i).name.as_ref().unwrap()
     }
@@ -539,9 +597,13 @@ impl Compiler {
                     let name = d.qname(d.req("name")?)?;
                     let (params, body) = self.params_and_body(d)?;
                     let arity = params.len();
+                    let id = self.ss.functions.len();
+                    let source = d.source();
                     self.ss.functions.insert(
                         (name.clone(), arity),
                         Function {
+                            id,
+                            source,
                             name,
                             params,
                             body,
@@ -661,6 +723,7 @@ impl Compiler {
             as_: d.seq_type()?,
             prec,
             location,
+            source: d.source(),
         });
         Ok(())
     }

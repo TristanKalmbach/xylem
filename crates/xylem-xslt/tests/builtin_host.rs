@@ -63,3 +63,38 @@ fn builtin_host_reports_compile_errors() {
     assert!(!run.jobs[0].ok);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn builtin_host_writes_profiles_like_the_dotnet_host() {
+    let out = std::env::temp_dir().join(format!("xylem-builtin-profile-{}", std::process::id()));
+    std::fs::create_dir_all(&out).unwrap();
+    let job = (cases().join("input.xml"), out.join("params.xml"));
+    let run = Host::builtin().run(
+        &cases().join("params").join("style.xsl"),
+        std::slice::from_ref(&job),
+        &BTreeMap::new(),
+        true,
+    );
+    assert!(run.jobs[0].ok, "{:?}", run.jobs[0].error);
+    let path = run.jobs[0].profile.clone().expect("a profile");
+    let p = xylem_xslt::profile::Profile::load(&path).unwrap();
+    let chapter = p
+        .templates
+        .iter()
+        .find(|t| t.pattern.as_deref() == Some("chapter"))
+        .expect("the chapter rule");
+    assert_eq!(
+        (chapter.kind.as_str(), chapter.calls, chapter.line),
+        ("template", 2, 36)
+    );
+    assert!(chapter.path().ends_with("style.xsl"));
+    let label = p
+        .templates
+        .iter()
+        .find(|t| t.name.as_deref() == Some("my:label"))
+        .unwrap();
+    assert_eq!((label.kind.as_str(), label.calls), ("function", 2));
+    // Own time never exceeds total time.
+    assert!(p.templates.iter().all(|t| t.self_ms <= t.total_ms + 1e-9));
+    let _ = std::fs::remove_dir_all(&out);
+}

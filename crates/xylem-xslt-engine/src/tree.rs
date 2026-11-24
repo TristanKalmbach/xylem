@@ -79,6 +79,9 @@ pub struct Tree {
     /// Per node, its number among the tree's non-attribute nodes in
     /// document order (see `generate-id` in the design notes).
     numbers: std::cell::OnceCell<Vec<u32>>,
+    /// For stylesheet modules: per node, the line where an element's start
+    /// tag ends (the line the reference processor reports), else empty.
+    pub lines: Vec<u32>,
 }
 
 /// A node: which tree (index in the engine's tree list) and which node.
@@ -218,6 +221,17 @@ pub trait StripSpace {
 
 /// Copies a parsed `xylem-dom` document into a [`Tree`], resolving names.
 pub fn from_dom(doc: &Document, base: &str, strip: &dyn StripSpace) -> Result<Tree, String> {
+    from_dom_lines(doc, base, strip, None)
+}
+
+/// Like [`from_dom`], also recording each element's line from `lines`
+/// (indexed by `xylem-dom` node).
+pub fn from_dom_lines(
+    doc: &Document,
+    base: &str,
+    strip: &dyn StripSpace,
+    lines: Option<&[u32]>,
+) -> Result<Tree, String> {
     let mut t = Tree::new_document();
     t.base = base.to_string();
     let b = std::path::Path::new(base);
@@ -236,6 +250,7 @@ pub fn from_dom(doc: &Document, base: &str, strip: &dyn StripSpace) -> Result<Tr
     let strip = &Strip {
         s: strip,
         ents: &ents,
+        lines,
     };
     for &c in doc.children(doc.root()) {
         // Whitespace outside the document element is not part of the XDM.
@@ -267,6 +282,7 @@ enum Entity {
 struct Strip<'a> {
     s: &'a dyn StripSpace,
     ents: &'a Entities,
+    lines: Option<&'a [u32]>,
 }
 
 fn parse_entities(subset: &str) -> HashMap<String, Entity> {
@@ -413,6 +429,12 @@ fn copy(
             }
             let stripping = !preserve && strip.s.strip(&name);
             t.nodes[me as usize].name = Some(name);
+            if let Some(l) = strip.lines {
+                if t.lines.len() <= me as usize {
+                    t.lines.resize(me as usize + 1, 0);
+                }
+                t.lines[me as usize] = l.get(id.index()).copied().unwrap_or(0);
+            }
             for &c in doc.children(id) {
                 if stripping
                     && let NodeKind::Text(s) = doc.kind(c)

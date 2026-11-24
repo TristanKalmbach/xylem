@@ -193,9 +193,11 @@ needed.
   the host writes it (`Output::host_bytes`, UTF-8 with a byte order mark),
   so `xylem-xslt::compare` works unchanged.
 - **Time templates**: `transform_bytes(.., time = true)` records calls and
-  inclusive wall time per template rule (`Output::timing`), keyed by the
-  rule's file and name/match. The host's profile also times stylesheet
-  functions and reports exclusive time; both are still to do.
+  own and total time per template rule and stylesheet function
+  (`Output::timing`), with the file and line the .NET host reports, and the
+  built-in `Host` writes them in the host's profile format, so Time
+  templates and Analyze work unchanged. Call counts can differ slightly
+  from the host's, which optimises some calls away.
 - **Analyze**: works on stylesheet source and stays as it is; with the
   engine in-process its proofs can run without starting a process per
   candidate.
@@ -260,7 +262,7 @@ first-item semantics for string functions) are a milestone of their own.
 |---|---|---|
 | M0 | Prototype (this branch) | Templates, modes, parameters, variables, choose, for-each, XPath paths and predicates; the oracle suites run end to end |
 | M1 | Exact production output | Every saved output in every check suite identical without renumbering ids; the unverified spec notes probed; line numbers in errors |
-| M2 | Tools on the engine (started: Check runs on it with engine `builtin`) | Check, Time templates, Analyze proofs and Publication preview can run on the engine, chosen in settings, with the .NET host as the fallback; results compared on every run while both exist |
+| M2 | Tools on the engine (started: Check, Time templates and Analyze run on it with engine `builtin`) | Check, Time templates, Analyze proofs and Publication preview can run on the engine, chosen in settings, with the .NET host as the fallback; results compared on every run while both exist |
 | M3 | XSLT 1.0 and `xsl:output` | FO-to-HTML stylesheet reproduces the host's `--serialize` output; xml/html/text serialization |
 | M4 | Breadth | QT3 XPath 2.0 subset ≥ 90 %, XSLT 2.0 subset of xslt30-test tracked; `for-each-group`, `analyze-string`, `result-document`, `next-match`, `apply-imports`, collations |
 | M5 | Retire the host | Default to the engine; the .NET host becomes an optional oracle for development |

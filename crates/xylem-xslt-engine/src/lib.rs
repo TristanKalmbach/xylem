@@ -26,8 +26,17 @@ pub mod xpath;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub use compile::Stylesheet;
+pub use compile::{Source, Stylesheet};
 pub use exec::TemplateTime;
+
+/// One timed template or function.
+#[derive(Debug, Clone)]
+pub struct Timed {
+    /// `template` or `function`.
+    pub kind: &'static str,
+    pub source: Source,
+    pub time: TemplateTime,
+}
 
 /// The result of one transformation.
 pub struct Output {
@@ -35,9 +44,10 @@ pub struct Output {
     pub text: String,
     /// `xsl:message` output, in order.
     pub messages: Vec<String>,
-    /// Per template (indexed like the stylesheet's rules) when timing was
-    /// asked for, with each template's location.
-    pub timing: Vec<(String, TemplateTime)>,
+    /// Every template and function that ran, when timing was asked for.
+    pub timing: Vec<Timed>,
+    /// Wall time of the transformation (timing runs only), in milliseconds.
+    pub total_ms: f64,
 }
 
 /// Transforms an input file. Parameters set the global `xsl:param` of
@@ -64,20 +74,34 @@ pub fn transform_bytes(
     // The host gives the input the stylesheet's folder as its base URI.
     let source = tree::from_dom(&doc, &ss.base.to_string_lossy(), ss)?;
     let engine = exec::Engine::new(ss, source, params.clone(), time);
+    let started = std::time::Instant::now();
     let result = engine.run()?;
-    let timing = match &engine.timing {
-        Some(t) => ss
-            .templates
-            .iter()
-            .map(|t| t.location.clone())
-            .zip(t.borrow().iter().cloned())
-            .collect(),
-        None => Vec::new(),
-    };
+    let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let mut timing = Vec::new();
+    if let Some(p) = &engine.timing {
+        let times = &p.borrow().times;
+        for t in &ss.templates {
+            timing.push(Timed {
+                kind: "template",
+                source: t.source.clone(),
+                time: times[t.id].clone(),
+            });
+        }
+        for f in ss.functions.values() {
+            let time = times[ss.templates.len() + f.id].clone();
+            timing.push(Timed {
+                kind: "function",
+                source: f.source.clone(),
+                time,
+            });
+        }
+        timing.retain(|t| t.time.calls > 0);
+    }
     Ok(Output {
         text: serialize::host_style(&result),
         messages: engine.messages.borrow().clone(),
         timing,
+        total_ms: if time { total_ms } else { 0.0 },
     })
 }
 

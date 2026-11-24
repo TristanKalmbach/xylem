@@ -65,11 +65,43 @@ impl Dyn {
     }
 }
 
-/// Per-template call counts and time, for "Time templates".
+/// Calls and time of one template or function, for "Time templates".
+///
+/// Own time excludes the templates and functions it called; total time
+/// includes them, counting a recursive call once (the outermost).
 #[derive(Default, Clone, Debug)]
 pub struct TemplateTime {
     pub calls: u64,
+    pub own: Duration,
     pub total: Duration,
+}
+
+/// Timing state: one entry per template, then one per function.
+pub struct Profiler {
+    pub times: Vec<TemplateTime>,
+    /// Running calls: (entry, started, time spent in calls it made).
+    stack: Vec<(usize, Instant, Duration)>,
+}
+
+impl Profiler {
+    fn enter(&mut self, id: usize) {
+        self.stack.push((id, Instant::now(), Duration::ZERO));
+    }
+    fn leave(&mut self) {
+        let Some((id, started, inner)) = self.stack.pop() else {
+            return;
+        };
+        let spent = started.elapsed();
+        let t = &mut self.times[id];
+        t.calls += 1;
+        t.own += spent.saturating_sub(inner);
+        if !self.stack.iter().any(|(i, _, _)| *i == id) {
+            t.total += spent;
+        }
+        if let Some(parent) = self.stack.last_mut() {
+            parent.2 += spent;
+        }
+    }
 }
 
 pub struct Engine<'s> {
@@ -85,7 +117,7 @@ pub struct Engine<'s> {
     /// Variables visible to patterns: those in scope at an `xsl:number`
     /// whose `count` / `from` patterns are being matched.
     pattern_env: RefCell<Env>,
-    pub timing: Option<RefCell<Vec<TemplateTime>>>,
+    pub timing: Option<RefCell<Profiler>>,
     source: u32,
 }
 
@@ -107,7 +139,12 @@ impl<'s> Engine<'s> {
             docs: RefCell::default(),
             messages: RefCell::default(),
             pattern_env: RefCell::default(),
-            timing: time.then(|| RefCell::new(vec![TemplateTime::default(); ss.templates.len()])),
+            timing: time.then(|| {
+                RefCell::new(Profiler {
+                    times: vec![TemplateTime::default(); ss.templates.len() + ss.functions.len()],
+                    stack: Vec::new(),
+                })
+            }),
             source: 0,
         }
     }
@@ -403,7 +440,9 @@ impl<'s> Engine<'s> {
 
     /// Calls template `t` with `params` (name, value, tunnel).
     fn invoke(&self, t: usize, d: &Dyn, params: &[(QName, Rc<Seq>, bool)], out: &mut Out) -> R<()> {
-        let started = self.timing.as_ref().map(|_| Instant::now());
+        if let Some(p) = &self.timing {
+            p.borrow_mut().enter(t);
+        }
         let tpl = &self.ss.templates[t];
         let mut tunnel: HashMap<QName, Rc<Seq>> = (*d.tunnel).clone();
         for (n, v, tun) in params {
@@ -437,10 +476,8 @@ impl<'s> Engine<'s> {
             nd = nd.bind(p.name.clone(), v);
         }
         let r = self.body(&tpl.body, &nd, out);
-        if let (Some(s), Some(tm)) = (started, &self.timing) {
-            let mut tm = tm.borrow_mut();
-            tm[t].calls += 1;
-            tm[t].total += s.elapsed();
+        if let Some(p) = &self.timing {
+            p.borrow_mut().leave();
         }
         r.map_err(|e| format!("{e}\n  in template {}", tpl.location))
     }
@@ -479,8 +516,14 @@ impl<'s> Engine<'s> {
             d = d.bind(p.name.clone(), v);
         }
         let mut out = Out::sequence();
-        self.body(&f.body, &d, &mut out)
-            .map_err(|e| format!("{e}\n  in function {}()", f.name.lexical()))?;
+        if let Some(p) = &self.timing {
+            p.borrow_mut().enter(self.ss.templates.len() + f.id);
+        }
+        let r = self.body(&f.body, &d, &mut out);
+        if let Some(p) = &self.timing {
+            p.borrow_mut().leave();
+        }
+        r.map_err(|e| format!("{e}\n  in function {}()", f.name.lexical()))?;
         let v = out.finish_seq(self);
         Ok(Some(match &f.as_ {
             Some(t) => self.convert(v, t, &format!("result of {}()", f.name.lexical()))?,

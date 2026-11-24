@@ -318,9 +318,6 @@ fn run_builtin(
     if host.serialize {
         return failed("The built-in engine cannot write xsl:output results yet; use the .NET host for this step.".into());
     }
-    if profile {
-        return failed("The built-in engine cannot write timing profiles yet; use the .NET host to time templates.".into());
-    }
     let started = std::time::Instant::now();
     let ss = match xylem_xslt_engine::Stylesheet::compile(stylesheet) {
         Ok(s) => s,
@@ -336,7 +333,9 @@ fn run_builtin(
         let mut result = Err(String::new());
         for _ in 0..repeat {
             let t = std::time::Instant::now();
-            result = xylem_xslt_engine::transform_file(&ss, input, &params);
+            result = std::fs::read(input)
+                .map_err(|e| format!("{}: {e}", input.display()))
+                .and_then(|b| xylem_xslt_engine::transform_bytes(&ss, &b, &params, profile));
             times.push(t.elapsed().as_millis() as u64);
             if result.is_err() {
                 break;
@@ -344,11 +343,22 @@ fn run_builtin(
         }
         times.sort_unstable();
         let ms = times[times.len() / 2];
+        let mut profile_path = None;
         let (ok, error) = match result {
-            Ok(o) => match std::fs::write(output, o.host_bytes()) {
-                Ok(()) => (true, None),
-                Err(e) => (false, Some(format!("{}: {e}", output.display()))),
-            },
+            Ok(o) => {
+                if profile {
+                    let mut p = output.as_os_str().to_owned();
+                    p.push(".profile.json");
+                    let p = PathBuf::from(p);
+                    if std::fs::write(&p, profile_json(&o).to_string()).is_ok() {
+                        profile_path = Some(p);
+                    }
+                }
+                match std::fs::write(output, o.host_bytes()) {
+                    Ok(()) => (true, None),
+                    Err(e) => (false, Some(format!("{}: {e}", output.display()))),
+                }
+            }
             Err(e) => (false, Some(e)),
         };
         out.push(JobResult {
@@ -357,7 +367,7 @@ fn run_builtin(
             ok,
             ms,
             error,
-            profile: None,
+            profile: profile_path,
         });
     }
     Run {
@@ -373,4 +383,28 @@ fn run_builtin(
         ),
         error: None,
     }
+}
+
+/// A timing run's result in the .NET host's profile format (see
+/// [`crate::profile`]).
+fn profile_json(o: &xylem_xslt_engine::Output) -> serde_json::Value {
+    let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+    let templates: Vec<serde_json::Value> = o
+        .timing
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "kind": t.kind,
+                "name": t.source.name,
+                "match": t.source.pattern,
+                "mode": t.source.mode,
+                "file": t.source.file,
+                "line": t.source.line,
+                "calls": t.time.calls,
+                "self_ms": ms(t.time.own),
+                "total_ms": ms(t.time.total),
+            })
+        })
+        .collect();
+    serde_json::json!({ "total_ms": o.total_ms, "templates": templates })
 }
