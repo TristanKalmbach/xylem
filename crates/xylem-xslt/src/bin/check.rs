@@ -18,6 +18,9 @@
 //! `--against` (default: the last committed version), and every top-level
 //! stylesheet under `--scope` that uses a changed file is compiled.
 //!
+//! `--prove` proves the uncommitted changes to stylesheet files in the git
+//! repository the stylesheet is in, the same way `--fix` proves its fixes.
+//!
 //! `--repeat <n>` runs each input n times when checking and reports the median
 //! time, for comparing speed before and after.
 //!
@@ -38,7 +41,7 @@ use xylem_xslt::{Baseline, Host, Outcome, Suite, check, profile, proof};
 
 const USAGE: &str = "Usage: xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>] \
 [--against saved|committed[:<rev>]|<other.xsl>] [--host <program>] [--work <folder>] \
-[--profile [--top <n>]] [--analyze [--fix] [--scope <folder>]] [--repeat <n>]";
+[--profile [--top <n>]] [--analyze [--fix] [--scope <folder>]] [--prove] [--repeat <n>]";
 
 fn main() -> ExitCode {
     match run() {
@@ -61,6 +64,7 @@ fn run() -> Result<bool, String> {
     let mut profiling = false;
     let mut analyzing = false;
     let mut fixing = false;
+    let mut proving = false;
     let mut scope: Option<PathBuf> = None;
     let mut repeat = 1u32;
     let mut top = 25usize;
@@ -74,6 +78,7 @@ fn run() -> Result<bool, String> {
             "--profile" => profiling = true,
             "--analyze" => analyzing = true,
             "--fix" => fixing = true,
+            "--prove" => proving = true,
             "--scope" => scope = Some(PathBuf::from(value("--scope")?)),
             "--repeat" => {
                 repeat = value("--repeat")?
@@ -118,6 +123,34 @@ fn run() -> Result<bool, String> {
     let work = work.unwrap_or_else(|| std::env::temp_dir().join("xylem-xslt").join("work"));
     let cancel = AtomicBool::new(false);
     let mut progress = |s: String| eprintln!("{s}");
+    if proving {
+        let changed = xylem_xslt::git::changed_files(&stylesheet)?;
+        if changed.is_empty() {
+            println!("No uncommitted changes to stylesheet files.");
+            return Ok(true);
+        }
+        let scope = scope.or_else(|| xylem_xslt::git::scope_of(&stylesheet));
+        println!(
+            "Proving {} changed file{}:",
+            changed.len(),
+            if changed.len() == 1 { "" } else { "s" }
+        );
+        for c in &changed {
+            println!("  {}", c.display());
+        }
+        let against = match against.as_deref() {
+            None => Baseline::Committed { rev: "HEAD".into() },
+            Some(_) => baseline.clone(),
+        };
+        return print_proof(
+            &suite_path,
+            &changed,
+            &host,
+            &work,
+            scope.as_deref(),
+            &against,
+        );
+    }
     if analyzing {
         let against = match against.as_deref() {
             None => Baseline::Committed { rev: "HEAD".into() },
@@ -375,11 +408,23 @@ fn run_analysis(
     for f in &applied.files {
         println!("  {}", f.display());
     }
+    print_proof(suite_path, &applied.files, host, work, scope, against)
+}
+
+fn print_proof(
+    suite_path: &std::path::Path,
+    changed: &[PathBuf],
+    host: &Host,
+    work: &std::path::Path,
+    scope: Option<&std::path::Path>,
+    against: &Baseline,
+) -> Result<bool, String> {
+    let cancel = AtomicBool::new(false);
     let folder = suite_path.parent().unwrap_or(std::path::Path::new("."));
     let suites = proof::suites_in(folder);
     let mut progress = |s: String| eprintln!("{s}");
     let p = proof::prove(
-        &applied.files,
+        changed,
         &suites,
         against,
         scope,

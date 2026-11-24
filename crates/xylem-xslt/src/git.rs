@@ -191,3 +191,28 @@ fn export(top: &Path, commit: &str, scope: &str, dest: &Path) -> Result<(), Stri
     let _ = child.wait();
     Ok(())
 }
+
+/// Stylesheet-related files with uncommitted changes in the repository
+/// holding `stylesheet`.
+pub fn changed_files(stylesheet: &Path) -> Result<Vec<PathBuf>, String> {
+    let (top, _) = locate(stylesheet)?;
+    let out = git(&top, &["diff", "--name-only", "HEAD"])?;
+    Ok(out
+        .lines()
+        .filter(|l| {
+            Path::new(l)
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
+        })
+        .map(|l| top.join(l))
+        .collect())
+}
+
+/// The top-level folder of the repository holding `stylesheet` that the
+/// stylesheet is in: where the stylesheets that may use it live.
+pub fn scope_of(stylesheet: &Path) -> Option<PathBuf> {
+    let (top, rel) = locate(stylesheet).ok()?;
+    let first = rel.components().next()?;
+    Some(top.join(first.as_os_str()))
+}
