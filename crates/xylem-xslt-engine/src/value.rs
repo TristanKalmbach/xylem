@@ -196,6 +196,27 @@ pub fn compat() -> bool {
     COMPAT.with(|c| c.get())
 }
 
+thread_local! {
+    /// Whether a transformation may read files: `document()` and external
+    /// entities in the input (stylesheet modules are always read).
+    static FILES: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Whether the running transformation may read files.
+pub fn file_access() -> bool {
+    FILES.with(|c| c.get())
+}
+
+/// Runs `f` with file access from inside transformations (`document()`,
+/// external entities in the input) allowed or not. Hosts that run input
+/// they do not trust should turn it off.
+pub fn with_file_access<T>(allowed: bool, f: impl FnOnce() -> T) -> T {
+    let before = FILES.with(|c| c.replace(allowed));
+    let r = f();
+    FILES.with(|c| c.set(before));
+    r
+}
+
 /// Runs `f` with XPath 1.0 rules switched on or off.
 pub fn with_compat<T>(on: bool, f: impl FnOnce() -> T) -> T {
     let before = COMPAT.with(|c| c.replace(on));

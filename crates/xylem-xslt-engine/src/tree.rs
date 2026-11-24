@@ -354,6 +354,11 @@ fn expand(
         None => return Err(format!("undeclared entity '&{name};'")),
         Some(Entity::Internal(v)) => (v.clone(), ents.dir.clone()),
         Some(Entity::External(uri)) => {
+            if !crate::value::file_access() {
+                return Err(format!(
+                    "external entity '&{name};': file access is turned off"
+                ));
+            }
             let path = ents.dir.join(uri.strip_prefix("file:///").unwrap_or(uri));
             let bytes = std::fs::read(&path)
                 .map_err(|e| format!("entity '{name}' ({}): {e}", path.display()))?;

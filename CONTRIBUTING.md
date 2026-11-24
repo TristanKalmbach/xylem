@@ -37,6 +37,8 @@ cargo test --workspace
 | `xylem-xpath` | XPath 1.0, used for BREX checks. |
 | `xylem-xslt` | Stylesheet tools: checking output against saved output, timing, analysis, publication preview. |
 | `xylem-xslt-engine` | The built-in XSLT 2.0 / XPath 2.0 processor; see [docs/design/xslt-engine.md](docs/design/xslt-engine.md). |
+| `xylem-xslt-ffi` | The engine as a C library (`xylem_xslt.dll`/`.so`/`.dylib`) for other applications; see [docs/embedding.md](docs/embedding.md). |
+| `xylem-xslt-cli` | `xylem-xslt`: the engine on the command line, with a `serve` mode for other programs. |
 | `xylem-w3c` | Runs the W3C XPath and XSLT test suites against the engine; see [docs/design/conformance.md](docs/design/conformance.md). |
 | `xylem-s1000d` | S1000D identification, references, templates, BREX. |
 | `xylem-customize` | Doctype packages and the XMAX importer. |

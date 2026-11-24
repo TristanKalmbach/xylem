@@ -1,0 +1,18 @@
+[package]
+name = "xylem-xslt-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Command-line XSLT processor built on Xylem's engine, with a long-running serve mode for other applications"
+publish = false
+
+[[bin]]
+name = "xylem-xslt"
+path = "src/main.rs"
+
+[dependencies]
+xylem-xslt-engine = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

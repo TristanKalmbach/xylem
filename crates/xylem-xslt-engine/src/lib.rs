@@ -29,6 +29,7 @@ use std::path::Path;
 
 pub use compile::{OutputSpec, Source, Stylesheet};
 pub use exec::TemplateTime;
+pub use value::with_file_access;
 
 /// One timed template or function.
 #[derive(Debug, Clone)]

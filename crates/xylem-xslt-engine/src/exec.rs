@@ -632,6 +632,9 @@ impl<'s> Engine<'s> {
     }
 
     pub fn document(&self, href: &str, base: &str) -> R<Option<u32>> {
+        if !crate::value::file_access() {
+            return Err(format!("document('{href}'): file access is turned off"));
+        }
         let base = std::path::Path::new(base);
         let dir = if base.is_dir() {
             base.to_path_buf()

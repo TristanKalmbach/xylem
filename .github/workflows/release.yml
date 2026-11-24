@@ -51,6 +51,9 @@ jobs:
         run: |
           cargo build --release --locked --target ${{ matrix.target }} -p xylem-app
           cargo build --release --locked --target ${{ matrix.target }} -p xylem-customize --bin xylem-import
+          cargo build --release --locked --target ${{ matrix.target }} -p xylem-xslt --bin xylem-xslt-check
+          cargo build --release --locked --target ${{ matrix.target }} -p xylem-xslt-cli
+          cargo build --release --locked --target ${{ matrix.target }} -p xylem-xslt-ffi
 
       - name: Package
         shell: bash
@@ -60,6 +63,11 @@ jobs:
           bin=target/${{ matrix.target }}/release
           cp "$bin/${{ matrix.exe }}" "$name/"
           cp "$bin/xylem-import"* "$name/" 2>/dev/null || true
+          cp "$bin/xylem-xslt-check"* "$bin/xylem-xslt"* "$name/" 2>/dev/null || true
+          # The engine as a library for other applications, with its C header.
+          mkdir -p "$name/lib"
+          cp "$bin/xylem_xslt.dll" "$bin/xylem_xslt.dll.lib" "$bin/libxylem_xslt.so" "$bin/libxylem_xslt.dylib" "$name/lib/" 2>/dev/null || true
+          cp crates/xylem-xslt-ffi/include/xylem_xslt.h docs/embedding.md "$name/lib/"
           rm -f "$name"/*.d "$name"/*.pdb
           cp README.md "$name/"
           if [ "${{ runner.os }}" = "Windows" ]; then
