@@ -14,6 +14,7 @@ pub mod check;
 pub mod compare;
 pub mod git;
 pub mod host;
+pub mod navigate;
 pub mod profile;
 pub mod proof;
 pub mod stylesheet;

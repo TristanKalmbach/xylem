@@ -545,7 +545,7 @@ impl XylemApp {
     /// Saxon reports the line where the element's start tag ends, so the
     /// template is the last `xsl:template` or `xsl:function` starting on or
     /// before that line.
-    fn open_stylesheet_at(&mut self, path: &Path, line: u32) {
+    pub(super) fn open_stylesheet_at(&mut self, path: &Path, line: u32) {
         let key = crate::find_files::path_key(path);
         let find = |docs: &[crate::doc::DocState]| {
             docs.iter().position(|d| {

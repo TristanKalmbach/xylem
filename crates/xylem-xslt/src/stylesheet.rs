@@ -68,10 +68,15 @@ impl RawValue {
 impl Module {
     pub fn load(path: &Path) -> Result<Module, String> {
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let doc = Document::from_bytes(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        Module::from_bytes(path, &bytes)
+    }
+
+    /// A module from its bytes (an editor's unsaved text, say).
+    pub fn from_bytes(path: &Path, bytes: &[u8]) -> Result<Module, String> {
+        let doc = Document::from_bytes(bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         let (bom, rest) = match bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
             Some(r) => (true, r),
-            None => (false, &bytes[..]),
+            None => (false, bytes),
         };
         let utf8 = std::str::from_utf8(rest).ok().map(str::to_string);
         let (serialised, offsets) = doc.to_xml_with_offsets();
@@ -346,15 +351,32 @@ pub fn path_key(p: &Path) -> String {
 
 impl Stylesheet {
     pub fn load(top: &Path) -> Result<Stylesheet, String> {
+        Stylesheet::load_many(&[top.to_path_buf()], &|_| None)
+    }
+
+    /// Every module of several stylesheets, each once. `read` gives the
+    /// bytes to use for a file instead of what is on disk (unsaved edits),
+    /// or `None` to read the file. The first stylesheet is the top.
+    pub fn load_many(
+        tops: &[PathBuf],
+        read: &dyn Fn(&Path) -> Option<Vec<u8>>,
+    ) -> Result<Stylesheet, String> {
+        let Some(top) = tops.first() else {
+            return Err("No stylesheet given.".into());
+        };
         let mut modules: Vec<Module> = Vec::new();
         let mut warnings = Vec::new();
         let mut seen = HashSet::new();
-        let mut queue = VecDeque::from([tidy(top)]);
+        let mut queue: VecDeque<PathBuf> = tops.iter().map(|t| tidy(t)).collect();
         while let Some(path) = queue.pop_front() {
             if !seen.insert(path_key(&path)) {
                 continue;
             }
-            let module = match Module::load(&path) {
+            let loaded = match read(&path) {
+                Some(bytes) => Module::from_bytes(&path, &bytes),
+                None => Module::load(&path),
+            };
+            let module = match loaded {
                 Ok(m) => m,
                 Err(e) if modules.is_empty() => return Err(e),
                 Err(e) => {

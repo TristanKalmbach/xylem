@@ -161,6 +161,24 @@ xylem-xslt-check suite.toml --analyze --fix --scope <stylesheets folder> [--repe
 `--repeat 5` times each test five times and reports the median, for
 comparing speed before and after.
 
+## Finding your way around a stylesheet
+
+**Tools › Stylesheet references** (F12), in a stylesheet, lists what the
+element at the caret defines or uses: named templates, functions, keys,
+modes and variables. For each it shows where it is defined and every place it
+is used, in this file and in every stylesheet that includes or imports it
+(found in the same folder tree: the top folder of the git repository, or the
+file's own folder). Click one to go there. With the caret on an element that
+names nothing, the nearest enclosing element that does is used, so the caret
+can be anywhere inside a template.
+
+A name defined more than once (a template overridden in another module, a
+function redefined for one kind of publication) lists every definition.
+Functions are matched by namespace, not prefix. Variables follow XSLT's
+scoping: a reference goes to the nearest declaration before it, else to the
+global one. Stylesheets with unsaved changes are read as they are in the
+editor.
+
 ## Publication preview for authors
 
 **File › Publication preview** (Ctrl+Shift+F5) runs the publishing

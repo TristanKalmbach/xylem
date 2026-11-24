@@ -224,8 +224,9 @@ pub fn write_suite(
         let p = p.strip_prefix(dir).unwrap_or(p);
         toml::Value::String(p.to_string_lossy().replace('\\', "/")).to_string()
     };
-    let mut out =
-        String::from("# Made by Xylem from a folder of saved inputs. Paths are relative to this file.\n");
+    let mut out = String::from(
+        "# Made by Xylem from a folder of saved inputs. Paths are relative to this file.\n",
+    );
     if let Some(s) = stylesheet {
         out.push_str(&format!("stylesheet = {}\n", show(s)));
     }
