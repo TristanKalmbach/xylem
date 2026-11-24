@@ -4,7 +4,7 @@
 //! ```text
 //! xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>]
 //!                  [--against saved | committed[:<rev>] | <other.xsl>]
-//!                  [--host <SaxonDotnetHost.exe>] [--allow-scripts] [--work <folder>]
+//!                  [--host <SaxonDotnetHost.exe> | builtin] [--allow-scripts] [--work <folder>]
 //!                  [--report <file.html>]
 //! xylem-xslt-check <suite.toml> --profile [--top <n>] [--stylesheet ...]
 //! xylem-xslt-check <suite.toml> --analyze [--fix] [--scope <folder>]
@@ -46,7 +46,8 @@
 //! `--allow-scripts` lets XSLT 1.0 stylesheets run embedded scripts
 //! (`msxsl:script`); they are refused otherwise.
 //!
-//! The host defaults to `XYLEM_XSLT_HOST`. Exit code 0 means every test gave
+//! The host defaults to `XYLEM_XSLT_HOST`; `--host builtin` uses Xylem's own
+//! engine instead of a program. Exit code 0 means every test gave
 //! the same output.
 
 use std::path::PathBuf;
@@ -57,7 +58,7 @@ use xylem_xslt::check::CheckEnv;
 use xylem_xslt::{Baseline, Host, Outcome, Suite, check, profile, proof};
 
 const USAGE: &str = "Usage: xylem-xslt-check <suite.toml> [--stylesheet <file.xsl>] \
-[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>] [--allow-scripts] [--work <folder>] [--report <file.html>] \
+[--against saved|committed[:<rev>]|<other.xsl>] [--host <program>|builtin] [--allow-scripts] [--work <folder>] [--report <file.html>] \
 [--profile [--top <n>]] [--analyze [--fix] [--scope <folder>]] [--prove] [--repeat <n>]";
 
 fn main() -> ExitCode {
@@ -131,7 +132,7 @@ fn run() -> Result<bool, String> {
         .ok_or("The suite names no stylesheet; pass --stylesheet.")?;
     let mut host =
         Host::new(host.ok_or(
-            "No host program: set XYLEM_XSLT_HOST or pass --host (see tools/saxon-dotnet).",
+            "No host program: set XYLEM_XSLT_HOST or pass --host (a program, see tools/saxon-dotnet, or builtin).",
         )?);
     host.repeat = repeat.max(1);
     host.allow_scripts = allow_scripts;

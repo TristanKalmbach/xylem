@@ -4367,11 +4367,12 @@ dependencies = [
  "similar",
  "toml 0.9.12+spec-1.1.0",
  "xylem-dom",
+ "xylem-xslt-engine",
 ]
 
 [[package]]
 name = "xylem-xslt-engine"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "regex",
  "xylem-dom",

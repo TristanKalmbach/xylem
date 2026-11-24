@@ -18,6 +18,7 @@ xylem-customize = { path = "crates/xylem-customize", version = "0.4.1" }
 xylem-xpath = { path = "crates/xylem-xpath", version = "0.4.1" }
 xylem-edit = { path = "crates/xylem-edit", version = "0.4.1" }
 xylem-xslt = { path = "crates/xylem-xslt", version = "0.4.1" }
+xylem-xslt-engine = { path = "crates/xylem-xslt-engine", version = "0.4.1" }
 
 [profile.release]
 opt-level = 3
