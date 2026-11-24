@@ -313,7 +313,8 @@ fn check(x: &Xml, a: NodeId, got: &Result<String, String>, base: &Path) -> Verdi
         "assert" => {
             let ns = x.in_scope(a);
             let r = with_session(Some(text.as_bytes()), base, &ns, |s| {
-                s.eval(x.text(a).trim())
+                // The catalog takes the assertion's effective boolean value.
+                s.eval(&format!("boolean(({}))", x.text(a).trim()))
             });
             match r {
                 Ok(Ok(v)) => pass(
