@@ -16,6 +16,10 @@ use std::time::{Duration, Instant};
 pub struct Env(Option<Rc<(QName, Rc<Seq>, Env)>>);
 
 type Tunnel = Rc<HashMap<QName, Rc<Seq>>>;
+/// Template rules of one mode, best first: (template, pattern alternative).
+type RuleList = Vec<(usize, usize)>;
+/// One key's index over one tree: key value to nodes in document order.
+type KeyIndex = HashMap<String, Vec<NodeRef>>;
 
 /// The dynamic context of an expression or instruction.
 #[derive(Clone)]
@@ -74,8 +78,8 @@ pub struct Engine<'s> {
     globals: RefCell<HashMap<QName, Rc<Seq>>>,
     evaluating: RefCell<Vec<QName>>,
     params: HashMap<String, String>,
-    rules: RefCell<HashMap<Option<QName>, Rc<Vec<(usize, usize)>>>>,
-    keys: RefCell<HashMap<(QName, u32), Rc<HashMap<String, Vec<NodeRef>>>>>,
+    rules: RefCell<HashMap<Option<QName>, Rc<RuleList>>>,
+    keys: RefCell<HashMap<(QName, u32), Rc<KeyIndex>>>,
     docs: RefCell<HashMap<String, u32>>,
     pub messages: RefCell<Vec<String>>,
     pub timing: Option<RefCell<Vec<TemplateTime>>>,
@@ -1005,7 +1009,7 @@ impl<'s> Engine<'s> {
         }
     }
 
-    fn from_matches(&self, x: NodeRef, n: &Number) -> R<bool> {
+    fn matches_from(&self, x: NodeRef, n: &Number) -> R<bool> {
         if let Some(alts) = &n.from {
             for a in alts {
                 if self.matches(x, a)? {
@@ -1066,7 +1070,7 @@ impl<'s> Engine<'s> {
                 return Ok(Some(None));
             }
             for a in ancestors_or_self(node) {
-                if self.from_matches(a, n)? {
+                if self.matches_from(a, n)? {
                     return Ok(Some(Some(a)));
                 }
             }
@@ -1087,7 +1091,7 @@ impl<'s> Engine<'s> {
                 let mut from = None;
                 if n.from.is_some() {
                     for &x in before.iter().rev() {
-                        if self.from_matches(x, n)? {
+                        if self.matches_from(x, n)? {
                             from = Some(x);
                             break;
                         }

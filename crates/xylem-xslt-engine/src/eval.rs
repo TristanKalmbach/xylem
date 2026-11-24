@@ -256,8 +256,7 @@ impl Engine<'_> {
                     n.idx
                 };
                 let mut acc = Vec::new();
-                loop {
-                    let Some(p) = t.node(cur).parent else { break };
+                while let Some(p) = t.node(cur).parent {
                     let sib = &t.node(p).children;
                     if let Some(at) = sib.iter().position(|&c| c == cur) {
                         for &c in sib[..at].iter().rev() {

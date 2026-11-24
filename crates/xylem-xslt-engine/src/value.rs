@@ -120,6 +120,7 @@ impl Atomic {
     pub fn str(s: impl Into<Rc<str>>) -> Atomic {
         Atomic::Str(s.into())
     }
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         match self {
             Atomic::Str(s) | Atomic::Untyped(s) => s.to_string(),

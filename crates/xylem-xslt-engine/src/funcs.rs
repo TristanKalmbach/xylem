@@ -422,9 +422,7 @@ impl Engine<'_> {
             }
             ("document" | "doc", 1 | 2) => {
                 let v = arg(0)?;
-                let base = match &*self.ss.base.to_string_lossy() {
-                    b => b.to_string(),
-                };
+                let base = self.ss.base.to_string_lossy().to_string();
                 let mut out = Vec::new();
                 for it in &v {
                     let (href, b) = match it {
