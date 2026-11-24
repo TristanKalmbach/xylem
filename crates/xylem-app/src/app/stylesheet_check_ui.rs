@@ -329,8 +329,8 @@ impl XylemApp {
         };
         if st.engine.trim().is_empty() {
             st.error = Some(
-                "Choose the engine program (SaxonDotnetHost.exe, see tools/saxon-dotnet), or ask \
-                 for xslt_host in the team configuration."
+                "Choose the engine: the program SaxonDotnetHost.exe (see tools/saxon-dotnet), or \
+                 builtin for Xylem's own engine; or ask for xslt_host in the team configuration."
                     .into(),
             );
             return None;
@@ -789,7 +789,7 @@ impl XylemApp {
                     ui,
                     "Engine program",
                     &mut st.engine,
-                    "SaxonDotnetHost.exe",
+                    "SaxonDotnetHost.exe, or builtin",
                     Field::Engine,
                     actions,
                 )

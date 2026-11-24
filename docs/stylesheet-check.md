@@ -38,6 +38,14 @@ Saxon-HE on .NET; build it with your copy of the Saxon assemblies (see its
 README). Point Xylem at it in the window's Engine field, or for everyone with
 `xslt_host` in the team configuration (see [team-setup.md](team-setup.md)).
 
+Instead of a program you can enter `builtin` (in the Engine field, as
+`xslt_host`, or as `--host builtin`) to use Xylem's own XSLT 2.0 engine,
+which needs no .NET or Saxon. It is new: it reproduces the publishing
+service's output on the stylesheets it has been tried with, but cannot yet
+time templates or write `xsl:output` results (the HTML step of Publication
+preview), and XSLT 1.0 support is limited. Keep the program as the reference
+while you try it. See [design/xslt-engine.md](design/xslt-engine.md).
+
 Like such a service, it runs a stylesheet whose root `version` is exactly
 `2.0` on Saxon and any other on .NET's XSLT 1.0 processor
 (`XslCompiledTransform`). Embedded scripts in XSLT 1.0 stylesheets
@@ -89,7 +97,7 @@ xylem-xslt-check new-suite <folder> --input "*-input.xml" --expected "*.fo"     
 ```
 xylem-xslt-check suite.toml [--stylesheet file.xsl]
                  [--against saved | committed[:<rev>] | other.xsl]
-                 [--host SaxonDotnetHost.exe] [--work folder]
+                 [--host SaxonDotnetHost.exe | builtin] [--work folder]
 ```
 
 `--host` defaults to the `XYLEM_XSLT_HOST` environment variable. The exit
