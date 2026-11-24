@@ -9,13 +9,18 @@
 //! or another stylesheet. [`compare`] ignores differences that are not real
 //! (generated IDs, a byte order mark) and describes the rest.
 
+pub mod analyze;
 pub mod check;
 pub mod compare;
 pub mod git;
 pub mod host;
 pub mod profile;
+pub mod proof;
+pub mod stylesheet;
 pub mod suite;
+pub mod xpath;
 
+pub use analyze::{Analysis, Applied, Finding, Rule, Severity, analyze, apply, revert};
 pub use check::{
     Baseline, CheckEnv, CheckReport, Outcome, ProfileReport, TestProfile, TestResult, check,
     profile,

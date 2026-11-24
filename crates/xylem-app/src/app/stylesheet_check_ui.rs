@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
+use xylem_xslt::proof::{self, Proof};
 use xylem_xslt::{
-    Baseline, CheckEnv, CheckReport, Host, Outcome, ProfileReport, Suite, check, profile,
+    Analysis, Applied, Baseline, CheckEnv, CheckReport, Host, Outcome, ProfileReport, Severity,
+    Suite, analyze, check, profile,
 };
 
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -28,6 +30,8 @@ enum Event {
     Progress(String),
     Done(Box<CheckReport>),
     Profiled(Box<ProfileReport>),
+    Analyzed(Box<Result<Analysis, String>>),
+    Proved(Box<Proof>),
 }
 
 #[derive(Default)]
@@ -46,6 +50,13 @@ pub struct StylesheetCheckState {
     error: Option<String>,
     /// Tests whose differences are shown.
     expanded: HashSet<usize>,
+    /// The last Analyze run.
+    analysis: Option<Analysis>,
+    /// Fixes applied from it, and the proof that they changed nothing.
+    applied: Option<Applied>,
+    proof: Option<Proof>,
+    /// Notes are listed only on request.
+    show_notes: bool,
 }
 
 enum Action {
@@ -56,6 +67,10 @@ enum Action {
     ShowFolder(PathBuf),
     Profile,
     OpenAt(PathBuf, u32),
+    Analyze,
+    /// Apply these findings' fixes (indices into the analysis).
+    Apply(Vec<usize>),
+    Undo,
 }
 
 #[derive(Clone, Copy)]
@@ -129,6 +144,9 @@ impl XylemApp {
                 Action::Run => self.start_stylesheet_check(),
                 Action::Profile => self.start_stylesheet_profile(),
                 Action::OpenAt(path, line) => self.open_stylesheet_at(&path, line),
+                Action::Analyze => self.start_stylesheet_analysis(),
+                Action::Apply(which) => self.apply_fixes(&which),
+                Action::Undo => self.undo_fixes(),
                 Action::Stop => {
                     if let Some((_, cancel)) = &self.stylesheet_check.running {
                         cancel.store(true, Ordering::Relaxed);
@@ -184,6 +202,9 @@ impl XylemApp {
         st.error = None;
         st.report = None;
         st.profile = None;
+        st.analysis = None;
+        st.applied = None;
+        st.proof = None;
         st.expanded.clear();
         let suite_path = PathBuf::from(st.suite.trim());
         let suite = match Suite::load(&suite_path) {
@@ -290,6 +311,135 @@ impl XylemApp {
         });
     }
 
+    fn start_stylesheet_analysis(&mut self) {
+        let Some((suite, stylesheet, host)) = self.prepare_check() else {
+            return;
+        };
+        let st = &mut self.stylesheet_check;
+        let (tx, rx) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = cancel.clone();
+        st.progress = "Starting…".into();
+        st.running = Some((rx, cancel));
+        std::thread::spawn(move || {
+            let tx2 = tx.clone();
+            let mut progress = move |s: String| {
+                let _ = tx2.send(Event::Progress(s));
+            };
+            let work = work_dir();
+            // Timing first: it ranks the findings and shows which code the
+            // tests reach.
+            let timed = profile(
+                &suite,
+                &stylesheet,
+                CheckEnv {
+                    host: &host,
+                    work: &work,
+                    progress: &mut progress,
+                    cancel: &stop,
+                },
+            );
+            let _ = tx.send(Event::Progress("Looking for slow patterns…".into()));
+            let timing = timed.error.is_none().then_some(&timed.combined);
+            let result = analyze(&stylesheet, timing);
+            let _ = tx.send(Event::Analyzed(Box::new(result)));
+        });
+    }
+
+    /// Applies fixes, then proves them in the background: every suite in the
+    /// suite's folder that uses a changed file is checked, and every
+    /// stylesheet that uses one is compiled.
+    fn apply_fixes(&mut self, which: &[usize]) {
+        let st = &mut self.stylesheet_check;
+        let Some(analysis) = &st.analysis else { return };
+        // A file open here with unsaved changes would be overwritten.
+        let files: HashSet<PathBuf> = which
+            .iter()
+            .filter_map(|&i| analysis.findings.get(i))
+            .flat_map(|f| f.edits.iter().map(|e| crate::find_files::path_key(&e.file)))
+            .collect();
+        let unsaved: Vec<String> = self
+            .docs
+            .iter()
+            .filter(|d| d.editor.is_dirty())
+            .filter_map(|d| d.path.as_ref())
+            .filter(|p| files.contains(&crate::find_files::path_key(p)))
+            .map(|p| p.display().to_string())
+            .collect();
+        if !unsaved.is_empty() {
+            st.error = Some(format!(
+                "Save or close {} first: the fixes change that file.",
+                unsaved.join(", ")
+            ));
+            return;
+        }
+        let applied = match xylem_xslt::apply(analysis, which) {
+            Ok(a) => a,
+            Err(e) => {
+                st.error = Some(e);
+                return;
+            }
+        };
+        let stylesheet = analysis.top.clone();
+        let changed = applied.files.clone();
+        st.analysis = None;
+        st.applied = Some(applied);
+        st.proof = None;
+        st.error = None;
+        let suite_path = PathBuf::from(st.suite.trim());
+        let suites = proof::suites_in(suite_path.parent().unwrap_or(Path::new(".")));
+        let baseline = match st.against {
+            Against::Saved => Baseline::Saved,
+            Against::Other if !st.other.trim().is_empty() => {
+                Baseline::Stylesheet(PathBuf::from(st.other.trim()))
+            }
+            _ => Baseline::Committed { rev: "HEAD".into() },
+        };
+        // Stylesheets elsewhere in the same tree that use the changed files.
+        let scope = xylem_xslt::git::locate(&stylesheet)
+            .ok()
+            .and_then(|(top, rel)| rel.components().next().map(|c| top.join(c.as_os_str())));
+        let host = Host::new(PathBuf::from(st.engine.trim()));
+        let (tx, rx) = channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = cancel.clone();
+        st.progress = "Proving the fixes…".into();
+        st.running = Some((rx, cancel));
+        std::thread::spawn(move || {
+            let tx2 = tx.clone();
+            let mut progress = move |s: String| {
+                let _ = tx2.send(Event::Progress(s));
+            };
+            let work = work_dir().join("proof");
+            let p = proof::prove(
+                &changed,
+                &suites,
+                &baseline,
+                scope.as_deref(),
+                CheckEnv {
+                    host: &host,
+                    work: &work,
+                    progress: &mut progress,
+                    cancel: &stop,
+                },
+            );
+            let _ = tx.send(Event::Proved(Box::new(p)));
+        });
+    }
+
+    fn undo_fixes(&mut self) {
+        let st = &mut self.stylesheet_check;
+        let Some(applied) = &st.applied else { return };
+        match xylem_xslt::revert(applied) {
+            Ok(()) => {
+                st.applied = None;
+                st.proof = None;
+                self.toast("The fixes were undone.", false);
+            }
+            Err(e) => st.error = Some(e),
+        }
+    }
+
     /// Opens a stylesheet with the template or function on `line` selected.
     /// Saxon reports the line where the element's start tag ends, so the
     /// template is the last `xsl:template` or `xsl:function` starting on or
@@ -325,14 +475,11 @@ impl XylemApp {
                 seen += 1;
             }
         }
+        // The last element starting on or before that line: the template
+        // for a timing row, the element itself for a finding.
         let target = doc
             .descendants(doc.root())
-            .filter(|&n| {
-                doc.name(n).is_some_and(|name| {
-                    let local = name.rsplit(':').next().unwrap_or(name);
-                    local == "template" || local == "function"
-                })
-            })
+            .filter(|&n| doc.is_element(n))
             .filter(|&n| offsets.get(n.index()).is_some_and(|&o| o <= line_end))
             .last();
         if let Some(el) = target {
@@ -351,6 +498,19 @@ impl XylemApp {
         loop {
             match rx.try_recv() {
                 Ok(Event::Progress(p)) => st.progress = p,
+                Ok(Event::Analyzed(result)) => {
+                    match *result {
+                        Ok(a) => st.analysis = Some(a),
+                        Err(e) => st.error = Some(e),
+                    }
+                    st.running = None;
+                    return;
+                }
+                Ok(Event::Proved(p)) => {
+                    st.proof = Some(*p);
+                    st.running = None;
+                    return;
+                }
                 Ok(Event::Profiled(report)) => {
                     st.error = report.error.clone();
                     st.profile = Some(*report);
@@ -480,6 +640,20 @@ impl XylemApp {
             {
                 actions.push(Action::Profile);
             }
+            if !busy
+                && ui
+                    .add_enabled_ui(!st.suite.trim().is_empty(), |ui| {
+                        crate::ui::button(ui, "Analyze")
+                    })
+                    .inner
+                    .on_hover_text(
+                        "Time the stylesheet on the tests, then list the patterns that make it slow, \
+                         with fixes where they are safe",
+                    )
+                    .clicked()
+            {
+                actions.push(Action::Analyze);
+            }
             if let Some(r) = &st.report
                 && !busy
                 && r.error.is_none()
@@ -514,6 +688,14 @@ impl XylemApp {
         });
         if let Some(e) = &st.error {
             crate::ui::notice(ui, crate::ui::Tone::Danger, e.clone());
+        }
+        if st.applied.is_some() {
+            proof_ui(ui, st, busy, actions);
+            return;
+        }
+        if let Some(a) = &st.analysis {
+            analysis_ui(ui, a, &mut st.show_notes, actions);
+            return;
         }
         if let Some(prof) = &st.profile {
             if prof.error.is_none() {
@@ -716,4 +898,255 @@ fn profile_ui(ui: &mut egui::Ui, prof: &ProfileReport, actions: &mut Vec<Action>
                     }
                 });
         });
+}
+
+/// The Analyze results: findings ranked by the time of the code they are in.
+fn analysis_ui(ui: &mut egui::Ui, a: &Analysis, show_notes: &mut bool, actions: &mut Vec<Action>) {
+    crate::ui::divider(ui);
+    let count = |s: Severity| a.findings.iter().filter(|f| f.severity == s).count();
+    let auto: Vec<usize> = a
+        .findings
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.auto())
+        .map(|(i, _)| i)
+        .collect();
+    ui.horizontal(|ui| {
+        crate::ui::muted(
+            ui,
+            format!(
+                "{} modules · {} fixes · {} suggestions · {} notes",
+                a.modules.len(),
+                count(Severity::Fix),
+                count(Severity::Suggestion),
+                count(Severity::Note)
+            ),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let label = format!(
+                "Apply {} fix{}",
+                auto.len(),
+                if auto.len() == 1 { "" } else { "es" }
+            );
+            if ui
+                .add_enabled_ui(!auto.is_empty(), |ui| crate::ui::primary_button(ui, &label))
+                .inner
+                .on_hover_text(
+                    "Apply the fixes that are equivalent by construction, in code the tests reach, \
+                     then check every test suite in the suite's folder that uses the changed files",
+                )
+                .clicked()
+            {
+                actions.push(Action::Apply(auto.clone()));
+            }
+            ui.checkbox(show_notes, format!("Notes ({})", count(Severity::Note)));
+        });
+    });
+    for w in &a.warnings {
+        crate::ui::notice(ui, crate::ui::Tone::Warning, w.clone());
+    }
+    ui.add_space(4.0);
+    let pal = crate::ui::palette(ui.ctx());
+    let mono = egui::TextStyle::Monospace.resolve(ui.style());
+    egui::ScrollArea::vertical()
+        .id_salt("stylesheet-analysis")
+        .auto_shrink([false, true])
+        .max_height(460.0)
+        .show(ui, |ui| {
+            for (i, f) in a.findings.iter().enumerate() {
+                if f.severity == Severity::Note && !*show_notes {
+                    continue;
+                }
+                crate::ui::card(ui, false, |ui| {
+                    ui.horizontal(|ui| {
+                        let (label, tone) = match f.severity {
+                            Severity::Fix => ("Fix", crate::ui::Tone::Success),
+                            Severity::Suggestion => ("Suggestion", crate::ui::Tone::Accent),
+                            Severity::Note => ("Note", crate::ui::Tone::Neutral),
+                        };
+                        crate::ui::badge(ui, label, tone);
+                        ui.label(RichText::new(f.rule.title()).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let time = match (f.self_ms, f.calls) {
+                                (_, Some(0)) => "not reached by the tests".to_string(),
+                                (Some(ms), Some(calls)) => format!("{ms:.1} ms · {calls} calls"),
+                                _ => String::new(),
+                            };
+                            crate::ui::muted(ui, time);
+                        });
+                    });
+                    let file = f
+                        .file
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let place = match &f.within {
+                        Some(w) => format!("{w}   {file}:{}", f.line),
+                        None => format!("{file}:{}", f.line),
+                    };
+                    if ui.link(place).clicked() {
+                        actions.push(Action::OpenAt(f.file.clone(), f.line));
+                    }
+                    ui.label(RichText::new(&f.detail).color(pal.text_muted));
+                    let code = |ui: &mut egui::Ui, tag: &str, text: &str, color| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(tag).color(pal.text_muted));
+                            ui.label(RichText::new(text).font(mono.clone()).color(color));
+                        });
+                    };
+                    match &f.after {
+                        Some(after) => {
+                            code(ui, "Was", &f.before, pal.danger);
+                            code(ui, "Now", after, pal.success);
+                        }
+                        None => code(ui, "", &f.before, pal.text),
+                    }
+                    if !f.edits.is_empty() {
+                        ui.horizontal(|ui| match (f.severity, f.reached()) {
+                            (Severity::Fix, Some(true)) => {
+                                if crate::ui::button(ui, "Apply").clicked() {
+                                    actions.push(Action::Apply(vec![i]));
+                                }
+                            }
+                            (Severity::Fix, _) => {
+                                crate::ui::muted(
+                                    ui,
+                                    "No test reaches this code, so the check cannot prove the fix. \
+                                     Add a test that does, or apply it by hand.",
+                                );
+                            }
+                            _ => {
+                                if crate::ui::button(ui, "Apply and check").clicked() {
+                                    actions.push(Action::Apply(vec![i]));
+                                }
+                            }
+                        });
+                    }
+                });
+                ui.add_space(4.0);
+            }
+        });
+}
+
+/// What was applied, and the proof that nothing changed.
+fn proof_ui(ui: &mut egui::Ui, st: &StylesheetCheckState, busy: bool, actions: &mut Vec<Action>) {
+    crate::ui::divider(ui);
+    let Some(applied) = &st.applied else { return };
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!(
+                "Applied {} fix{} to {} file{}",
+                applied.findings,
+                if applied.findings == 1 { "" } else { "es" },
+                applied.files.len(),
+                if applied.files.len() == 1 { "" } else { "s" }
+            ))
+            .strong(),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if !busy
+                && crate::ui::button(ui, "Undo")
+                    .on_hover_text("Put the files back as they were")
+                    .clicked()
+            {
+                actions.push(Action::Undo);
+            }
+        });
+    });
+    for f in &applied.files {
+        crate::ui::muted(ui, f.display().to_string());
+    }
+    let Some(p) = &st.proof else {
+        return;
+    };
+    ui.add_space(6.0);
+    if p.passed() {
+        let text = if p.compiled.is_empty() {
+            "Proven: every test gives the same output."
+        } else {
+            "Proven: every test gives the same output, and every stylesheet using the changed files compiles."
+        };
+        crate::ui::notice(ui, crate::ui::Tone::Success, text);
+    } else if p.cancelled {
+        crate::ui::notice(
+            ui,
+            crate::ui::Tone::Warning,
+            "The proof was stopped. Undo, or run the check again.",
+        );
+    } else {
+        crate::ui::notice(
+            ui,
+            crate::ui::Tone::Danger,
+            "Not proven: something below differs or failed. Undo the fixes, or look at the differences with Run check.",
+        );
+    }
+    for s in &p.suites {
+        let r = &s.report;
+        let same = r
+            .results
+            .iter()
+            .filter(|t| matches!(t.outcome, Outcome::Identical { .. }))
+            .count();
+        let (was, now): (u64, u64) = r.results.iter().fold((0, 0), |(a, b), t| {
+            (a + t.baseline_ms.unwrap_or(0), b + t.ms.unwrap_or(0))
+        });
+        let name = s
+            .suite
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let tone = if r.all_identical() {
+            crate::ui::Tone::Success
+        } else {
+            crate::ui::Tone::Danger
+        };
+        ui.horizontal(|ui| {
+            crate::ui::badge(ui, format!("{same} of {} the same", r.results.len()), tone);
+            ui.label(name);
+            if was > 0 {
+                crate::ui::muted(ui, format!("{now} ms, was {was} ms"));
+            }
+            if let Some(e) = &r.error {
+                crate::ui::muted(ui, e.clone());
+            }
+        });
+    }
+    if !p.unaffected.is_empty() {
+        crate::ui::muted(
+            ui,
+            format!(
+                "{} other suites do not use the changed files.",
+                p.unaffected.len()
+            ),
+        );
+    }
+    if !p.compiled.is_empty() {
+        let failed: Vec<_> = p.compiled.iter().filter(|c| !c.ok).collect();
+        crate::ui::muted(
+            ui,
+            format!(
+                "{} stylesheets using the changed files compiled{}.",
+                p.compiled.len() - failed.len(),
+                if failed.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {} failed", failed.len())
+                }
+            ),
+        );
+        for c in failed.iter().take(10) {
+            crate::ui::notice(
+                ui,
+                crate::ui::Tone::Danger,
+                format!(
+                    "{}: {}",
+                    c.stylesheet.display(),
+                    c.error.as_deref().unwrap_or("")
+                ),
+            );
+        }
+    }
+    for e in &p.errors {
+        crate::ui::notice(ui, crate::ui::Tone::Warning, e.clone());
+    }
 }

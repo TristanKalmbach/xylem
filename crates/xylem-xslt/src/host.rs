@@ -12,6 +12,16 @@ use std::process::{Command, Stdio};
 #[derive(Debug, Clone)]
 pub struct Host {
     pub program: PathBuf,
+    /// Runs per input; the median time is reported (timing runs only).
+    pub repeat: u32,
+}
+
+/// Whether one stylesheet compiled.
+#[derive(Debug, Clone)]
+pub struct Compiled {
+    pub stylesheet: PathBuf,
+    pub ok: bool,
+    pub error: Option<String>,
 }
 
 /// What became of one input.
@@ -53,6 +63,7 @@ impl Host {
     pub fn new(program: impl Into<PathBuf>) -> Host {
         Host {
             program: program.into(),
+            repeat: 1,
         }
     }
 
@@ -78,6 +89,8 @@ impl Host {
         }
         if profile {
             cmd.arg("--profile");
+        } else if self.repeat > 1 {
+            cmd.arg("--repeat").arg(self.repeat.to_string());
         }
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -151,6 +164,58 @@ impl Host {
             });
         }
         run
+    }
+}
+
+impl Host {
+    /// Compiles each stylesheet as a run would, without running it.
+    pub fn compile(&self, stylesheets: &[PathBuf]) -> Vec<Compiled> {
+        #[derive(Deserialize)]
+        struct CompileLine {
+            ok: Option<bool>,
+            error: Option<String>,
+        }
+        let mut results = Vec::new();
+        // In batches, to keep command lines short.
+        for chunk in stylesheets.chunks(20) {
+            let mut cmd = Command::new(&self.program);
+            cmd.arg("compile");
+            for s in chunk {
+                cmd.arg("--stylesheet").arg(s);
+            }
+            cmd.stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            quiet(&mut cmd);
+            let out = match cmd.output() {
+                Ok(o) => o,
+                Err(e) => {
+                    let error = format!("Could not start {}: {e}", self.program.display());
+                    results.extend(chunk.iter().map(|s| Compiled {
+                        stylesheet: s.clone(),
+                        ok: false,
+                        error: Some(error.clone()),
+                    }));
+                    continue;
+                }
+            };
+            let lines: Vec<CompileLine> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect();
+            for (i, s) in chunk.iter().enumerate() {
+                let l = lines.get(i);
+                results.push(Compiled {
+                    stylesheet: s.clone(),
+                    ok: l.and_then(|l| l.ok) == Some(true),
+                    error: match l {
+                        Some(l) => l.error.clone(),
+                        None => Some("The engine did not report on this stylesheet.".into()),
+                    },
+                });
+            }
+        }
+        results
     }
 }
 

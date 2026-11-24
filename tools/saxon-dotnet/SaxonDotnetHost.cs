@@ -21,6 +21,16 @@
 //   SaxonDotnetHost run --stylesheet <file.xsl> --job <input.xml>=<output>
 //                       [--job ...] [--param name=value ...] [--profile]
 //
+// --repeat N runs each job N times and reports the median time ("ms") and
+// every run's time ("runs_ms"), for comparing speed before and after a
+// change. The output is written by every run.
+//
+//   SaxonDotnetHost compile --stylesheet <file.xsl> [--stylesheet ...]
+//
+// compiles each stylesheet as the host would and prints one JSON line per
+// stylesheet ({"stylesheet":…,"ok":…,"ms":…,"error":…}); the exit code is 0
+// only when all compiled.
+//
 // --profile times every template and function (XSLT 2.0 only) and writes
 // <output>.profile.json next to each output: per template its kind, name or
 // match pattern, mode, file and line, how often it ran, the time spent in it
@@ -61,6 +71,9 @@ namespace Xylem.SaxonDotnet
     {
         public string Stylesheet;
         public bool Profile;
+        public bool CompileOnly;
+        public int Repeat = 1;
+        public readonly List<string> Stylesheets = new List<string>();
         public readonly List<Job> Jobs = new List<Job>();
         public readonly List<KeyValuePair<string, string>> Params = new List<KeyValuePair<string, string>>();
     }
@@ -81,6 +94,8 @@ namespace Xylem.SaxonDotnet
                 return 2;
             }
 
+            if (options.CompileOnly)
+                return CompileAll(options.Stylesheets);
             var stylesheet = Path.GetFullPath(options.Stylesheet);
             bool isXslt2;
             try
@@ -116,14 +131,21 @@ namespace Xylem.SaxonDotnet
                 var clock = Stopwatch.StartNew();
                 string error = null;
                 string profile = options.Profile && isXslt2 ? Path.GetFullPath(job.Output) + ".profile.json" : null;
+                var runs = new List<long>();
                 try
                 {
-                    var result = transform.Run(Path.GetFullPath(job.Input), options.Params, profile);
-                    var outputDir = Path.GetDirectoryName(Path.GetFullPath(job.Output));
-                    if (!string.IsNullOrEmpty(outputDir))
-                        Directory.CreateDirectory(outputDir);
-                    // As the host writes it: UTF-8 with a byte order mark.
-                    File.WriteAllText(job.Output, result, Encoding.UTF8);
+                    for (int r = 0; r < Math.Max(1, options.Repeat); r++)
+                    {
+                        var runClock = Stopwatch.StartNew();
+                        var result = transform.Run(Path.GetFullPath(job.Input), options.Params, profile);
+                        runClock.Stop();
+                        runs.Add(runClock.ElapsedMilliseconds);
+                        var outputDir = Path.GetDirectoryName(Path.GetFullPath(job.Output));
+                        if (!string.IsNullOrEmpty(outputDir))
+                            Directory.CreateDirectory(outputDir);
+                        // As the host writes it: UTF-8 with a byte order mark.
+                        File.WriteAllText(job.Output, result, Encoding.UTF8);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -137,7 +159,9 @@ namespace Xylem.SaxonDotnet
                     .Append(",\"input\":").Append(Json(job.Input))
                     .Append(",\"output\":").Append(Json(job.Output))
                     .Append(",\"ok\":").Append(error == null ? "true" : "false")
-                    .Append(",\"ms\":").Append(clock.ElapsedMilliseconds);
+                    .Append(",\"ms\":").Append(runs.Count > 1 ? Median(runs) : clock.ElapsedMilliseconds);
+                if (runs.Count > 1)
+                    line.Append(",\"runs_ms\":[").Append(string.Join(",", runs)).Append(']');
                 if (profile != null && error == null)
                     line.Append(",\"profile\":").Append(Json(profile));
                 if (error != null)
@@ -152,11 +176,51 @@ namespace Xylem.SaxonDotnet
             return failed == 0 ? 0 : 1;
         }
 
+        private static long Median(List<long> values)
+        {
+            var sorted = values.OrderBy(v => v).ToList();
+            return sorted[sorted.Count / 2];
+        }
+
+        /// <summary>Compiles each stylesheet as a run would.</summary>
+        private static int CompileAll(List<string> stylesheets)
+        {
+            int failed = 0;
+            foreach (var s in stylesheets)
+            {
+                var full = Path.GetFullPath(s);
+                var clock = Stopwatch.StartNew();
+                string error = null;
+                try
+                {
+                    if (IsXslt2(full))
+                        new SaxonTransform(full, false);
+                    else
+                        new DotnetTransform(full);
+                }
+                catch (Exception e)
+                {
+                    error = Describe(e);
+                    failed++;
+                }
+                clock.Stop();
+                var line = new StringBuilder();
+                line.Append("{\"stylesheet\":").Append(Json(s))
+                    .Append(",\"ok\":").Append(error == null ? "true" : "false")
+                    .Append(",\"ms\":").Append(clock.ElapsedMilliseconds);
+                if (error != null)
+                    line.Append(",\"error\":").Append(Json(error));
+                line.Append('}');
+                Console.WriteLine(line.ToString());
+            }
+            return failed == 0 ? 0 : 1;
+        }
+
         private static Options ParseArgs(string[] args)
         {
-            if (args.Length == 0 || args[0] != "run")
-                throw new ArgumentException("The first argument must be 'run'.");
-            var options = new Options();
+            if (args.Length == 0 || (args[0] != "run" && args[0] != "compile"))
+                throw new ArgumentException("The first argument must be 'run' or 'compile'.");
+            var options = new Options { CompileOnly = args[0] == "compile" };
             for (int i = 1; i < args.Length; i++)
             {
                 string value = i + 1 < args.Length ? args[i + 1] : null;
@@ -164,8 +228,18 @@ namespace Xylem.SaxonDotnet
                 {
                     case "--stylesheet":
                         options.Stylesheet = Require(args[i], value);
+                        options.Stylesheets.Add(options.Stylesheet);
                         i++;
                         break;
+                    case "--repeat":
+                        {
+                            int n;
+                            if (!int.TryParse(Require(args[i], value), out n) || n < 1)
+                                throw new ArgumentException("--repeat takes a number of runs.");
+                            options.Repeat = n;
+                            i++;
+                            break;
+                        }
                     case "--job":
                         {
                             var pair = Require(args[i], value);
@@ -195,6 +269,8 @@ namespace Xylem.SaxonDotnet
             }
             if (options.Stylesheet == null)
                 throw new ArgumentException("--stylesheet is required.");
+            if (options.CompileOnly)
+                return options;
             if (options.Jobs.Count == 0)
                 throw new ArgumentException("At least one --job is required.");
             return options;

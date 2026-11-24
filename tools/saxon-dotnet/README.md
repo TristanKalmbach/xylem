@@ -43,6 +43,18 @@ of them. Each job prints one line of JSON (`ok`, time in `ms`, `error`), and a
 summary line follows with the compile time. The exit code is 0 only when every
 job worked.
 
+`--repeat N` runs each job N times and reports the median time (`ms`) and
+every run's time (`runs_ms`), for comparing speed before and after a change.
+
+## Compiling only
+
+```
+bin\SaxonDotnetHost.exe compile --stylesheet a.xsl --stylesheet b.xsl
+```
+
+compiles each stylesheet as a run would and prints one JSON line per
+stylesheet (`ok`, `ms`, `error`). The exit code is 0 only when all compiled.
+
 ## Timing templates
 
 `--profile` times every template and function and writes

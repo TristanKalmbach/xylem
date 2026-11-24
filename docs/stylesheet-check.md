@@ -81,9 +81,59 @@ afterwards.
 
 From a terminal: `xylem-xslt-check suite.toml --profile [--top 25]`.
 
+## Finding and fixing slow patterns
+
+**Analyze** times the stylesheet on the tests, then reads it and everything
+it includes or imports, looking for patterns that make stylesheets slow.
+Each finding shows the template or function it is in, how much time that
+took and how often it ran, so the ones that matter come first. Click the
+place to open it.
+
+There are three kinds of finding:
+
+- **Fix**: a rewrite that gives the same result by construction and stays
+  inside the element it came from. Today: a lookup in an `xsl:when` test
+  that the code inside it evaluates again is computed once, in a variable
+  just before the `xsl:choose`.
+- **Suggestion**: a rewrite that is equivalent only under conditions the
+  analyser cannot see, or that adds a top-level declaration. Today: a
+  whole-document search for a value (`//figure[@id = $ref]`) becomes an
+  `xsl:key` lookup. **Apply and check** applies one on request.
+- **Note**: a costly pattern with no mechanical fix, with what to do
+  instead: `xsl:number level="any"`, `preceding::` and `following::`,
+  searches with `//` or `descendant::` inside templates, and searches by
+  value through a list held in a variable.
+
+**Apply N fixes** applies the fixes in code the tests reach (a fix the tests
+do not reach cannot be proven, so it is listed but not applied), then
+proves them:
+
+- every test suite in the suite's folder whose stylesheet uses a changed
+  file is checked against the chosen baseline (normally the last committed
+  version), and
+- every top-level stylesheet in the same tree (the top folder of the git
+  repository the stylesheet is in) that uses a changed file is compiled.
+
+A fix in a shared module (a base stylesheet that many import) reaches
+stylesheets no suite covers; compiling them at least shows they still load.
+**Undo** puts the files back as they were. Fixes change only the characters
+of the expressions they rewrite and the lines they add, so the rest of each
+file stays byte for byte as it was. A file open in Xylem with unsaved
+changes is not touched.
+
+From a terminal:
+
+```
+xylem-xslt-check suite.toml --analyze [--top 40]
+xylem-xslt-check suite.toml --analyze --fix --scope <IA folder> [--repeat 5]
+```
+
+`--repeat 5` times each test five times and reports the median, for
+comparing speed before and after.
+
 ## Not yet
 
-- Which templates the tests never reached (a change there is not proven by
-  the check).
-- Suggested fixes for slow patterns.
 - A preview of the result for authors.
+- Fixes for numbering (`xsl:number level="any"` run many times for the same
+  element) and for searches through translation and configuration lists:
+  both need a judgement call today, and are reported as notes.
