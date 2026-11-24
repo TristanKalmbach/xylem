@@ -4592,12 +4592,12 @@ impl XylemApp {
                         form(ui, "prefs-stylesheets", |f| {
                             f.row_with_hint(
                                 "Engine",
-                                "The program that runs stylesheets (SaxonDotnetHost.exe, see tools/saxon-dotnet), or builtin. Used before the team's; Xylem's own engine when neither is set.",
+                                "Leave empty for Xylem's own engine. Or a program that runs stylesheets the way a publishing service does (SaxonDotnetHost.exe, see tools/saxon-dotnet); used before the team's.",
                                 |ui| path_pref(ui, &mut self.settings.xslt_host, false, &mut unused),
                             );
                             f.row_with_hint(
                                 "Compare with",
-                                "Optional second engine (say SaxonDotnetHost.exe). Check stylesheet output also runs it and reports any test whose output differs between the two.",
+                                "Optional reference engine (say SaxonDotnetHost.exe). Check stylesheet output also runs it and reports any test whose output differs between the two.",
                                 |ui| path_pref(ui, &mut self.settings.xslt_reference, false, &mut unused),
                             );
                         });

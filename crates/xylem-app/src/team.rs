@@ -61,7 +61,8 @@ pub struct TeamConfig {
     /// [`crate::install`].
     pub update_source: Option<PathBuf>,
     /// Program that runs stylesheets for Check stylesheet output
-    /// (`SaxonDotnetHost.exe`, see `tools/saxon-dotnet`).
+    /// instead of Xylem's own engine (say `SaxonDotnetHost.exe`, see
+    /// `tools/saxon-dotnet`). Optional.
     pub xslt_host: Option<PathBuf>,
     /// A second engine Check stylesheet output compares with (say the .NET
     /// host while teams move to the built-in engine).

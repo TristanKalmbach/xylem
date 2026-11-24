@@ -31,34 +31,33 @@ change. From a terminal: `xylem-xslt-check suite.toml --report check.html`.
 
 ## The engine
 
-Stylesheets run in a separate program that behaves like the publishing
-service that runs them in production, so the output can be compared with
-what that service saves. `tools/saxon-dotnet` has one for services that host
-Saxon-HE on .NET; build it with your copy of the Saxon assemblies (see its
-README). Point Xylem at it in the window's Engine field, or for everyone with
-`xslt_host` in the team configuration (see [team-setup.md](team-setup.md)).
+Stylesheets run on Xylem's own XSLT 2.0 engine, which needs no .NET, Java or
+Saxon. It runs stylesheets the way the reference publishing service does, so
+its output can be compared with what that service saved: XSLT 2.0
+stylesheets (root `version="2.0"`) with the service's XSLT 2.0 rules, and
+any other version with its XSLT 1.0 rules, including how the service writes
+the HTML of the FO-to-HTML step. See [design/xslt-engine.md](design/xslt-engine.md)
+for what it supports and [design/conformance.md](design/conformance.md) for
+its W3C test-suite results.
 
-When no engine is chosen, Xylem uses its own XSLT 2.0 engine (`builtin`),
-which needs no .NET or Saxon. Choose a program in the Engine field, as
-`xslt_host`, or with `--host` to use it instead.
+### The .NET host (optional reference)
 
-To compare the two engines while you move from one to the other, set a
-second engine under **Preferences › Stylesheets › Compare with** (or
-`xslt_reference` in the team configuration, or `--reference <program>` on the
-command line). Check then runs the stylesheet on both and flags every test
-whose output differs between them; the exit code is non-zero if any does. It is new: it reproduces the publishing
-service's output on the stylesheets it has been tried with and can time
-templates (for Time templates and Analyze) and write the HTML step of
-Publication preview; XSLT 1.0 support covers what the FO-to-HTML stylesheet
-uses. Keep the program as the reference
-while you try it. See [design/xslt-engine.md](design/xslt-engine.md).
+`tools/saxon-dotnet` builds `SaxonDotnetHost.exe`, a program that runs
+stylesheets on Saxon-HE and .NET's XSLT 1.0 processor exactly as a .NET
+publishing service does (see its README; you need your own copy of the Saxon
+assemblies). Xylem no longer needs it. Use it as a reference:
 
-Like such a service, it runs a stylesheet whose root `version` is exactly
-`2.0` on Saxon and any other on .NET's XSLT 1.0 processor
-(`XslCompiledTransform`). Embedded scripts in XSLT 1.0 stylesheets
-(`msxsl:script`) are refused unless the team configuration sets
-`xslt_allow_scripts = true`, or `--allow-scripts` is given on the command
-line.
+- **Compare with** (Preferences › Stylesheets, `xslt_reference` in the team
+  configuration, or `--reference <program>`): Check also runs the stylesheet
+  on the host and flags every test whose output differs between the two
+  engines; the exit code is non-zero if any does.
+- **Engine** (Preferences › Stylesheets or the Check window's Engine field,
+  `xslt_host`, or `--host <program>`): run everything on the host instead of
+  the built-in engine.
+
+Embedded scripts in XSLT 1.0 stylesheets (`msxsl:script`) run only on the
+host, and only when the team configuration sets `xslt_allow_scripts = true`
+or `--allow-scripts` is given on the command line.
 
 ## Test suites
 
@@ -127,8 +126,8 @@ afterwards.
 
 From a terminal: `xylem-xslt-check suite.toml --profile [--top 25]`.
 
-Only stylesheets that run on Saxon (XSLT 2.0) can be timed; for an XSLT 1.0
-stylesheet Time templates says so instead of running.
+On the .NET host only XSLT 2.0 stylesheets can be timed; the built-in engine
+times both.
 
 ## Finding and fixing slow patterns
 
@@ -217,8 +216,6 @@ by the schema it points to, `schema_location = "*Cover*.xsd"`, or its file
 name, `file_name = "*-cover.xml"`; the first entry that matches is used):
 
 ```toml
-xslt_host = "tools/SaxonDotnetHost.exe"
-
 [[preview]]
 name = "Manual"
 root = "book"

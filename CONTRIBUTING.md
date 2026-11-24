@@ -35,8 +35,9 @@ cargo test --workspace
 | `xylem-schema` | XSD and DTD grammars, validation, "what may go here" queries. |
 | `xylem-style` | The CSS engine, including XMetaL's extensions. |
 | `xylem-xpath` | XPath 1.0, used for BREX checks. |
-| `xylem-xslt` | Stylesheet tools: checking output against saved output, timing, analysis, publication preview (through the .NET host for now). |
-| `xylem-xslt-engine` | Prototype pure-Rust XSLT 2.0 / XPath 2.0 processor; see [docs/design/xslt-engine.md](docs/design/xslt-engine.md). |
+| `xylem-xslt` | Stylesheet tools: checking output against saved output, timing, analysis, publication preview. |
+| `xylem-xslt-engine` | The built-in XSLT 2.0 / XPath 2.0 processor; see [docs/design/xslt-engine.md](docs/design/xslt-engine.md). |
+| `xylem-w3c` | Runs the W3C XPath and XSLT test suites against the engine; see [docs/design/conformance.md](docs/design/conformance.md). |
 | `xylem-s1000d` | S1000D identification, references, templates, BREX. |
 | `xylem-customize` | Doctype packages and the XMAX importer. |
 | `xylem-app` | The egui application. |

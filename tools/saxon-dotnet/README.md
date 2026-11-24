@@ -1,5 +1,10 @@
 # Saxon .NET host
 
+> **Optional.** Xylem runs stylesheets on its own built-in engine and does
+> not need this program. Build it only to compare Xylem's results with
+> Saxon's (Preferences › Stylesheets › Compare with, `xslt_reference`, or
+> `xylem-xslt-check --reference`), or to run stylesheets on Saxon instead.
+
 `SaxonDotnetHost.exe` runs XSLT stylesheets the way a .NET publishing service
 that hosts Saxon-HE does, so output made here can be compared with output
 that service saved. Xylem's stylesheet tools use it to check that a changed

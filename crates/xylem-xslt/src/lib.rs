@@ -3,8 +3,9 @@
 //!
 //! A [`Suite`] lists test inputs (with any output a publishing service saved
 //! for them). [`check`] runs the stylesheet under test on each input through
-//! a [`Host`] (a program that runs stylesheets the way the publishing service
-//! does, see `tools/saxon-dotnet`) and compares the result with a
+//! a [`Host`] (Xylem's built-in engine, or optionally a program such as
+//! `tools/saxon-dotnet` that runs stylesheets the way the publishing service
+//! does) and compares the result with a
 //! [`Baseline`]: the saved output, the stylesheet as last committed to git,
 //! or another stylesheet. [`compare`] ignores differences that are not real
 //! (generated IDs, a byte order mark) and describes the rest.

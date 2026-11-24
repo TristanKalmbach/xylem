@@ -34,8 +34,8 @@ brex = "brex/DMC-ACME-A-00-00-00-00A-022A-D_001-00_EN-US.XML"
 dictionary_dir = "dictionaries"
 dictionary_lang = "en_US"
 update_source = "updates"
-xslt_host = "tools/SaxonDotnetHost.exe"   # optional: Xylem's own engine when left out
-xslt_reference = "tools/SaxonDotnetHost.exe"   # optional: a second engine Check compares with
+# xslt_host = "tools/SaxonDotnetHost.exe"       # optional: run stylesheets on the .NET host instead of Xylem's engine
+# xslt_reference = "tools/SaxonDotnetHost.exe"  # optional: a second engine Check compares with
 xslt_allow_scripts = false               # let XSLT 1.0 stylesheets run msxsl:script
 
 [[preview]]                              # File › Publication preview

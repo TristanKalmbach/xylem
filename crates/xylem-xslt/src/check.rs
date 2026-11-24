@@ -409,11 +409,13 @@ pub fn profile(suite: &Suite, stylesheet: &Path, env: CheckEnv) -> ProfileReport
         report.error = Some(format!("Could not create {}: {e}", dir.display()));
         return report;
     }
+    // The .NET host times XSLT 2.0 only; the built-in engine times both.
     match crate::stylesheet::runs_as_xslt2(stylesheet) {
         Ok(true) => {}
+        Ok(false) if env.host.is_builtin() => {}
         Ok(false) => {
             report.error = Some(
-                "Time templates works on XSLT 2.0 stylesheets only. This one runs on an XSLT 1.0 processor (its version is not 2.0)."
+                "The .NET host times XSLT 2.0 stylesheets only, and this one runs as XSLT 1.0 (its version is not 2.0). Leave the engine empty (or builtin) to time it on Xylem's engine."
                     .into(),
             );
             return report;
