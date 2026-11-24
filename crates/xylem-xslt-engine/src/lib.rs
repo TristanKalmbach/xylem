@@ -48,6 +48,10 @@ pub struct Output {
     /// The principal result written as the stylesheet's `xsl:output` asks,
     /// the way the host's `--serialize` step writes it.
     pub serialized: String,
+    /// Secondary results from `xsl:result-document`: the `href` as the
+    /// stylesheet gave it (relative to the principal output) and the
+    /// result written the way `text` is.
+    pub results: Vec<(String, String)>,
     /// `xsl:message` output, in order.
     pub messages: Vec<String>,
     /// Every template and function that ran, when timing was asked for.
@@ -107,6 +111,7 @@ pub fn transform_bytes(
     Ok(Output {
         text: value::with_compat(compat, || serialize::host_style(&result)),
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
+        results: secondary(&engine, compat),
         messages: engine.messages.borrow().clone(),
         timing,
         total_ms: if time { total_ms } else { 0.0 },
@@ -168,10 +173,21 @@ pub fn transform_from(
     Ok(Output {
         text: value::with_compat(compat, || serialize::host_style(&result)),
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
+        results: secondary(&engine, compat),
         messages: engine.messages.borrow().clone(),
         timing: Vec::new(),
         total_ms: 0.0,
     })
+}
+
+/// The engine's secondary results, written the host's way.
+fn secondary(engine: &exec::Engine, compat: bool) -> Vec<(String, String)> {
+    engine
+        .results
+        .borrow()
+        .iter()
+        .map(|(h, t)| (h.clone(), value::with_compat(compat, || serialize::host_style(t))))
+        .collect()
 }
 
 impl Output {

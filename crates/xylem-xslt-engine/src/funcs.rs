@@ -196,11 +196,11 @@ impl Engine<'_> {
                 str_(parts.join(&s(1)?))
             }
             ("matches", 2 | 3) => {
-                let re = regex(&s(1)?, if n == 3 { s(2)? } else { String::new() })?;
+                let re = regex(self.xpath30(), &s(1)?, if n == 3 { s(2)? } else { String::new() })?;
                 bool_(re.is_match(&s(0)?)?)
             }
             ("replace", 3 | 4) => {
-                let re = regex(&s(1)?, if n == 4 { s(3)? } else { String::new() })?;
+                let re = regex(self.xpath30(), &s(1)?, if n == 4 { s(3)? } else { String::new() })?;
                 no_empty_match(&re)?;
                 let rep = replacement(&s(2)?, re.groups())?;
                 str_(re.replace_all(&s(0)?, rep.as_str()).into_owned())
@@ -210,7 +210,7 @@ impl Engine<'_> {
                 if src.is_empty() {
                     return Ok(vec![]);
                 }
-                let re = regex(&s(1)?, if n == 3 { s(2)? } else { String::new() })?;
+                let re = regex(self.xpath30(), &s(1)?, if n == 3 { s(2)? } else { String::new() })?;
                 no_empty_match(&re)?;
                 Ok(re
                     .split(&src)?
@@ -482,6 +482,15 @@ impl Engine<'_> {
                 }
                 Ok(out)
             }
+            ("deep-equal", 2 | 3) => {
+                let (x, y) = (arg(0)?, arg(1)?);
+                bool_(self.deep_equal(&x, &y))
+            }
+            ("doc-available", 1) => {
+                let href = s(0)?.trim().to_string();
+                let base = self.ss.base.to_string_lossy().to_string();
+                bool_(!href.is_empty() && matches!(self.document(&href, &base), Ok(Some(_))))
+            }
             ("format-number", 2 | 3) => {
                 let v = self.atomize(&arg(0)?);
                 let x = v.first().map(|a| a.to_f64()).unwrap_or(f64::NAN);
@@ -536,6 +545,76 @@ impl Engine<'_> {
             _ => Err(format!("function {}#{n} is not supported yet", name.local)),
         }
     }
+}
+
+impl Engine<'_> {
+    /// Whether XPath 3.0 regex syntax (`(?:...)`, the `q` flag) is allowed:
+    /// only for stylesheets of version 3.0 or later.
+    pub fn xpath30(&self) -> bool {
+        !self.ss.version.starts_with(['1', '2'])
+    }
+
+    /// `fn:deep-equal` with the codepoint collation.
+    pub fn deep_equal(&self, x: &Seq, y: &Seq) -> bool {
+        x.len() == y.len()
+            && x.iter().zip(y).all(|(a, b)| match (a, b) {
+                (Item::Atomic(p), Item::Atomic(q)) => atomic_equal(p, q),
+                (Item::Node(p), Item::Node(q)) => self.node_equal(*p, *q),
+                _ => false,
+            })
+    }
+
+    fn node_equal(&self, p: NodeRef, q: NodeRef) -> bool {
+        let (tp, tq) = (self.tree(p.tree), self.tree(q.tree));
+        let (a, b) = (tp.node(p.idx), tq.node(q.idx));
+        if a.kind != b.kind {
+            return false;
+        }
+        let names = match (&a.name, &b.name) {
+            (Some(m), Some(n)) => m.same(n),
+            (None, None) => true,
+            _ => false,
+        };
+        match a.kind {
+            Kind::Text | Kind::Comment => a.value == b.value,
+            Kind::Attribute | Kind::Pi => names && a.value == b.value,
+            Kind::Document | Kind::Element => {
+                if !names || a.attrs.len() != b.attrs.len() {
+                    return false;
+                }
+                let attrs_match = a.attrs.iter().all(|&i| {
+                    let x = tp.node(i);
+                    b.attrs.iter().any(|&j| {
+                        let y = tq.node(j);
+                        matches!((&x.name, &y.name), (Some(m), Some(n)) if m.same(n))
+                            && x.value == y.value
+                    })
+                });
+                // Comments and processing instructions are not compared.
+                let kids = |t: &crate::tree::Tree, n: &crate::tree::TNode, tree: u32| -> Vec<NodeRef> {
+                    n.children
+                        .iter()
+                        .filter(|&&c| !matches!(t.node(c).kind, Kind::Comment | Kind::Pi))
+                        .map(|&idx| NodeRef { tree, idx })
+                        .collect()
+                };
+                let (ka, kb) = (kids(&tp, a, p.tree), kids(&tq, b, q.tree));
+                drop((tp, tq));
+                attrs_match
+                    && ka.len() == kb.len()
+                    && ka.iter().zip(&kb).all(|(&m, &n)| self.node_equal(m, n))
+            }
+        }
+    }
+}
+
+/// `eq` for `deep-equal`: NaN equals NaN; values that cannot be compared
+/// are not equal.
+fn atomic_equal(p: &Atomic, q: &Atomic) -> bool {
+    if p.is_numeric() && q.is_numeric() && p.to_f64().is_nan() && q.to_f64().is_nan() {
+        return true;
+    }
+    matches!(crate::eval::compare(p, q), Ok(Some(std::cmp::Ordering::Equal)))
 }
 
 /// Converts an XPath replacement string (`$1`, `\$`, `\\`) to the `regex`
@@ -601,8 +680,8 @@ fn numeric_of(a: &Atomic) -> Atomic {
 }
 
 /// Builds a regex from an XPath pattern and flags (s, m, i, x, q).
-fn regex(pattern: &str, flags: String) -> R<XRegex> {
-    XRegex::new(pattern, &flags)
+fn regex(xpath30: bool, pattern: &str, flags: String) -> R<XRegex> {
+    XRegex::with_version(pattern, &flags, xpath30)
 }
 
 /// `fn:replace` and `fn:tokenize` reject patterns that match "".

@@ -25,8 +25,16 @@ fn invalid(pattern: &str, why: &str) -> String {
 }
 
 impl XRegex {
-    /// Compiles `pattern` with the XPath `flags` (`s`, `m`, `i`, `x`, `q`).
+    /// Compiles `pattern` with the XPath `flags` (`s`, `m`, `i`, `x`, `q`),
+    /// accepting XPath 3.0 syntax.
+    #[cfg(test)]
     pub fn new(pattern: &str, flags: &str) -> Result<Self, String> {
+        Self::with_version(pattern, flags, true)
+    }
+
+    /// Compiles `pattern`; without `xpath30`, the XPath 3.0 additions
+    /// (non-capturing groups, the `q` flag) are errors.
+    pub fn with_version(pattern: &str, flags: &str, xpath30: bool) -> Result<Self, String> {
         let mut f = Flags::default();
         for c in flags.chars() {
             match c {
@@ -34,7 +42,7 @@ impl XRegex {
                 'm' => f.multi_line = true,
                 'i' => f.case_insensitive = true,
                 'x' => f.extended = true,
-                'q' => f.literal = true,
+                'q' if xpath30 => f.literal = true,
                 _ => return Err(format!("{ERR_FLAGS}: unknown regex flag '{c}'")),
             }
         }
@@ -42,6 +50,7 @@ impl XRegex {
             (regex::escape(pattern), false)
         } else {
             let mut t = Translator::new(pattern, &f);
+            t.xpath30 = xpath30;
             t.translate().map_err(|why| invalid(pattern, &why))?;
             (t.out, t.uses_backrefs)
         };
@@ -152,6 +161,8 @@ struct Translator {
     uses_backrefs: bool,
     /// Under the `i` flag, `\p{..}` still tests the exact character.
     case_insensitive: bool,
+    /// Accept XPath 3.0 additions such as `(?:...)`.
+    xpath30: bool,
 }
 
 type T<V> = Result<V, String>;
@@ -193,6 +204,7 @@ impl Translator {
             closed: Vec::new(),
             uses_backrefs: false,
             case_insensitive: f.case_insensitive,
+            xpath30: true,
         }
     }
 
@@ -309,6 +321,8 @@ impl Translator {
                     }
                     self.groups += 1;
                     self.out.push('(');
+                } else if !self.xpath30 {
+                    return Err("non-capturing groups '(?:' need XPath 3.0".into());
                 } else {
                     self.pos += 2;
                     self.out.push_str("(?:");

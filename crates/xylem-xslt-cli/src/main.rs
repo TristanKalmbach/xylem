@@ -105,7 +105,13 @@ fn transform(args: &[String]) -> Result<(), String> {
         eprintln!("message: {m}");
     }
     match output {
-        Some(p) => std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display())),
+        Some(p) => {
+            std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))?;
+            write_secondary(&p, &out.results, files)
+        }
+        None if !out.results.is_empty() => {
+            Err("the stylesheet writes secondary results; give --output".into())
+        }
         None => {
             print!("{text}");
             Ok(())
@@ -246,4 +252,34 @@ fn handle(req: &Request, cache: &mut HashMap<PathBuf, Cached>) -> serde_json::Va
             serde_json::json!({"id": req.id, "ok": true, "ms": ms, "messages": out.messages, "output_text": text})
         }
     }
+}
+
+/// Writes `xsl:result-document` results next to the principal output.
+/// Hrefs must stay below the output's folder; with file access off there
+/// may be none.
+fn write_secondary(
+    principal: &std::path::Path,
+    results: &[(String, String)],
+    files: bool,
+) -> Result<(), String> {
+    use std::path::Component;
+    if results.is_empty() {
+        return Ok(());
+    }
+    if !files {
+        return Err("secondary results need file access".into());
+    }
+    let dir = principal.parent().unwrap_or(std::path::Path::new("."));
+    for (href, text) in results {
+        let rel = std::path::Path::new(href.strip_prefix("file:").unwrap_or(href));
+        if !rel.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)) {
+            return Err(format!("result-document href '{href}' leaves the output folder"));
+        }
+        let p = dir.join(rel);
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))?;
+    }
+    Ok(())
 }

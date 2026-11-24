@@ -205,10 +205,18 @@ fn run_case(
         .entry(stylesheet.clone())
         .or_insert_with(|| Stylesheet::compile(&stylesheet));
     let got = match ss {
-        Ok(ss) => transform_from(ss, env.source.as_deref(), &params, &start).map(|o| o.text),
+        Ok(ss) => transform_from(ss, env.source.as_deref(), &params, &start).map(|o| {
+            SECONDARY.with(|r| *r.borrow_mut() = o.results);
+            o.text
+        }),
         Err(e) => Err(e.clone()),
     };
     check(x, assertion, &got, base)
+}
+
+thread_local! {
+    /// The secondary results of the test being checked (href, text).
+    static SECONDARY: std::cell::RefCell<Vec<(String, String)>> = Default::default();
 }
 
 fn check(x: &Xml, a: NodeId, got: &Result<String, String>, base: &Path) -> Verdict {
@@ -327,6 +335,30 @@ fn check(x: &Xml, a: NodeId, got: &Result<String, String>, base: &Path) -> Verdi
                 Ok(Err(e)) => Verdict::Fail(format!("assertion: {e}")),
                 Err(_) => Verdict::Skip("result is not a single document".into()),
             }
+        }
+        "assert-result-document" => {
+            if got.is_err() {
+                return Verdict::Fail(format!("{got:?}"));
+            }
+            let uri = x.attr(a, "uri").unwrap_or("");
+            let doc = SECONDARY.with(|r| {
+                r.borrow()
+                    .iter()
+                    .find(|(h, _)| h == uri || h.ends_with(&format!("/{uri}")))
+                    .map(|(_, t)| t.clone())
+            });
+            let Some(doc) = doc else {
+                return Verdict::Fail(format!("no result document '{uri}'"));
+            };
+            let doc = Ok(doc);
+            let kids = x.all_kids(a);
+            for k in kids {
+                let v = check(x, k, &doc, base);
+                if !matches!(v, Verdict::Pass) {
+                    return v;
+                }
+            }
+            Verdict::Pass
         }
         other => Verdict::Skip(format!("assertion {other}")),
     }

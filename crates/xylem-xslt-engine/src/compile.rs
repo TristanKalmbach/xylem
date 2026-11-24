@@ -84,6 +84,12 @@ pub enum Instr {
     Variable(Param),
     Choose(Vec<(Expr, Vec<Instr>)>, Vec<Instr>),
     If(Expr, Vec<Instr>),
+    /// `xsl:result-document`: a secondary result at `href`, or the
+    /// principal result when `href` is absent or empty.
+    ResultDocument {
+        href: Option<Avt>,
+        body: Vec<Instr>,
+    },
     /// `xsl:analyze-string`.
     AnalyzeString {
         select: Expr,
@@ -944,6 +950,10 @@ impl Compiler {
             "processing-instruction" => Instr::Pi {
                 name: e.avt(e.req("name")?)?,
                 select: e.opt_expr("select")?,
+                body: self.body(e)?,
+            },
+            "result-document" => Instr::ResultDocument {
+                href: e.attr("href").map(|s| e.avt(s)).transpose()?,
                 body: self.body(e)?,
             },
             "message" => Instr::Message {

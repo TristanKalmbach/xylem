@@ -117,6 +117,9 @@ pub struct Engine<'s> {
     keys: RefCell<HashMap<(QName, u32), Rc<KeyIndex>>>,
     docs: RefCell<HashMap<String, u32>>,
     pub messages: RefCell<Vec<String>>,
+    /// Secondary results from `xsl:result-document`: (href, tree), in the
+    /// order they were finished.
+    pub results: RefCell<Vec<(String, Tree)>>,
     /// Variables visible to patterns: those in scope at an `xsl:number`
     /// whose `count` / `from` patterns are being matched.
     pattern_env: RefCell<Env>,
@@ -141,6 +144,7 @@ impl<'s> Engine<'s> {
             keys: RefCell::default(),
             docs: RefCell::default(),
             messages: RefCell::default(),
+            results: RefCell::default(),
             pattern_env: RefCell::default(),
             timing: time.then(|| {
                 RefCell::new(Profiler {
@@ -776,6 +780,23 @@ impl<'s> Engine<'s> {
                     self.body(body, d, out)?;
                 }
             }
+            Instr::ResultDocument { href, body } => {
+                let href = match href {
+                    Some(h) => self.avt(h, d)?,
+                    None => String::new(),
+                };
+                if href.trim().is_empty() {
+                    self.body(body, d, out)?;
+                } else {
+                    let href = href.trim().to_string();
+                    if self.results.borrow().iter().any(|(h, _)| *h == href) {
+                        return Err(format!("XTDE1490: two result documents at '{href}'"));
+                    }
+                    let mut doc = Out::document();
+                    self.body(body, d, &mut doc)?;
+                    self.results.borrow_mut().push((href, doc.finish_tree()));
+                }
+            }
             Instr::AnalyzeString {
                 select,
                 regex,
@@ -788,7 +809,7 @@ impl<'s> Engine<'s> {
                     Some(f) => self.avt(f, d)?,
                     None => String::new(),
                 };
-                let re = crate::xsd_regex::XRegex::new(&self.avt(regex, d)?, &flags)?;
+                let re = crate::xsd_regex::XRegex::with_version(&self.avt(regex, d)?, &flags, self.xpath30())?;
                 if re.is_match("")? {
                     return Err("XTDE1150: the regex of xsl:analyze-string matches a zero-length string".into());
                 }
