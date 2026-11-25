@@ -61,14 +61,22 @@ fn compile_errors_name_the_file_and_line() {
     let bad_xpath = INC.replace("select=\"'ok'\"", "select=\"1 +\"");
     let read = |p: &Path| (p == inc_path).then(|| bad_xpath.clone().into_bytes());
     let e: XsltError = Stylesheet::compile_with(&top, &read).err().unwrap();
-    assert_eq!(e.file.as_deref(), Some(inc_path.to_string_lossy().as_ref()), "{e}");
+    assert_eq!(
+        e.file.as_deref(),
+        Some(inc_path.to_string_lossy().as_ref()),
+        "{e}"
+    );
     assert_eq!(e.line, Some(2), "{e}");
 
     // Malformed XML: file, line and column.
     let malformed = "<xsl:stylesheet version=\"2.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">\n  <xsl:template>\n</xsl:stylesheet>";
     let read = |p: &Path| (p == inc_path).then(|| malformed.as_bytes().to_vec());
     let e = Stylesheet::compile_with(&top, &read).err().unwrap();
-    assert_eq!(e.file.as_deref(), Some(inc_path.to_string_lossy().as_ref()), "{e}");
+    assert_eq!(
+        e.file.as_deref(),
+        Some(inc_path.to_string_lossy().as_ref()),
+        "{e}"
+    );
     assert_eq!(e.line, Some(3), "{e}");
     assert!(e.column.is_some(), "{e}");
 

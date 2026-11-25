@@ -32,7 +32,7 @@ pub(crate) mod xsd_regex;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub use compile::{ModuleReader, OutputSpec, Source, Stylesheet};
+pub use compile::{ModuleReader, OutputSpec, Source, Stylesheet, VersionRule};
 pub use error::{Frame, XsltError};
 pub use exec::TemplateTime;
 pub use value::with_file_access;
@@ -99,7 +99,7 @@ pub fn transform_bytes(
     let source = tree::from_dom(&doc, &ss.base.to_string_lossy(), ss)?;
     let engine = exec::Engine::new(ss, source, params.clone(), time);
     let started = std::time::Instant::now();
-    let compat = ss.version.starts_with('1');
+    let compat = ss.runs_as_xslt1();
     let result = value::with_compat(compat, || engine.run())?;
     let total_ms = started.elapsed().as_secs_f64() * 1000.0;
     let mut timing = Vec::new();
@@ -178,7 +178,7 @@ pub fn transform_from(
         None => tree::Tree::new_document(),
     };
     let engine = exec::Engine::new(ss, source, params.clone(), false);
-    let compat = ss.version.starts_with('1');
+    let compat = ss.runs_as_xslt1();
     let result = value::with_compat(compat, || match start {
         Start::Rules => engine.run(),
         Start::Mode(uri, local) => engine.run_mode(&tree::QName::new(uri, local, "")),

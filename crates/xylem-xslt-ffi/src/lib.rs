@@ -34,6 +34,11 @@ pub const XYLEM_OUTPUT_SERIALIZE: u32 = 1;
 /// Do not let the transformation read files: `document()` and external
 /// entities in the input fail instead. Stylesheet modules are still read.
 pub const XYLEM_NO_FILE_ACCESS: u32 = 2;
+/// For [`xylem_xslt_compile_flags`]: run every stylesheet of version 2.0 or
+/// higher as XSLT 2.0. Without it a stylesheet runs as XSLT 2.0 only when
+/// its root `version` is exactly `2.0`, as the reference publishing
+/// service chooses its processor; anything else runs with XSLT 1.0 rules.
+pub const XYLEM_VERSIONS_2_AND_ABOVE: u32 = 4;
 
 /// A compiled stylesheet. Opaque to callers. It holds no per-run state,
 /// so transformations on one handle run concurrently.
@@ -152,6 +157,26 @@ pub unsafe extern "C" fn xylem_xslt_compile(path: *const c_char) -> *mut XylemSt
     })
 }
 
+/// Like [`xylem_xslt_compile`], with `flags` (`XYLEM_VERSIONS_2_AND_ABOVE`).
+///
+/// # Safety
+/// `path` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xylem_xslt_compile_flags(
+    path: *const c_char,
+    flags: u32,
+) -> *mut XylemStylesheet {
+    // SAFETY: the caller upholds `xylem_xslt_compile`'s contract.
+    let ss = unsafe { xylem_xslt_compile(path) };
+    if flags & XYLEM_VERSIONS_2_AND_ABOVE != 0
+        // SAFETY: a non-null handle was just created and is not shared yet.
+        && let Some(h) = unsafe { ss.as_mut() }
+    {
+        h.inner.version_rule = xylem_xslt_engine::VersionRule::TwoAndAbove;
+    }
+    ss
+}
+
 /// The XSLT version the stylesheet runs as: 1 or 2 (0 for a null handle).
 ///
 /// # Safety
@@ -163,11 +188,7 @@ pub unsafe extern "C" fn xylem_xslt_version_of(ss: *const XylemStylesheet) -> u3
         let Some(ss) = (unsafe { ss.as_ref() }) else {
             return 0;
         };
-        if ss.inner.version.starts_with('1') {
-            1
-        } else {
-            2
-        }
+        if ss.inner.runs_as_xslt1() { 1 } else { 2 }
     })
 }
 

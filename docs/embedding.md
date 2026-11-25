@@ -22,8 +22,15 @@ cargo build --release -p xylem-xslt-cli      # target/release/xylem-xslt(.exe)
 
 ## What the engine does
 
-- Stylesheets whose root `version` is `2.0` (or higher) run as XSLT 2.0;
-  others run with XSLT 1.0 rules (numbers as doubles, 1.0 comparisons).
+- **Versions.** A stylesheet runs as XSLT 2.0 when its root `version`
+  attribute is exactly `2.0`; anything else (`1.0`, `3.0`, none, a
+  simplified stylesheet) runs with XSLT 1.0 rules (numbers as doubles, 1.0
+  comparisons, the XSLT 1.0 processor's output details). This is how the
+  reference publishing service picks Saxon or .NET's XSLT 1.0 processor.
+  To run version 2.0 and higher as XSLT 2.0 instead, compile with
+  `XYLEM_VERSIONS_2_AND_ABOVE` (`xylem_xslt_compile_flags`), set
+  `Stylesheet::version_rule` to `VersionRule::TwoAndAbove` in Rust, or pass
+  `--versions 2-and-above` to `xylem-xslt`.
 - **Output.** *Publish* output (`XYLEM_OUTPUT_PUBLISH`, or `serialize`
   off) is what a .NET publishing service that hosts Saxon saves: the
   result tree written as `XmlDocument.OuterXml` would write it, with no
@@ -40,10 +47,14 @@ cargo build --release -p xylem-xslt-cli      # target/release/xylem-xslt(.exe)
   compiles from the stylesheet file does. The input document gets the
   stylesheet's folder as its base URI.
 - **`generate-id()`** gives the same values as Saxon 9.7 (`d<doc>e<node>`).
-- **Not supported yet:** `xsl:for-each-group`, `xsl:analyze-string`,
-  `xsl:result-document`, `xsl:next-match`, `xsl:apply-imports`, schema
-  awareness, output indentation. A stylesheet that uses them fails to
-  compile with a message naming the instruction. See
+- **Not supported yet:** schema awareness, `xsl:namespace`,
+  `format-date`/`format-dateTime`/`format-time`, `normalize-unicode`,
+  output indentation (`indent="yes"` and the XSLT 1.0 HTML default), and
+  W3C error codes on most errors. Secondary results (`xsl:result-document`)
+  are written next to the principal output by the CLI and host, and refused
+  by the C API. A stylesheet that uses an unsupported instruction fails to
+  compile with a message naming it; an unsupported function fails when it
+  is called. See
   [design/xslt-engine.md](design/xslt-engine.md) and
   [design/conformance.md](design/conformance.md).
 

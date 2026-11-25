@@ -18,6 +18,10 @@ extern "C" {
 #define XYLEM_OUTPUT_SERIALIZE 1u
 /* Refuse document() and external entities in the input. */
 #define XYLEM_NO_FILE_ACCESS   2u
+/* For xylem_xslt_compile_flags: run version 2.0 and higher as XSLT 2.0.
+ * Without it only a root version of exactly "2.0" runs as XSLT 2.0, as the
+ * reference publishing service chooses; anything else runs as XSLT 1.0. */
+#define XYLEM_VERSIONS_2_AND_ABOVE 4u
 
 typedef struct XylemStylesheet XylemStylesheet;
 
@@ -37,6 +41,8 @@ const char *xylem_xslt_last_log(void);
 /* Compiles a stylesheet file and what it includes or imports.
  * Returns NULL on failure. */
 XylemStylesheet *xylem_xslt_compile(const char *path);
+/* The same with flags (XYLEM_VERSIONS_2_AND_ABOVE). */
+XylemStylesheet *xylem_xslt_compile_flags(const char *path, uint32_t flags);
 /* 1 or 2: the XSLT version the stylesheet runs as (0 for NULL). */
 uint32_t xylem_xslt_version_of(const XylemStylesheet *ss);
 

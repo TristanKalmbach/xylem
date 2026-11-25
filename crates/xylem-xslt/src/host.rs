@@ -384,14 +384,7 @@ fn run_builtin(
     Run {
         jobs: out,
         compile_ms: Some(compile_ms),
-        xslt: Some(
-            if ss.version.starts_with('1') {
-                "1.0"
-            } else {
-                "2.0"
-            }
-            .into(),
-        ),
+        xslt: Some(if ss.runs_as_xslt1() { "1.0" } else { "2.0" }.into()),
         error: None,
     }
 }

@@ -238,9 +238,30 @@ pub struct AttrSet {
     pub body: Vec<Instr>,
 }
 
+/// Which stylesheets run with XSLT 2.0 rules; the others run with XSLT 1.0
+/// rules (backwards-compatible mode: numbers as doubles, 1.0 comparisons,
+/// the XSLT 1.0 processor's output details).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VersionRule {
+    /// As the reference publishing service chooses its processor: a root
+    /// `version` attribute of exactly `2.0` runs as XSLT 2.0, anything else
+    /// (`1.0`, `3.0`, a missing attribute) as XSLT 1.0.
+    #[default]
+    ReferenceHost,
+    /// Version 2.0 and higher (`3.0` included) run as XSLT 2.0.
+    TwoAndAbove,
+}
+
 #[derive(Debug, Default)]
 pub struct Stylesheet {
+    /// The `version` the stylesheet declares.
     pub version: String,
+    /// Whether the stylesheet declares its `version` on the root element as
+    /// an attribute without a namespace (not a simplified stylesheet's
+    /// `xsl:version`).
+    pub version_on_root: bool,
+    /// How [`Stylesheet::runs_as_xslt1`] reads `version`.
+    pub version_rule: VersionRule,
     pub templates: Vec<Template>,
     pub named: HashMap<QName, usize>,
     pub functions: HashMap<(QName, usize), Function>,
@@ -258,6 +279,18 @@ pub struct Stylesheet {
     /// reference processor gives each a document number before the
     /// source document's (spec note 1).
     pub extra_modules: u32,
+}
+
+impl Stylesheet {
+    /// Whether this stylesheet runs with XSLT 1.0 rules under its
+    /// [`VersionRule`].
+    pub fn runs_as_xslt1(&self) -> bool {
+        let v = self.version.trim();
+        match self.version_rule {
+            VersionRule::ReferenceHost => !(self.version_on_root && v == "2.0"),
+            VersionRule::TwoAndAbove => v.parse::<f64>().map_or(true, |n| n < 2.0),
+        }
+    }
 }
 
 impl StripSpace for Stylesheet {
@@ -674,6 +707,7 @@ impl Compiler<'_> {
             return Ok(());
         }
         if self.ss.version.is_empty() {
+            self.ss.version_on_root = el.attr("version").is_some();
             self.ss.version = el.attr("version").unwrap_or("1.0").to_string();
         }
         // Imports first: each gets a lower precedence than this module.

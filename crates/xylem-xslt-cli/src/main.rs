@@ -29,7 +29,9 @@
 //!
 //! A request names `input` (a file) or `input_text`; the result goes to
 //! `output` (a file) or is returned as `output_text`. `params`,
-//! `serialize` and `no_file_access` are optional. A stylesheet is compiled
+//! `serialize`, `no_file_access` and `versions` (`reference-host`, the
+//! default: only a root `version="2.0"` runs as XSLT 2.0, as the reference
+//! publishing service decides; or `2-and-above`) are optional. A stylesheet is compiled
 //! again when its file changes; `{"command":"clear"}` drops every compiled
 //! stylesheet and `{"command":"quit"}` ends the session.
 
@@ -39,9 +41,9 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Instant, SystemTime};
-use xylem_xslt_engine::{Stylesheet, XsltError, transform_bytes, with_file_access};
+use xylem_xslt_engine::{Stylesheet, VersionRule, XsltError, transform_bytes, with_file_access};
 
-const USAGE: &str = "usage: xylem-xslt transform --stylesheet <file.xsl> --input <file.xml> [--output <file>] [--param name=value ...] [--serialize] [--no-file-access]
+const USAGE: &str = "usage: xylem-xslt transform --stylesheet <file.xsl> --input <file.xml> [--output <file>] [--param name=value ...] [--serialize] [--no-file-access] [--versions reference-host|2-and-above]
        xylem-xslt compile --stylesheet <file.xsl> ...
        xylem-xslt serve";
 
@@ -73,6 +75,7 @@ fn transform(args: &[String]) -> Result<(), String> {
     let mut params = HashMap::new();
     let mut serialize = false;
     let mut files = true;
+    let mut versions = VersionRule::ReferenceHost;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || {
@@ -93,12 +96,14 @@ fn transform(args: &[String]) -> Result<(), String> {
             }
             "--serialize" => serialize = true,
             "--no-file-access" => files = false,
+            "--versions" => versions = version_rule(&value()?)?,
             _ => return Err(format!("unknown argument {a}\n{USAGE}")),
         }
     }
     let stylesheet = stylesheet.ok_or(USAGE)?;
     let input = input.ok_or(USAGE)?;
-    let ss = Stylesheet::compile(&stylesheet)?;
+    let mut ss = Stylesheet::compile(&stylesheet)?;
+    ss.version_rule = versions;
     let bytes = std::fs::read(&input).map_err(|e| format!("{}: {e}", input.display()))?;
     let mut out = with_file_access(files, || transform_bytes(&ss, &bytes, &params, false))?;
     let text = if serialize {
@@ -125,6 +130,17 @@ fn transform(args: &[String]) -> Result<(), String> {
             print!("{text}");
             Ok(())
         }
+    }
+}
+
+/// `--versions` / `"versions"`: which stylesheets run as XSLT 2.0.
+fn version_rule(s: &str) -> Result<VersionRule, String> {
+    match s {
+        "reference-host" => Ok(VersionRule::ReferenceHost),
+        "2-and-above" => Ok(VersionRule::TwoAndAbove),
+        _ => Err(format!(
+            "--versions takes reference-host or 2-and-above, got {s}"
+        )),
     }
 }
 
@@ -167,6 +183,8 @@ struct Request {
     params: HashMap<String, serde_json::Value>,
     serialize: bool,
     no_file_access: bool,
+    /// `reference-host` (the default) or `2-and-above`.
+    versions: Option<String>,
 }
 
 struct Cached {
@@ -226,7 +244,13 @@ fn handle(req: &Request, cache: &mut HashMap<PathBuf, Cached>) -> serde_json::Va
             Err(e) => return fail(e),
         }
     }
-    let ss = &cache[path].ss;
+    let rule = match req.versions.as_deref().map(version_rule).transpose() {
+        Ok(r) => r.unwrap_or_default(),
+        Err(e) => return fail(e),
+    };
+    let ss = &mut cache.get_mut(path).expect("compiled above").ss;
+    ss.version_rule = rule;
+    let ss = &*ss;
     let bytes = match (&req.input, &req.input_text) {
         (Some(p), _) => match std::fs::read(p) {
             Ok(b) => b,

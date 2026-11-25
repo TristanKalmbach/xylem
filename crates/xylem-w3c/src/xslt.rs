@@ -204,9 +204,14 @@ fn run_case(
     let Some(assertion) = x.all_kids(result).into_iter().next() else {
         return Verdict::Skip("no assertion".into());
     };
-    let ss = compiled
-        .entry(stylesheet.clone())
-        .or_insert_with(|| Stylesheet::compile(&stylesheet));
+    let ss = compiled.entry(stylesheet.clone()).or_insert_with(|| {
+        // Conformance, not publishing-host parity: 2.0 and above (a
+        // 2.0 test may say `version="2.1"`) run as XSLT 2.0.
+        Stylesheet::compile(&stylesheet).map(|mut ss| {
+            ss.version_rule = xylem_xslt_engine::VersionRule::TwoAndAbove;
+            ss
+        })
+    });
     let got = match ss {
         Ok(ss) => transform_from(ss, env.source.as_deref(), &params, &start).map(|o| {
             SECONDARY.with(|r| *r.borrow_mut() = o.results);

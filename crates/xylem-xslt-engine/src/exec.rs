@@ -900,7 +900,7 @@ impl<'s> Engine<'s> {
                             None => " ".into(),
                         };
                         let v = self.eval(e, d)?;
-                        if self.ss.version.starts_with('1') {
+                        if self.ss.runs_as_xslt1() {
                             v.first().map(|i| self.string_of(i)).unwrap_or_default()
                         } else {
                             self.joined(&v, &sep)
