@@ -216,7 +216,13 @@ impl XylemApp {
                 None => std::fs::read(&out)
                     .map_err(|e| format!("{}: {e}", out.display()))
                     .and_then(|bytes| {
-                        let named = out.with_extension(result_extension(&bytes));
+                        // The saved-document form is XML (`<div />`); only
+                        // the xsl:output form is a page for a browser.
+                        let ext = match result_extension(&bytes) {
+                            "html" if !host.serialize => "xml",
+                            ext => ext,
+                        };
+                        let named = out.with_extension(ext);
                         std::fs::rename(&out, &named)
                             .map(|_| named)
                             .map_err(|e| e.to_string())

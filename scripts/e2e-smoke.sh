@@ -161,4 +161,7 @@ params = { mode = "draft" }
 TEAM
 TMP="$native/preview" TEMP="$native/preview" TMPDIR="$native/preview" XYLEM_TEAM_CONFIG="$native/preview/xylem-team.toml"     XYLEM_CONFIG_DIR="$native/preview/cfg" XYLEM_PACKAGES=samples/doctypes     XYLEM_SCRIPT="cmd PublicationPreview;;wait 40;;quit"     timeout 120 "$bin" "$repo/samples/manual-sample.xml" > /dev/null 2>&1
 check preview-html "$out/preview/xylem-preview/manual-sample.html" '<p class="banner">Draft</p>'
+# Written as xsl:output asks, so a browser reads it: the empty list item
+# is not self-closed.
+check preview-html-form "$out/preview/xylem-preview/manual-sample.html" '<p></p>'
 exit $fail

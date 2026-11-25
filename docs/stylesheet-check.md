@@ -234,7 +234,9 @@ in the structured or the Source view.
 ## Running a stylesheet on a document
 
 **Tools › Run stylesheet** (Ctrl+Shift+R) runs a stylesheet on a document
-and opens the result: in Xylem, or in the browser when it is an HTML page.
+and opens the result: in the browser when it is an HTML page written as
+`xsl:output` asks, otherwise in Xylem (the way a publishing service saves
+it is an XML document, so it opens as one).
 The stylesheet and document are filled in from the open documents (the
 active one is the stylesheet or the document, whichever it is), with the
 parameters as `name=value` pairs. A document open in Xylem is read as it is
@@ -294,7 +296,8 @@ html = "stylesheets/fo-to-html.xsl"
 params = { output = "html" }
 ```
 
-Without `html`, the stylesheet's own output opens in Xylem.
+Without `html`, the stylesheet's own output is the preview, written as its
+`xsl:output` asks: an HTML page opens in the browser, anything else in Xylem.
 
 To try a preview without changing the team file, add one in File ›
 Preferences › Stylesheets. Your own entries are tried before the team's.

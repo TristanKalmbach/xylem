@@ -26,6 +26,12 @@ fn run_preview(
     stem: &str,
 ) -> Result<PathBuf, String> {
     let fo = dir.join(format!("{stem}.fo"));
+    // A two-step preview's first result is what a publishing service saves
+    // and hands to the second step. A one-step result is the page itself,
+    // so it is written as its `xsl:output` asks: the saved-document form
+    // writes empty elements as `<div />`, which a browser reads as an open tag.
+    let mut host = host.clone();
+    host.serialize = cfg.html.is_none();
     let first = host.run(
         &cfg.stylesheet,
         &[(input, fo.clone())],
