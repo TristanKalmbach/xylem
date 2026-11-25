@@ -142,4 +142,10 @@ XYLEM_CONFIG_DIR="$native/safe/cfg" XYLEM_PACKAGES=samples/doctypes     XYLEM_SC
 check save-writes-file "$out/safe/docs/s.xml" "hydraulic linesSAVED"
 check save-keeps-backup "$(ls "$out"/safe/cfg/backups/*/s.*.xml 2>/dev/null | head -1)" "Inspect the hydraulic lines.</para>"
 if ls -a "$out/safe/docs" | grep -q lock; then echo "FAIL  lock-removed-on-close"; fail=1; else echo "ok    lock-removed-on-close"; fi
+# Tools > Run stylesheet on the built-in engine: the result is written as
+# xsl:output asks and labelled as the UTF-8 file it is.
+rm -rf "$out/run" && mkdir -p "$out/run"
+TMP="$native/run" TEMP="$native/run" TMPDIR="$native/run" XYLEM_CONFIG_DIR="$native/run/cfg" XYLEM_PACKAGES=samples/doctypes     XYLEM_SCRIPT="cmd RunStylesheet;;wait 5;;clickui As xsl:output asks;;clickui Run;;wait 40;;quit"     timeout 120 "$bin" "$repo/samples/manual-sample.xml" "$repo/samples/xslt/manual-to-html.xsl" > /dev/null 2>&1
+check run-stylesheet "$out/run/xylem-run/manual-sample-result.html" '<h2>2. Safety</h2>'
+check run-stylesheet-utf8 "$out/run/xylem-run/manual-sample-result.html" 'charset=utf-8'
 exit $fail

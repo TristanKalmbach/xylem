@@ -51,6 +51,8 @@ for t in ${THEMES:-light dark}; do
     shot dm-info "$t" "cmd S1000dInfo" "$dm"
     shot project "$t" "pick $repo/samples/s1000d;;cmd ShowProject;;cmd ProjectFolder;;wait 20;;cmd CheckReferences;;wait 10" "$dm"
     shot project-empty "$t" "cmd ShowProject"
+    shot run-stylesheet "$t" "cmd RunStylesheet;;wait 5;;clickui Run;;wait 30" "$manual $repo/samples/xslt/manual-to-html.xsl"
+    shot stylesheet-references "$t" "cmd View source;;caretend name=\"number\";;cmd StylesheetReferences;;wait 10" "$repo/samples/xslt/common.xsl"
     SIZE=700,520 shot narrow "$t" "caret Inspect the"
 done
 echo "Screenshots in $out"
