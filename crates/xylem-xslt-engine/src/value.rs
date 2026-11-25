@@ -163,6 +163,7 @@ impl Atomic {
     }
     pub fn is_stringlike(&self) -> bool {
         match self {
+            Atomic::Sub("hexBinary" | "base64Binary", _) => false,
             Atomic::Sub(_, v) => v.is_stringlike(),
             o => matches!(o, Atomic::Str(_) | Atomic::Untyped(_)),
         }
@@ -220,7 +221,7 @@ fn sub_type_name(t: &str) -> &'static str {
         "xs:byte", "xs:nonNegativeInteger", "xs:unsignedLong", "xs:unsignedInt",
         "xs:unsignedShort", "xs:unsignedByte", "xs:positiveInteger", "xs:normalizedString",
         "xs:token", "xs:language", "xs:NMTOKEN", "xs:Name", "xs:NCName", "xs:ID", "xs:IDREF",
-        "xs:ENTITY", "xs:anyURI", "xs:float",
+        "xs:ENTITY", "xs:anyURI", "xs:float", "xs:hexBinary", "xs:base64Binary",
     ];
     NAMES.iter().copied().find(|n| &n[3..] == t).unwrap_or("xs:anyAtomicType")
 }
@@ -354,6 +355,13 @@ pub fn format_double(d: f64) -> String {
 
 /// Numeric comparison where any operand is a double, else exact.
 pub fn cmp_numeric(a: &Atomic, b: &Atomic) -> Option<Ordering> {
+    // xs:float against a non-double: both promote to float precision.
+    let fl = |x: &Atomic| matches!(x, Atomic::Sub("float", _));
+    let dbl = |x: &Atomic| matches!(x, Atomic::Dbl(_));
+    if (fl(a) && !dbl(b) && !fl(b)) || (fl(b) && !dbl(a) && !fl(a)) {
+        let f = |x: &Atomic| x.to_f64() as f32 as f64;
+        return f(a).partial_cmp(&f(b));
+    }
     if matches!(a, Atomic::Sub(..)) || matches!(b, Atomic::Sub(..)) {
         return cmp_numeric(&a.prim(), &b.prim());
     }

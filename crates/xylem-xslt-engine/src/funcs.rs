@@ -14,7 +14,9 @@ pub fn round_half_up(x: f64) -> f64 {
     if !x.is_finite() {
         return x;
     }
-    (x + 0.5).floor()
+    // Halves round up; a negative value that rounds to zero stays -0.
+    let r = (x + 0.5).floor();
+    if r == 0.0 && x.is_sign_negative() { -0.0 } else { r }
 }
 
 impl Engine<'_> {
@@ -329,11 +331,29 @@ impl Engine<'_> {
             ("max" | "min", 1) => {
                 let v = self.atomize(&arg(0)?);
                 let mut best: Option<Atomic> = None;
+                // The numeric type all values promote to (0 none, 1 decimal,
+                // 2 float, 3 double), and whether a NaN was seen.
+                let mut widest = 0;
+                let mut nan = false;
                 for a in v {
                     let a = match a {
-                        Atomic::Untyped(s) => Atomic::Dbl(crate::value::parse_double(&s)),
+                        Atomic::Untyped(_) => cast(&a, "double")?,
                         o => o,
                     };
+                    if a.is_numeric() {
+                        let rank = match &a {
+                            Atomic::Dbl(_) => 3,
+                            Atomic::Sub("float", _) => 2,
+                            Atomic::Dec(_) => 1,
+                            _ => 0,
+                        };
+                        widest = widest.max(rank);
+                        nan |= a.to_f64().is_nan();
+                    }
+                    if nan {
+                        best = Some(a);
+                        continue;
+                    }
                     best = Some(match best {
                         None => a,
                         Some(b) => {
@@ -347,6 +367,17 @@ impl Engine<'_> {
                         }
                     });
                 }
+                let best = match best {
+                    Some(b) if b.is_numeric() => Some(match widest {
+                        3 if nan => Atomic::Dbl(f64::NAN),
+                        2 if nan => cast(&Atomic::Dbl(f64::NAN), "float")?,
+                        3 => cast(&b, "double")?,
+                        2 => cast(&b, "float")?,
+                        1 if !matches!(b, Atomic::Dec(_)) => cast(&b, "decimal")?,
+                        _ => b,
+                    }),
+                    o => o,
+                };
                 Ok(best.map(Item::Atomic).into_iter().collect())
             }
             ("avg", 1) => {
@@ -370,16 +401,31 @@ impl Engine<'_> {
                 let Some(a) = v.first() else {
                     return Ok(vec![]);
                 };
+                if !a.is_numeric() && !matches!(a, Atomic::Untyped(_)) {
+                    return Err(format!("XPTY0004: {}() needs a numeric value, not {}", name.local, a.type_name()));
+                }
                 let a = numeric_of(a);
-                let f = |x: f64| match &*name.local {
+                let op = &*name.local;
+                let f = |x: f64| match op {
                     "round" => round_half_up(x),
                     "floor" => x.floor(),
                     "ceiling" => x.ceil(),
                     _ => x.abs(),
                 };
+                const S: i128 = crate::value::DEC_SCALE;
                 Ok(vec![Item::Atomic(match a {
-                    Atomic::Int(i) => Atomic::Int(if &*name.local == "abs" { i.abs() } else { i }),
-                    Atomic::Dec(x) => Atomic::Dec(Decimal::from_f64(f(x.to_f64())).unwrap_or(x)),
+                    Atomic::Int(i) if op == "abs" => i
+                        .checked_abs()
+                        .map(Atomic::Int)
+                        .unwrap_or_else(|| Atomic::Dec(Decimal(-(i as i128) * S))),
+                    Atomic::Int(i) => Atomic::Int(i),
+                    Atomic::Dec(x) => Atomic::Dec(Decimal(match op {
+                        "round" => (x.0 + S / 2).div_euclid(S) * S,
+                        "floor" => x.0.div_euclid(S) * S,
+                        "ceiling" => -(-x.0).div_euclid(S) * S,
+                        _ => x.0.abs(),
+                    })),
+                    Atomic::Sub("float", v) => Atomic::Sub("float", Rc::new(Atomic::Dbl(f(v.to_f64()) as f32 as f64))),
                     o => Atomic::Dbl(f(o.to_f64())),
                 })])
             }
@@ -444,7 +490,9 @@ impl Engine<'_> {
                 let uri = s(0)?;
                 let lex = s(1)?;
                 let (prefix, local) = lex.split_once(':').unwrap_or(("", &lex));
-                if local.is_empty() || (!prefix.is_empty() && uri.is_empty()) {
+                let names_ok = crate::types::is_ncname(local)
+                    && (!lex.contains(':') || crate::types::is_ncname(prefix));
+                if !names_ok || (!prefix.is_empty() && uri.is_empty()) {
                     return Err(format!("FOCA0002: invalid QName '{lex}'"));
                 }
                 Ok(vec![Item::Atomic(Atomic::QName(Rc::new((
@@ -485,7 +533,17 @@ impl Engine<'_> {
                 } else {
                     0
                 };
-                Ok(vec![Item::Atomic(round_half_even(&numeric_of(a), p))])
+                if !a.is_numeric() && !matches!(a, Atomic::Untyped(_)) {
+                    return Err(format!("XPTY0004: round-half-to-even() needs a numeric value, not {}", a.type_name()));
+                }
+                let r = match numeric_of(a) {
+                    Atomic::Sub("float", v) => {
+                        let r = round_half_even(&Atomic::Dbl(v.to_f64() as f32 as f64), p);
+                        Atomic::Sub("float", Rc::new(Atomic::Dbl(r.to_f64() as f32 as f64)))
+                    }
+                    o => round_half_even(&o, p),
+                };
+                Ok(vec![Item::Atomic(r)])
             }
             ("remove", 2) => {
                 let mut v = arg(0)?;

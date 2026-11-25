@@ -83,7 +83,7 @@ fn intern(t: &str) -> Option<&'static str> {
         "nonPositiveInteger", "negativeInteger", "long", "int", "short", "byte",
         "nonNegativeInteger", "unsignedLong", "unsignedInt", "unsignedShort", "unsignedByte",
         "positiveInteger", "normalizedString", "token", "language", "NMTOKEN", "Name",
-        "NCName", "ID", "IDREF", "ENTITY", "anyURI", "float",
+        "NCName", "ID", "IDREF", "ENTITY", "anyURI", "float", "hexBinary", "base64Binary",
     ];
     NAMES.iter().copied().find(|n| *n == t)
 }
@@ -94,6 +94,22 @@ fn is_name_start(c: char) -> bool {
 
 fn is_name_char(c: char) -> bool {
     is_name_start(c) || c.is_alphanumeric() || matches!(c, '-' | '.' | '\u{B7}')
+}
+
+/// Whether `s` is an `xs:NCName`.
+pub fn is_ncname(s: &str) -> bool {
+    let mut c = s.chars();
+    c.next().is_some_and(|c| is_name_start(c) && c != ':') && c.all(|c| is_name_char(c) && c != ':')
+}
+
+/// Whether `s` is acceptable as an `xs:anyURI`: every `%` starts an
+/// escape, and a scheme, when present, is not empty.
+fn is_uri(s: &str) -> bool {
+    let b = s.as_bytes();
+    let escapes = b.iter().enumerate().all(|(i, c)| {
+        *c != b'%' || (b.len() > i + 2 && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit())
+    });
+    escapes && !s.starts_with(':')
 }
 
 /// Checks and normalises the lexical form of a derived string type.
@@ -154,10 +170,13 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
             return Ok(Atomic::Sub(name, Rc::new(Atomic::Int(v as i64))));
         }
         match t {
-            "anyURI" if lexical || matches!(a, Atomic::Sub("anyURI", _)) => Ok(Atomic::Sub(
-                name,
-                Rc::new(Atomic::str(s.trim_matches(crate::tree::is_xml_space))),
-            )),
+            "anyURI" if lexical || matches!(a, Atomic::Sub("anyURI", _)) => {
+                let v = s.trim_matches(crate::tree::is_xml_space);
+                if !is_uri(v) {
+                    return Err(bad());
+                }
+                Ok(Atomic::Sub(name, Rc::new(Atomic::str(v))))
+            }
             "float" => {
                 let d = match &prim {
                     _ if lexical => {
@@ -173,7 +192,22 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
                 };
                 Ok(Atomic::Sub(name, Rc::new(Atomic::Dbl(d as f32 as f64))))
             }
+            "hexBinary" | "base64Binary" => {
+                let bytes = match a {
+                    Atomic::Sub("hexBinary", v) => hex_decode(&v.to_string()),
+                    Atomic::Sub("base64Binary", v) => base64_decode(&v.to_string()),
+                    _ if lexical && t == "hexBinary" => hex_decode(s.trim_matches(crate::tree::is_xml_space)),
+                    _ if lexical => base64_decode(&s),
+                    _ => return Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name())),
+                }
+                .ok_or_else(bad)?;
+                let text = if t == "hexBinary" { hex_encode(&bytes) } else { base64_encode(&bytes) };
+                Ok(Atomic::Sub(name, Rc::new(Atomic::str(text))))
+            }
             "anyURI" => Err(format!("XPTY0004: cannot cast {} to xs:anyURI", a.type_name())),
+            _ if matches!(a, Atomic::Sub("hexBinary" | "base64Binary", _)) => {
+                Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name()))
+            }
             _ if lexical || matches!(a, Atomic::Sub(..)) => string_value(t, &s)
                 .map(|v| Atomic::Sub(name, Rc::new(Atomic::str(v))))
                 .ok_or_else(bad),
@@ -182,3 +216,71 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
     })())
 }
 
+
+/// Decodes the lexical form of `xs:hexBinary`.
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    let b = s.as_bytes();
+    if b.len() % 2 != 0 {
+        return None;
+    }
+    b.chunks(2)
+        .map(|p| u8::from_str_radix(std::str::from_utf8(p).ok()?, 16).ok())
+        .collect()
+}
+
+/// The canonical (upper-case) form of `xs:hexBinary`.
+fn hex_encode(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02X}")).collect()
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Decodes the lexical form of `xs:base64Binary`: spaces allowed between
+/// characters, padding checked as XML Schema requires.
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    let chars: Vec<u8> = s.bytes().filter(|c| !c.is_ascii_whitespace()).collect();
+    if chars.len() % 4 != 0 {
+        return None;
+    }
+    let pad = chars.iter().rev().take_while(|c| **c == b'=').count();
+    if pad > 2 || chars[..chars.len() - pad].contains(&b'=') {
+        return None;
+    }
+    let val = |c: u8| B64.iter().position(|x| *x == c).map(|p| p as u32);
+    let mut out = Vec::new();
+    for q in chars.chunks(4) {
+        let mut n = 0u32;
+        let mut used = 0;
+        for &c in q {
+            n <<= 6;
+            if c != b'=' {
+                n |= val(c)?;
+                used += 1;
+            }
+        }
+        let bytes = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+        match used {
+            4 => out.extend_from_slice(&bytes),
+            3 if n & 0xFF == 0 => out.extend_from_slice(&bytes[..2]),
+            2 if n & 0xFFFF == 0 => out.push(bytes[0]),
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+/// The canonical form of `xs:base64Binary`.
+fn base64_encode(b: &[u8]) -> String {
+    let mut out = String::new();
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            if i <= c.len() {
+                out.push(B64[(n >> (18 - 6 * i)) as usize & 63] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}

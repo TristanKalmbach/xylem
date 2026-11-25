@@ -566,6 +566,11 @@ impl Parser<'_> {
         if self.is_kw("castable") && matches!(self.peek_at(1), Tok::Name(n) if n == "as") {
             self.i += 2;
             let (t, opt) = self.single_type()?;
+            if t == "QName" {
+                if let Expr::Literal(Atomic::Str(s)) = &l {
+                    return Ok(Expr::Literal(Atomic::Bool(self.qname_value(s).is_ok())));
+                }
+            }
             return Ok(Expr::Castable(Box::new(l), t, opt));
         }
         Ok(l)
@@ -575,6 +580,11 @@ impl Parser<'_> {
         if self.is_kw("cast") && matches!(self.peek_at(1), Tok::Name(n) if n == "as") {
             self.i += 2;
             let (t, opt) = self.single_type()?;
+            if t == "QName" {
+                if let Expr::Literal(Atomic::Str(s)) = &l {
+                    return Ok(Expr::Literal(self.qname_value(s)?));
+                }
+            }
             return Ok(Expr::Cast(Box::new(l), t, opt));
         }
         Ok(l)
@@ -584,7 +594,31 @@ impl Parser<'_> {
             return Err("expected a type name".into());
         };
         let q = self.qname(&n, false)?;
+        if &*q.uri == XS_NS && matches!(&*q.local, "NOTATION" | "anyAtomicType") {
+            return Err(format!("XPST0080: cannot cast to the abstract type xs:{}", q.local));
+        }
         Ok((q.local.to_string(), self.sym("?")))
+    }
+
+    /// The `xs:QName` value of a string literal cast to `xs:QName`, its
+    /// prefix resolved against the static namespaces.
+    fn qname_value(&self, s: &str) -> Result<Atomic, String> {
+        let lex = s.trim_matches(|c: char| c.is_ascii_whitespace());
+        let (p, l) = lex.split_once(':').unwrap_or(("", lex));
+        let ncname = |x: &str| {
+            let mut c = x.chars();
+            c.next().is_some_and(|c| c.is_alphabetic() || c == '_')
+                && c.all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '·'))
+        };
+        if !ncname(l) || (!p.is_empty() && !ncname(p)) {
+            return Err(format!("FORG0001: invalid QName '{lex}'"));
+        }
+        let uri = match (self.ns)(p) {
+            Some(u) => u,
+            None if p.is_empty() => String::new(),
+            None => return Err(format!("FONS0004: undeclared prefix '{p}'")),
+        };
+        Ok(Atomic::QName(std::rc::Rc::new((uri.into(), p.into(), l.into()))))
     }
     pub fn seq_type(&mut self) -> Result<SeqType, String> {
         let item = match self.next() {
@@ -880,6 +914,14 @@ impl Parser<'_> {
                 } else {
                     QName::new(FN_NS, &n, "")
                 };
+                if &*q.uri == XS_NS {
+                    if matches!(&*q.local, "NOTATION" | "anyAtomicType") {
+                        return Err(format!("XPST0017: no constructor function xs:{}", q.local));
+                    }
+                    if let ("QName", [Expr::Literal(Atomic::Str(s))]) = (&*q.local, args.as_slice()) {
+                        return Ok(Expr::Literal(self.qname_value(s)?));
+                    }
+                }
                 Ok(Expr::Call(q, args))
             }
             t => Err(format!("unexpected {t:?}")),

@@ -813,6 +813,19 @@ fn general_cmp(op: BinOp, p: &Atomic, q: &Atomic) -> R<bool> {
 
 /// Compares two atomic values of comparable types; None for NaN.
 pub fn compare(p: &Atomic, q: &Atomic) -> R<Option<Ordering>> {
+    let binary = |a: &Atomic| match a {
+        Atomic::Sub(t @ ("hexBinary" | "base64Binary"), _) => Some(*t),
+        _ => None,
+    };
+    if let (Some(a), Some(b)) = (binary(p), binary(q)) {
+        if a == b {
+            let eq = p.to_string() == q.to_string();
+            return Ok(Some(if eq { Ordering::Equal } else { Ordering::Less }));
+        }
+    }
+    if binary(p).is_some() || binary(q).is_some() {
+        return Err(format!("XPTY0004: cannot compare {} with {}", p.type_name(), q.type_name()));
+    }
     if matches!(p, Atomic::Sub(..)) || matches!(q, Atomic::Sub(..)) {
         return compare(&p.prim(), &q.prim());
     }
@@ -857,6 +870,22 @@ fn holds(op: BinOp, o: Option<Ordering>) -> bool {
 
 /// Casts an atomic value to the named built-in type (local name).
 pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
+    if t == "QName" {
+        return match a {
+            Atomic::QName(_) => Ok(a.clone()),
+            _ => Err(format!("XPTY0004: cannot cast {} to xs:QName", a.type_name())),
+        };
+    }
+    if let Atomic::Sub("hexBinary" | "base64Binary", _) = a {
+        if !matches!(t, "string" | "untypedAtomic" | "hexBinary" | "base64Binary") {
+            return Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name()));
+        }
+        if !matches!(t, "string" | "untypedAtomic") {
+            return crate::types::cast(a, t).unwrap_or_else(|| {
+                Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name()))
+            });
+        }
+    }
     if let Atomic::Sub(..) = a {
         if !matches!(t, "string" | "untypedAtomic") {
             return cast(&a.prim(), t);
@@ -895,7 +924,7 @@ pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
             Atomic::Bool(b) => Atomic::Int(*b as i64),
             _ => Atomic::Dec(to_dec(a).ok_or_else(bad)?),
         },
-        "double" | "float" => match a {
+        "double" => match a {
             Atomic::Str(_) | Atomic::Untyped(_) => {
                 let d = parse_double(&s);
                 if d.is_nan() && s.trim() != "NaN" {
