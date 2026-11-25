@@ -38,6 +38,28 @@ impl Engine<'_> {
         Ok(self.ss.base.to_string_lossy().to_string())
     }
 
+    /// XPTY0004 for a sequence given where a function takes one item,
+    /// worded as the reference processor words it.
+    fn too_many_items(&self, v: &Seq, arg: usize, function: &str) -> String {
+        const ORDINALS: [&str; 6] = ["first", "second", "third", "fourth", "fifth", "sixth"];
+        let which = ORDINALS.get(arg).copied().unwrap_or("next");
+        let mut shown: Vec<String> = v
+            .iter()
+            .take(2)
+            .map(|it| match it {
+                Item::Atomic(a) if !a.is_stringlike() => a.to_string(),
+                it => format!("\"{}\"", self.string_of(it)),
+            })
+            .collect();
+        if v.len() > 2 {
+            shown.push("...".into());
+        }
+        format!(
+            "XPTY0004: A sequence of more than one item is not allowed as the {which} argument of {function}() ({})",
+            shown.join(", ")
+        )
+    }
+
     pub fn call(&self, name: &QName, args: &[Expr], d: &Dyn) -> R<Seq> {
         let n = args.len();
         if &*name.uri == XS_NS {
@@ -61,8 +83,14 @@ impl Engine<'_> {
                 .ok_or_else(|| format!("unknown function {}#{n}", name.lexical()));
         }
         let arg = |i: usize| self.eval(&args[i], d);
+        // A single-item string argument. XSLT 1.0 rules take the first item
+        // of a longer sequence; XSLT 2.0 refuses it, with the reference
+        // processor's message.
         let s = |i: usize| -> R<String> {
             let v = arg(i)?;
+            if v.len() > 1 && !crate::value::compat() {
+                return Err(self.too_many_items(&v, i, &name.local));
+            }
             Ok(v.first().map(|x| self.string_of(x)).unwrap_or_default())
         };
         // The context item's string, for one-argument functions called bare.
