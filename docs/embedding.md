@@ -75,6 +75,10 @@ xylem_xslt_free(ss);
   bad arguments, 2 when the stylesheet or input fails (a dynamic error,
   malformed XML) and 3 for an internal engine failure; the handle stays
   usable after any of them.
+- In publish mode a result that is not one well-formed document (text at
+  the top level, even whitespace, or more than one top-level element)
+  fails with return code 2, with the message the reference publishing
+  service gives; `XYLEM_OUTPUT_SERIALIZE` writes such fragments.
 - Add `XYLEM_NO_FILE_ACCESS` to the flags when the input comes from users:
   `document()` and external entities then fail instead of reading files.
   (Stylesheet modules are still read when compiling.)

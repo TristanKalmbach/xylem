@@ -10,6 +10,47 @@
 use crate::tree::{Kind, Tree, XML_NS};
 use std::rc::Rc;
 
+/// Why the reference host could not save this result as a document, or
+/// `None`. The host builds an XML document from the result (XSLT 2.0) or
+/// writes it through an `XmlWriter` that requires a document (XSLT 1.0),
+/// so top-level text, even whitespace, and a second top-level element
+/// fail there; comments and processing instructions are allowed, and an
+/// empty result is. The messages are the host's.
+pub fn document_error(t: &Tree, xslt1: bool) -> Option<String> {
+    const FRAGMENT_HINT: &str = concat!(
+        " would result in an invalid XML document. Make sure that the ConformanceLevel ",
+        "setting is set to ConformanceLevel.Fragment or ConformanceLevel.Auto if you ",
+        "want to write an XML fragment. ",
+    );
+    let mut seen_root = false;
+    for &c in &t.node(0).children {
+        let state = if seen_root { "EndRootElement" } else { "Start" };
+        match t.node(c).kind {
+            Kind::Text => {
+                return Some(if xslt1 {
+                    format!("Token Text in state {state}{FRAGMENT_HINT}")
+                } else {
+                    concat!(
+                        "The specified node cannot be inserted as the valid child of this node, ",
+                        "because the specified node is the wrong type."
+                    )
+                    .to_string()
+                });
+            }
+            Kind::Element if seen_root => {
+                return Some(if xslt1 {
+                    format!("Token StartElement in state {state}{FRAGMENT_HINT}")
+                } else {
+                    "This document already has a 'DocumentElement' node.".to_string()
+                });
+            }
+            Kind::Element => seen_root = true,
+            _ => {}
+        }
+    }
+    None
+}
+
 pub fn host_style(t: &Tree) -> String {
     let mut out = String::new();
     let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];

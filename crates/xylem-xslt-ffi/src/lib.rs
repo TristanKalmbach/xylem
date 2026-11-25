@@ -28,6 +28,8 @@ use xylem_xslt_engine::{Stylesheet, transform_bytes, with_file_access};
 
 /// Write the result the way a publishing service saves it: the
 /// `XmlDocument.OuterXml` form (no XML declaration, `xsl:output` ignored).
+/// A result that is not one well-formed document (top-level text, or more
+/// than one top-level element) fails, as it does there.
 pub const XYLEM_OUTPUT_PUBLISH: u32 = 0;
 /// Write the result as the stylesheet's `xsl:output` asks (for HTML steps).
 pub const XYLEM_OUTPUT_SERIALIZE: u32 = 1;
@@ -223,7 +225,13 @@ pub unsafe extern "C" fn xylem_xslt_transform(
                 return 2;
             }
             Ok(o) if flags & XYLEM_OUTPUT_SERIALIZE != 0 => o.serialized,
-            Ok(o) => o.text,
+            Ok(o) => match o.published() {
+                Ok(_) => o.text,
+                Err(e) => {
+                    set_error(e);
+                    return 2;
+                }
+            },
             Err(e) => {
                 set_error(e);
                 return 2;
@@ -317,6 +325,51 @@ mod tests {
             );
             assert_eq!(rc, 0);
             assert_eq!(std::slice::from_raw_parts(out, len), b"<r />");
+            xylem_xslt_free_bytes(out, len);
+            xylem_xslt_free(ss);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_needs_one_well_formed_document() {
+        let dir = std::env::temp_dir().join(format!("xylem-ffi-doc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xsl = dir.join("s.xsl");
+        std::fs::write(
+            &xsl,
+            r#"<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/">text<r/></xsl:template></xsl:stylesheet>"#,
+        )
+        .unwrap();
+        let path = CString::new(xsl.to_str().unwrap()).unwrap();
+        unsafe {
+            let ss = xylem_xslt_compile(path.as_ptr());
+            let (mut out, mut len) = (std::ptr::null_mut(), 0usize);
+            let rc = xylem_xslt_transform(
+                ss,
+                b"<a/>".as_ptr(),
+                4,
+                std::ptr::null(),
+                0,
+                &mut out,
+                &mut len,
+            );
+            assert_eq!(rc, 2);
+            let err = CStr::from_ptr(xylem_xslt_last_error())
+                .to_string_lossy()
+                .to_string();
+            assert!(err.starts_with("Token Text in state Start"), "{err}");
+            // Serialized output is a fragment and is allowed.
+            let rc = xylem_xslt_transform(
+                ss,
+                b"<a/>".as_ptr(),
+                4,
+                std::ptr::null(),
+                XYLEM_OUTPUT_SERIALIZE,
+                &mut out,
+                &mut len,
+            );
+            assert_eq!(rc, 0);
             xylem_xslt_free_bytes(out, len);
             xylem_xslt_free(ss);
         }

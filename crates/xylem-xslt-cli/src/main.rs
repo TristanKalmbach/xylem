@@ -8,7 +8,8 @@
 //! ```
 //!
 //! `transform` writes the result the way a publishing service saves it
-//! (the `XmlDocument.OuterXml` form, `xsl:output` ignored) unless
+//! (the `XmlDocument.OuterXml` form, `xsl:output` ignored; a result that is
+//! not one well-formed document is an error, as it is there) unless
 //! `--serialize` asks for the stylesheet's `xsl:output`. Without
 //! `--output` the result goes to standard output.
 //!
@@ -103,6 +104,7 @@ fn transform(args: &[String]) -> Result<(), String> {
     let text = if serialize {
         std::mem::take(&mut out.serialized)
     } else {
+        out.published()?;
         std::mem::take(&mut out.text)
     };
     for m in &out.messages {
@@ -242,6 +244,9 @@ fn handle(req: &Request, cache: &mut HashMap<PathBuf, Cached>) -> serde_json::Va
     let text = if req.serialize {
         std::mem::take(&mut out.serialized)
     } else {
+        if let Err(e) = out.published() {
+            return fail(e);
+        }
         std::mem::take(&mut out.text)
     };
     let ms = started.elapsed().as_millis() as u64;

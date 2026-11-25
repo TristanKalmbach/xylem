@@ -354,12 +354,16 @@ fn run_builtin(
                 let bytes = if host.serialize {
                     let mut b = vec![0xEF, 0xBB, 0xBF];
                     b.extend_from_slice(o.serialized.as_bytes());
-                    b
+                    Ok(b)
                 } else {
-                    o.host_bytes()
+                    // The host fails to save a result that is not one
+                    // well-formed document; so does this.
+                    o.published().map(|_| o.host_bytes())
                 };
-                match std::fs::write(output, bytes)
-                    .map_err(|e| format!("{}: {e}", output.display()))
+                match bytes
+                    .and_then(|b| {
+                        std::fs::write(output, b).map_err(|e| format!("{}: {e}", output.display()))
+                    })
                     .and_then(|()| o.write_secondary(output, true))
                 {
                     Ok(()) => (true, None),

@@ -48,6 +48,11 @@ pub struct Timed {
 pub struct Output {
     /// The principal result, written the way the reference host writes it.
     pub text: String,
+    /// Why the reference host would fail to save `text` (it is not a
+    /// single well-formed document: top-level text or several top-level
+    /// elements), with the host's message. Publishing callers report this
+    /// as the transformation's error; [`Output::published`] does.
+    pub publish_error: Option<String>,
     /// The principal result written as the stylesheet's `xsl:output` asks,
     /// the way the host's `--serialize` step writes it.
     pub serialized: String,
@@ -112,6 +117,7 @@ pub fn transform_bytes(
         timing.retain(|t| t.time.calls > 0);
     }
     Ok(Output {
+        publish_error: serialize::document_error(&result, compat),
         text: value::with_compat(compat, || serialize::host_style(&result)),
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
         results: secondary(&engine, compat),
@@ -174,6 +180,7 @@ pub fn transform_from(
         }
     })?;
     Ok(Output {
+        publish_error: serialize::document_error(&result, compat),
         text: value::with_compat(compat, || serialize::host_style(&result)),
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
         results: secondary(&engine, compat),
@@ -233,6 +240,15 @@ impl Output {
 
     /// The result as the host writes it to a file: UTF-8 with a byte order
     /// mark.
+    /// The principal result as the host saves it, or the host's error when
+    /// it is not a single well-formed document.
+    pub fn published(&self) -> Result<&str, String> {
+        match &self.publish_error {
+            Some(e) => Err(e.clone()),
+            None => Ok(&self.text),
+        }
+    }
+
     pub fn host_bytes(&self) -> Vec<u8> {
         let mut b = vec![0xEF, 0xBB, 0xBF];
         b.extend_from_slice(self.text.as_bytes());
