@@ -243,7 +243,14 @@ the window says so when it has unsaved changes. **Output** chooses between
 the way a publishing service saves a result (as Check compares it) and the
 way the stylesheet's `xsl:output` asks. Results go to `xylem-run` in the
 temporary folder, named after the document, and a result already open in
-Xylem is reloaded.
+Xylem is reloaded. The file is UTF-8 and says so: a publishing service's
+second step writes to a string, so its XML declaration or HTML content-type
+tag names `utf-16`, and that label is corrected in the saved file (Check and
+the differential keep the service's bytes). `samples/xslt` has a small
+stylesheet to try this on `samples/manual-sample.xml`.
+
+The F12 references window opens at the right edge of the window, so the
+place it takes you to stays in view.
 
 ## Finding your way around a stylesheet
 
