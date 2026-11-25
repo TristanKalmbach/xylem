@@ -1,7 +1,7 @@
 //! Running a compiled stylesheet: focus and variables, template rules,
 //! instructions and the result-tree builder.
 
-use crate::compile::{Avt, AvtPart, Instr, ModeRef, Number, Param, Sort, Stylesheet, Template};
+use crate::compile::{Avt, AvtPart, GroupBy, Instr, ModeRef, Number, Param, Sort, Stylesheet, Template};
 use crate::eval::R;
 use crate::tree::{self, Kind, NodeRef, QName, TNode, Tree};
 use crate::value::{Atomic, Item, Seq};
@@ -35,6 +35,12 @@ pub struct Dyn {
     /// `regex-group()`: the captured groups of the current
     /// `xsl:matching-substring` (group 0 is the whole match).
     pub groups: Rc<Vec<String>>,
+    /// `current-group()` and `current-grouping-key()` of the innermost
+    /// `xsl:for-each-group`.
+    pub group: Option<Rc<(Seq, Option<Atomic>)>>,
+    /// The current template rule: its position in the mode's rule list
+    /// and its template, for `xsl:next-match` / `xsl:apply-imports`.
+    pub rule: Option<(usize, usize)>,
 }
 
 impl Dyn {
@@ -182,6 +188,8 @@ impl<'s> Engine<'s> {
             mode: None,
             tunnel: Rc::default(),
             groups: Rc::default(),
+            rule: None,
+            group: None,
         }
     }
 
@@ -363,10 +371,23 @@ impl<'s> Engine<'s> {
         r
     }
 
-    fn find_rule(&self, n: NodeRef, mode: &Option<QName>) -> R<Option<usize>> {
-        for &(t, k) in self.rules_for(mode).iter() {
+    /// The first rule at or after position `from` in the mode's rule list
+    /// that matches `n` (below precedence `below`, if given, and never
+    /// template `skip`), as (position, template).
+    fn find_rule_from(
+        &self,
+        n: NodeRef,
+        mode: &Option<QName>,
+        from: usize,
+        below: Option<usize>,
+        skip: Option<usize>,
+    ) -> R<Option<(usize, usize)>> {
+        for (i, &(t, k)) in self.rules_for(mode).iter().enumerate().skip(from) {
+            if below.is_some_and(|p| self.ss.templates[t].prec >= p) || skip == Some(t) {
+                continue;
+            }
             if self.matches(n, &self.ss.templates[t].matches[k].0)? {
-                return Ok(Some(t));
+                return Ok(Some((i, t)));
             }
         }
         Ok(None)
@@ -451,9 +472,15 @@ impl<'s> Engine<'s> {
             let mut nd = d.focus(it.clone(), k + 1, size);
             nd.current = Some(it.clone());
             nd.mode = mode.clone();
-            match self.find_rule(*n, &mode)? {
-                Some(t) => self.invoke(t, &nd, params, out)?,
-                None => self.builtin(*n, &nd, params, out)?,
+            match self.find_rule_from(*n, &mode, 0, None, None)? {
+                Some((i, t)) => {
+                    nd.rule = Some((i, t));
+                    self.invoke(t, &nd, params, out)?
+                }
+                None => {
+                    nd.rule = None;
+                    self.builtin(*n, &nd, params, out)?
+                }
             }
         }
         Ok(())
@@ -756,6 +783,29 @@ impl<'s> Engine<'s> {
                 let ps = self.with_params(params, d)?;
                 self.apply(&items, d, mode, &ps, out)?;
             }
+            Instr::NextMatch { params, imports } => {
+                let Some((pos, cur)) = d.rule else {
+                    return Err("XTDE0560: xsl:next-match / xsl:apply-imports with no current template rule".into());
+                };
+                let Some(Item::Node(n)) = d.current.clone() else {
+                    return Err("XTDE0560: the current template rule's item is not a node".into());
+                };
+                let ps = self.with_params(params, d)?;
+                let below = imports.then(|| self.ss.templates[cur].prec);
+                let from = if *imports { 0 } else { pos + 1 };
+                let mut nd = d.clone();
+                nd.item = Some(Item::Node(n));
+                match self.find_rule_from(n, &d.mode, from, below, Some(cur))? {
+                    Some((i, t)) => {
+                        nd.rule = Some((i, t));
+                        self.invoke(t, &nd, &ps, out)?;
+                    }
+                    None => {
+                        nd.rule = None;
+                        self.builtin(n, &nd, &ps, out)?;
+                    }
+                }
+            }
             Instr::CallTemplate { name, params } => {
                 let t = self
                     .ss
@@ -838,6 +888,7 @@ impl<'s> Engine<'s> {
                     let it = Item::Atomic(Atomic::str(text));
                     let mut nd = d.focus(it.clone(), k + 1, size);
                     nd.current = Some(it);
+                    nd.rule = None;
                     match groups {
                         Some(g) => {
                             nd.groups = Rc::new(g);
@@ -850,6 +901,59 @@ impl<'s> Engine<'s> {
                     }
                 }
             }
+            Instr::PerformSort {
+                select,
+                sorts,
+                body,
+            } => {
+                let items = match select {
+                    Some(e) => self.eval(e, d)?,
+                    None => {
+                        let mut seq = Out::sequence();
+                        self.body(body, d, &mut seq)?;
+                        seq.finish_seq(self)
+                    }
+                };
+                for it in self.sort(items, sorts, d)? {
+                    out.item(self, it, false)?;
+                }
+            }
+            Instr::Document(body) => {
+                let mut doc = Out::document();
+                self.body(body, d, &mut doc)?;
+                let t = self.add_tree(doc.finish_tree());
+                out.item(self, Item::Node(NodeRef { tree: t, idx: 0 }), false)?;
+            }
+            Instr::ForEachGroup {
+                select,
+                how,
+                key,
+                sorts,
+                body,
+            } => {
+                let items = self.eval(select, d)?;
+                let groups = self.make_groups(items, how, key, d)?;
+                let size = groups.len();
+                let entries = groups
+                    .into_iter()
+                    .enumerate()
+                    .map(|(k, (g, gk))| {
+                        let first = g[0].clone();
+                        let mut nd = d.focus(first.clone(), k + 1, size);
+                        nd.current = Some(first);
+                        nd.rule = None;
+                        nd.group = Some(Rc::new((g, gk)));
+                        (nd.clone(), nd)
+                    })
+                    .collect();
+                let ordered = self.sort_keyed(entries, sorts, d)?;
+                let size = ordered.len();
+                for (k, mut nd) in ordered.into_iter().enumerate() {
+                    nd.pos = k + 1;
+                    nd.size = size;
+                    self.body(body, &nd, out)?;
+                }
+            }
             Instr::ForEach {
                 select,
                 sorts,
@@ -860,6 +964,8 @@ impl<'s> Engine<'s> {
                 for (k, it) in items.into_iter().enumerate() {
                     let mut nd = d.focus(it.clone(), k + 1, size);
                     nd.current = Some(it);
+                    // No current template rule inside xsl:for-each.
+                    nd.rule = None;
                     self.body(body, &nd, out)?;
                 }
             }
@@ -1056,12 +1162,107 @@ impl<'s> Engine<'s> {
         Ok(())
     }
 
+    /// Splits `items` into groups for `xsl:for-each-group`, in order of
+    /// first appearance, each with its grouping key (by / adjacent).
+    fn make_groups(
+        &self,
+        items: Seq,
+        how: &GroupBy,
+        key: &Expr,
+        d: &Dyn,
+    ) -> R<Vec<(Seq, Option<Atomic>)>> {
+        let size = items.len();
+        let mut groups: Vec<(Seq, Option<Atomic>)> = Vec::new();
+        let same = |a: &Atomic, b: &Atomic| {
+            let n = |x: &Atomic| match x {
+                Atomic::Untyped(s) => Atomic::Str(s.clone()),
+                o => o.clone(),
+            };
+            let (a, b) = (n(a), n(b));
+            if a.is_numeric() && b.is_numeric() && a.to_f64().is_nan() && b.to_f64().is_nan() {
+                return true;
+            }
+            matches!(crate::eval::compare(&a, &b), Ok(Some(std::cmp::Ordering::Equal)))
+        };
+        for (k, it) in items.into_iter().enumerate() {
+            let mut nd = d.focus(it.clone(), k + 1, size);
+            nd.current = Some(it.clone());
+            match how {
+                GroupBy::By => {
+                    let keys = self.atomize(&self.eval(key, &nd)?);
+                    let mut joined: Vec<usize> = Vec::new();
+                    for kv in keys {
+                        let found = groups
+                            .iter()
+                            .position(|(_, g)| g.as_ref().is_some_and(|g| same(g, &kv)));
+                        match found {
+                            Some(i) if joined.contains(&i) => {}
+                            Some(i) => {
+                                groups[i].0.push(it.clone());
+                                joined.push(i);
+                            }
+                            None => {
+                                groups.push((vec![it.clone()], Some(kv)));
+                                joined.push(groups.len() - 1);
+                            }
+                        }
+                    }
+                }
+                GroupBy::Adjacent => {
+                    let keys = self.atomize(&self.eval(key, &nd)?);
+                    let [kv] = keys.as_slice() else {
+                        return Err("XTTE1100: group-adjacent needs exactly one key value".into());
+                    };
+                    match groups.last_mut() {
+                        Some((g, Some(last))) if same(last, kv) => g.push(it),
+                        _ => groups.push((vec![it], Some(kv.clone()))),
+                    }
+                }
+                GroupBy::StartingWith | GroupBy::EndingWith => {
+                    let Item::Node(n) = it else {
+                        return Err(
+                            "XTTE1120: group-starting-with / -ending-with need nodes".into()
+                        );
+                    };
+                    let hit = self.matches(n, key)?;
+                    let starts = matches!(how, GroupBy::StartingWith);
+                    if groups.is_empty() || (starts && hit) {
+                        groups.push((vec![it], None));
+                    } else if let Some((g, _)) = groups.last_mut() {
+                        g.push(it);
+                    }
+                    if !starts && hit {
+                        // The group ends here; the next item starts another.
+                        groups.push((vec![], None));
+                    }
+                }
+            }
+        }
+        groups.retain(|(g, _)| !g.is_empty());
+        Ok(groups)
+    }
+
     fn sort(&self, items: Seq, sorts: &[Sort], d: &Dyn) -> R<Seq> {
         if sorts.is_empty() {
             return Ok(items);
         }
         let size = items.len();
-        let mut keyed: Vec<(Vec<Option<Atomic>>, Item)> = Vec::with_capacity(size);
+        let entries = items
+            .into_iter()
+            .enumerate()
+            .map(|(k, it)| {
+                let mut nd = d.focus(it.clone(), k + 1, size);
+                nd.current = Some(it.clone());
+                (nd, it)
+            })
+            .collect();
+        self.sort_keyed(entries, sorts, d)
+    }
+
+    /// Sorts `entries` by `sorts`, each entry's keys evaluated with its own
+    /// dynamic context (an item's focus, or a group's).
+    fn sort_keyed<T>(&self, entries: Vec<(Dyn, T)>, sorts: &[Sort], d: &Dyn) -> R<Vec<T>> {
+        let mut keyed: Vec<(Vec<Option<Atomic>>, T)> = Vec::with_capacity(entries.len());
         let mut specs = Vec::new();
         for s in sorts {
             let desc = s
@@ -1079,14 +1280,12 @@ impl<'s> Engine<'s> {
             let _ = &s.case_order;
             specs.push((desc, num));
         }
-        for (k, it) in items.into_iter().enumerate() {
-            let mut nd = d.focus(it.clone(), k + 1, size);
-            nd.current = Some(it.clone());
+        for (nd, it) in entries {
             let mut keys = Vec::new();
             for (s, (_, num)) in sorts.iter().zip(&specs) {
                 let v = match &s.select {
                     Some(e) => self.atomize(&self.eval(e, &nd)?),
-                    None => self.atomize(&vec![it.clone()]),
+                    None => self.atomize(&nd.item.iter().cloned().collect()),
                 };
                 let a = v.into_iter().next().map(|a| {
                     if *num {

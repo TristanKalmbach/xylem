@@ -93,6 +93,16 @@ impl Engine<'_> {
                 }
                 str_(out)
             }
+            ("current-group", 0) => {
+                Ok(d.group.as_ref().map(|g| g.0.clone()).unwrap_or_default())
+            }
+            ("current-grouping-key", 0) => Ok(d
+                .group
+                .as_ref()
+                .and_then(|g| g.1.clone())
+                .map(Item::Atomic)
+                .into_iter()
+                .collect()),
             ("regex-group", 1) => {
                 let k = match self.atomize(&arg(0)?).first() {
                     Some(Atomic::Int(i)) => *i,

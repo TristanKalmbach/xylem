@@ -39,6 +39,15 @@ pub struct Sort {
     pub case_order: Option<Avt>,
 }
 
+/// How `xsl:for-each-group` forms groups.
+#[derive(Clone, Debug)]
+pub enum GroupBy {
+    By,
+    Adjacent,
+    StartingWith,
+    EndingWith,
+}
+
 #[derive(Clone, Debug)]
 pub enum ModeRef {
     Default,
@@ -82,6 +91,11 @@ pub enum Instr {
         params: Vec<Param>,
     },
     Variable(Param),
+    /// `xsl:next-match` (`imports` false) or `xsl:apply-imports` (true).
+    NextMatch {
+        params: Vec<Param>,
+        imports: bool,
+    },
     Choose(Vec<(Expr, Vec<Instr>)>, Vec<Instr>),
     If(Expr, Vec<Instr>),
     /// `xsl:result-document`: a secondary result at `href`, or the
@@ -90,6 +104,22 @@ pub enum Instr {
         href: Option<Avt>,
         body: Vec<Instr>,
     },
+    /// `xsl:for-each-group`: `key` is the grouping expression or pattern.
+    ForEachGroup {
+        select: Expr,
+        how: GroupBy,
+        key: Expr,
+        sorts: Vec<Sort>,
+        body: Vec<Instr>,
+    },
+    /// `xsl:perform-sort`: `select`, or the body's sequence, sorted.
+    PerformSort {
+        select: Option<Expr>,
+        sorts: Vec<Sort>,
+        body: Vec<Instr>,
+    },
+    /// `xsl:document`: a new document node holding the body's result.
+    Document(Vec<Instr>),
     /// `xsl:analyze-string`.
     AnalyzeString {
         select: Expr,
@@ -561,9 +591,35 @@ impl Compiler {
             file: &file,
         };
         if !(el.is_xsl("stylesheet") || el.is_xsl("transform")) {
-            return Err(format!(
-                "{file}: simplified stylesheets are not supported yet"
-            ));
+            // A simplified stylesheet: the literal result element is the
+            // body of a template rule matching the document node.
+            if self.ss.version.is_empty() {
+                let v = el.attr_ns(XSL_NS, "version");
+                let v = v.ok_or_else(|| format!("{file}: XTSE0150: no xsl:version"))?;
+                self.ss.version = v.to_string();
+            }
+            let prec = self.next_prec;
+            self.next_prec += 1;
+            let id = self.ss.templates.len();
+            let body = vec![self.lre(el)?];
+            self.ss.templates.push(Template {
+                id,
+                matches: vec![(Expr::Root, -0.5)],
+                name: None,
+                modes: vec![None],
+                all_modes: false,
+                params: Vec::new(),
+                body,
+                as_: None,
+                prec,
+                location: file.clone(),
+                source: el.source(),
+            });
+            if let Some(p) = prec_out {
+                *p = prec;
+            }
+            self.loading.pop();
+            return Ok(());
         }
         if self.ss.version.is_empty() {
             self.ss.version = el.attr("version").unwrap_or("1.0").to_string();
@@ -880,6 +936,43 @@ impl Compiler {
                 },
                 params: self.with_params(e)?,
                 sorts: self.sorts(e)?,
+            },
+            "perform-sort" => Instr::PerformSort {
+                select: e.opt_expr("select")?,
+                sorts: self.sorts(e)?,
+                body: self.body(e)?,
+            },
+            "document" => Instr::Document(self.body(e)?),
+            "for-each-group" => {
+                let pick = [
+                    ("group-by", GroupBy::By),
+                    ("group-adjacent", GroupBy::Adjacent),
+                    ("group-starting-with", GroupBy::StartingWith),
+                    ("group-ending-with", GroupBy::EndingWith),
+                ];
+                let mut found = pick
+                    .into_iter()
+                    .filter_map(|(a, g)| e.attr(a).map(|v| (v.to_string(), g)));
+                let (Some((v, how)), None) = (found.next(), found.next()) else {
+                    return Err(e.err(
+                        "XTSE1080: xsl:for-each-group needs exactly one grouping attribute",
+                    ));
+                };
+                let key = match how {
+                    GroupBy::By | GroupBy::Adjacent => e.expr(&v)?,
+                    _ => e.expr(&v)?,
+                };
+                Instr::ForEachGroup {
+                    select: e.expr(e.req("select")?)?,
+                    how,
+                    key,
+                    sorts: self.sorts(e)?,
+                    body: self.body(e)?,
+                }
+            }
+            "next-match" | "apply-imports" => Instr::NextMatch {
+                params: self.with_params(e)?,
+                imports: local == "apply-imports",
             },
             "call-template" => Instr::CallTemplate {
                 name: e.qname(e.req("name")?)?,

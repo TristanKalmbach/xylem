@@ -97,6 +97,9 @@ pub fn run_set(_root: &Path, file: &Path) -> Vec<(String, Verdict)> {
     let mut out = Vec::new();
     for case in x.kids(set, "test-case") {
         let name = x.attr(case, "name").unwrap_or("?").to_string();
+        if std::env::var_os("XYLEM_W3C_TRACE").is_some() {
+            eprintln!("running {name}");
+        }
         let v = run_case(&x, set, case, &base, &mut compiled);
         out.push((name, v));
     }
