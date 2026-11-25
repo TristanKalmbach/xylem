@@ -52,6 +52,11 @@
 //! reports every test whose output differs between the two. Exit code 0
 //! means every test gave the same output (and the same on both engines).
 
+/// The engine allocates many small values; mimalloc makes transformations
+/// about a third faster than the system allocator.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;

@@ -19,6 +19,8 @@ xylem-xpath = { path = "crates/xylem-xpath", version = "0.6.0" }
 xylem-edit = { path = "crates/xylem-edit", version = "0.6.0" }
 xylem-xslt = { path = "crates/xylem-xslt", version = "0.6.0" }
 xylem-xslt-engine = { path = "crates/xylem-xslt-engine", version = "0.6.0" }
+# A faster allocator for the programs that run the XSLT engine.
+mimalloc = { version = "0.1", default-features = false }
 
 [profile.release]
 opt-level = 3
