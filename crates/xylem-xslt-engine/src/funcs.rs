@@ -461,6 +461,47 @@ impl Engine<'_> {
                 let v = now.convert(kind).unwrap_or(now);
                 Ok(vec![Item::Atomic(Atomic::Time(Arc::new(v)))])
             }
+            ("format-date" | "format-dateTime" | "format-time", 2 | 5) => {
+                let v = self.atomize(&arg(0)?);
+                let Some(a) = v.first() else {
+                    return Ok(vec![]);
+                };
+                let want = match &*name.local {
+                    "format-date" => crate::datetime::DtKind::Date,
+                    "format-time" => crate::datetime::DtKind::Time,
+                    _ => crate::datetime::DtKind::DateTime,
+                };
+                let value = match a {
+                    Atomic::Time(t) if t.kind == want => (**t).clone(),
+                    Atomic::Untyped(_) | Atomic::Str(_) => {
+                        return Err(format!(
+                            "XPTY0004: {}() needs an xs:{}, not a string",
+                            name.local,
+                            want.name()
+                        ));
+                    }
+                    other => {
+                        return Err(format!(
+                            "XPTY0004: {}() needs an xs:{}, not an xs:{}",
+                            name.local,
+                            want.name(),
+                            other.type_name()
+                        ));
+                    }
+                };
+                let picture = s(1)?;
+                let (lang, cal) = if n == 5 {
+                    (Some(s(2)?), Some(s(3)?))
+                } else {
+                    (None, None)
+                };
+                str_(crate::format_date::format(
+                    &value,
+                    &picture,
+                    lang.as_deref(),
+                    cal.as_deref(),
+                )?)
+            }
             ("implicit-timezone", 0) => Ok(vec![Item::Atomic(crate::datetime::tz_duration(
                 crate::datetime::IMPLICIT_TZ,
             ))]),

@@ -48,7 +48,7 @@ cargo build --release -p xylem-xslt-cli      # target/release/xylem-xslt(.exe)
   stylesheet's folder as its base URI.
 - **`generate-id()`** gives the same values as Saxon 9.7 (`d<doc>e<node>`).
 - **Not supported yet:** schema awareness, `xsl:namespace`,
-  `format-date`/`format-dateTime`/`format-time`, `normalize-unicode`,
+  `normalize-unicode`,
   output indentation (`indent="yes"` and the XSLT 1.0 HTML default), and
   W3C error codes on most errors. Secondary results (`xsl:result-document`)
   are written next to the principal output by the CLI and host, and refused

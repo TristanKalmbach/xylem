@@ -73,7 +73,7 @@ fn format_one(n: i64, tok: &str) -> String {
     }
 }
 
-fn alpha(n: i64, base: u8) -> String {
+pub(crate) fn alpha(n: i64, base: u8) -> String {
     if n <= 0 {
         return n.to_string();
     }
@@ -88,7 +88,7 @@ fn alpha(n: i64, base: u8) -> String {
     String::from_utf8(s).unwrap()
 }
 
-fn roman(n: i64) -> String {
+pub(crate) fn roman(n: i64) -> String {
     if !(1..4000).contains(&n) {
         return n.to_string();
     }

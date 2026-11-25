@@ -19,6 +19,7 @@ mod datetime;
 mod error;
 mod eval;
 mod exec;
+mod format_date;
 mod funcs;
 mod number;
 mod serialize;
