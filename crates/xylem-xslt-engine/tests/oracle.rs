@@ -39,6 +39,7 @@ const CASES: &[&str] = &[
     "docs",
     "html1",
     "parity",
+    "parity1",
 ];
 
 /// The cases to run: all, or those named in `XYLEM_XSLT_ENGINE_CASES`

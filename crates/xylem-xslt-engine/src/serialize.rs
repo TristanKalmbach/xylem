@@ -4,7 +4,8 @@
 //! `OuterXml` of a .NET `XmlDocument` loaded from the result, so empty
 //! elements are `<a />`, `xsl:output` has no effect and there is no XML
 //! declaration. Namespace declarations are written where a binding first
-//! appears or changes.
+//! appears or changes: before the attributes for XSLT 2.0 results, after
+//! them for XSLT 1.0 results (see [`node`]).
 
 use crate::tree::{Kind, Tree, XML_NS};
 use std::rc::Rc;
@@ -100,18 +101,26 @@ fn node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String)
             }
             out.push('<');
             out.push_str(&name.lexical());
-            for (p, u) in &decls {
-                if p.is_empty() {
-                    out.push_str(" xmlns=\"");
-                } else {
-                    out.push_str(" xmlns:");
-                    out.push_str(p);
-                    out.push_str("=\"");
+            // The XSLT 1.0 processor builds the result through an XmlWriter,
+            // which adds an element's namespace declarations after its
+            // attributes; the XSLT 2.0 path writes them first.
+            let write_decls = |out: &mut String| {
+                for (p, u) in &decls {
+                    if p.is_empty() {
+                        out.push_str(" xmlns=\"");
+                    } else {
+                        out.push_str(" xmlns:");
+                        out.push_str(p);
+                        out.push_str("=\"");
+                    }
+                    escape(u, true, out);
+                    out.push('"');
                 }
-                escape(u, true, out);
-                out.push('"');
+            };
+            let decls_last = crate::value::compat();
+            if !decls_last {
+                write_decls(out);
             }
-            scope.extend(decls);
             for &a in &n.attrs {
                 let an = t.node(a);
                 out.push(' ');
@@ -120,6 +129,10 @@ fn node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String)
                 escape(&an.value, true, out);
                 out.push('"');
             }
+            if decls_last {
+                write_decls(out);
+            }
+            scope.extend(decls);
             if n.children.is_empty() {
                 out.push_str(" />");
             } else {
