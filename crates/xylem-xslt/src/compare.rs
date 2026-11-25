@@ -90,45 +90,83 @@ pub fn renumber_generated_ids(text: &str) -> String {
     rewrite_generated_ids(text, false)
 }
 
-/// Like [`renumber_generated_ids`], or with `drop_documents` every document
-/// part the same (`d31e20` → `d0e20`): only the node part is compared.
-fn rewrite_generated_ids(text: &str, drop_documents: bool) -> String {
+/// The generated ID starting at byte `i`, if there is one, as its end and
+/// the end of its document part (for the `d<doc>e<node>` form).
+///
+/// `d<digits>e<digits>` may follow punctuation (`continuedTable-d62e206`);
+/// with `loose` it may also follow a letter (`partListItems-tabled15e155`,
+/// a stylesheet joining a name and an ID), and the form .NET's XSLT
+/// processor gives is recognised too (`ID0EVEAC`: `ID` and capitals or
+/// digits, at least one digit, standing alone). Strict matching keeps words
+/// such as `add12e3` out.
+fn generated_id_at(b: &[u8], i: usize, loose: bool) -> Option<(usize, Option<usize>)> {
+    let word = |c: u8| c.is_ascii_alphanumeric();
+    let after_ok = |k: usize| k == b.len() || !word(b[k]);
+    let before_ok = i == 0
+        || if loose {
+            !b[i - 1].is_ascii_digit()
+        } else {
+            !word(b[i - 1])
+        };
+    if b[i] == b'd' && before_ok {
+        let mut j = i + 1;
+        while j < b.len() && b[j].is_ascii_digit() {
+            j += 1;
+        }
+        if j > i + 1 && j < b.len() && b[j] == b'e' {
+            let mut k = j + 1;
+            while k < b.len() && b[k].is_ascii_digit() {
+                k += 1;
+            }
+            if k > j + 1 && after_ok(k) {
+                return Some((k, Some(j)));
+            }
+        }
+    }
+    if loose && b[i] == b'I' && b.get(i + 1) == Some(&b'D') && (i == 0 || !word(b[i - 1])) {
+        let mut k = i + 2;
+        let mut digit = false;
+        while k < b.len() && (b[k].is_ascii_digit() || b[k].is_ascii_uppercase()) {
+            digit |= b[k].is_ascii_digit();
+            k += 1;
+        }
+        if k > i + 2 && digit && after_ok(k) {
+            return Some((k, None));
+        }
+    }
+    None
+}
+
+/// With `rename` false, renumbers the document part of `d<doc>e<node>` IDs in
+/// order of first appearance. With `rename` true, replaces every generated
+/// ID of either form with `id<n>`, numbered in order of first appearance, so
+/// two outputs compare equal exactly when one's IDs can be renamed one to
+/// one into the other's.
+fn rewrite_generated_ids(text: &str, rename: bool) -> String {
     let b = text.as_bytes();
     let mut out = String::with_capacity(text.len());
     let mut docs: HashMap<&str, usize> = HashMap::new();
+    let mut ids: HashMap<&str, usize> = HashMap::new();
     let mut last = 0;
     let mut i = 0;
-    // A generated ID can be joined to other text (`continuedTable-d62e206`),
-    // so only a letter or digit next to it means it is part of a word.
-    let word = |c: u8| c.is_ascii_alphanumeric();
     while i < b.len() {
-        if b[i] == b'd' && (i == 0 || !word(b[i - 1])) {
-            let mut j = i + 1;
-            while j < b.len() && b[j].is_ascii_digit() {
-                j += 1;
+        if let Some((k, doc_end)) = generated_id_at(b, i, rename) {
+            out.push_str(&text[last..i]);
+            if rename {
+                let n = ids.len() + 1;
+                let n = *ids.entry(&text[i..k]).or_insert(n);
+                out.push_str("id");
+                out.push_str(&n.to_string());
+            } else if let Some(j) = doc_end {
+                let n = docs.len() + 1;
+                let n = *docs.entry(&text[i + 1..j]).or_insert(n);
+                out.push('d');
+                out.push_str(&n.to_string());
+                out.push_str(&text[j..k]);
             }
-            if j > i + 1 && j < b.len() && b[j] == b'e' {
-                let mut k = j + 1;
-                while k < b.len() && b[k].is_ascii_digit() {
-                    k += 1;
-                }
-                if k > j + 1 && (k == b.len() || !word(b[k])) {
-                    let doc = &text[i + 1..j];
-                    let n = docs.len() + 1;
-                    let n = if drop_documents {
-                        0
-                    } else {
-                        *docs.entry(doc).or_insert(n)
-                    };
-                    out.push_str(&text[last..i]);
-                    out.push('d');
-                    out.push_str(&n.to_string());
-                    out.push_str(&text[j..k]);
-                    last = k;
-                    i = k;
-                    continue;
-                }
-            }
+            last = k;
+            i = k;
+            continue;
         }
         i += 1;
     }
@@ -226,14 +264,15 @@ pub fn compare(baseline: &[u8], candidate: &[u8]) -> Comparison {
     compare_with(baseline, candidate, false)
 }
 
-/// Like [`compare`]; with `ignore_id_documents`, the document part of
-/// generated IDs is not compared at all, only the node part. Engines number
-/// documents differently (a processor may build a temporary tree once where
-/// another builds it per iteration, or not number trees nothing refers to),
-/// which changes IDs without changing what refers to what within an output.
-pub fn compare_with(baseline: &[u8], candidate: &[u8], ignore_id_documents: bool) -> Comparison {
+/// Like [`compare`]; with `rename_ids`, generated IDs are equal when one
+/// output's IDs can be renamed one to one into the other's (see
+/// [`rewrite_generated_ids`]). Engines number IDs differently (a processor
+/// may build a temporary tree once where another builds it per iteration;
+/// .NET's XSLT processor has a scheme of its own), which changes IDs without
+/// changing what refers to what within an output.
+pub fn compare_with(baseline: &[u8], candidate: &[u8], rename_ids: bool) -> Comparison {
     let byte_identical = baseline == candidate;
-    let (a, b) = if ignore_id_documents {
+    let (a, b) = if rename_ids {
         (
             rewrite_generated_ids(&decode(baseline), true),
             rewrite_generated_ids(&decode(candidate), true),
@@ -330,14 +369,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn document_numbers_can_be_left_out_of_the_comparison() {
-        // The same node, numbered in different documents in a different order.
-        let a = b"<x id=\"d3e7\"/><y ref=\"d5e9\"/>";
-        let b = b"<x id=\"d4e7\"/><y ref=\"d4e9\"/>";
+    fn ids_can_be_compared_up_to_a_one_to_one_renaming() {
+        // Different numbering, same references: equal when renaming.
+        let a = b"<x id=\"d3e7\"/><y ref=\"d3e7\"/><z id=\"d5e9\"/>";
+        let b = b"<x id=\"d4e7\"/><y ref=\"d4e7\"/><z id=\"d4e8\"/>";
         assert!(!compare(a, b).identical);
         assert!(compare_with(a, b, true).identical);
-        // The node part still counts.
-        assert!(!compare_with(a, b"<x id=\"d4e8\"/><y ref=\"d4e9\"/>", true).identical);
+        // .NET's form against ours.
+        let net = b"<x id=\"ID0EVEAC\"/><y ref=\"ID0EVEAC\"/><z id=\"ID0EBC\"/>";
+        assert!(compare_with(net, b, true).identical);
+        // A reference to a different element is a real difference.
+        let wrong = b"<x id=\"d4e7\"/><y ref=\"d4e8\"/><z id=\"d4e8\"/>";
+        assert!(!compare_with(a, wrong, true).identical);
+        // Words are not IDs.
+        assert!(!compare_with(b"<p>IDLE</p>", b"<p>IDEA</p>", true).identical);
+    }
+
+    #[test]
+    fn ids_joined_to_a_word_are_recognised_when_renaming() {
+        let a = b"<r id=\"partListItems-tabled1540e155\"/><l to=\"partListItems-tabled1540e155\"/>";
+        let b = b"<r id=\"partListItems-tabled27e155\"/><l to=\"partListItems-tabled27e155\"/>";
+        assert!(!compare(a, b).identical);
+        assert!(compare_with(a, b, true).identical);
     }
 
     #[test]

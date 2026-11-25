@@ -77,9 +77,9 @@ pub struct Plan<'a> {
     pub work: &'a Path,
     /// Stylesheets run at the same time.
     pub threads: usize,
-    /// Compare generated IDs by their node part only (see
+    /// Compare generated IDs up to a one-to-one renaming (see
     /// [`crate::compare::compare_with`]).
-    pub ignore_id_documents: bool,
+    pub rename_ids: bool,
 }
 
 /// Name of the results file in the work folder.
@@ -240,7 +240,7 @@ fn run_unit(
             (None, Some(error)) => Outcome::CandidateFailed { error },
             (None, None) => match (std::fs::read(r_out), std::fs::read(c_out)) {
                 (Ok(a), Ok(b)) => {
-                    let c: Comparison = compare_with(&a, &b, plan.ignore_id_documents);
+                    let c: Comparison = compare_with(&a, &b, plan.rename_ids);
                     if c.identical {
                         Outcome::Same {
                             byte_identical: c.byte_identical,
@@ -460,7 +460,7 @@ mod tests {
             candidate: &host,
             work: &work,
             threads: 2,
-            ignore_id_documents: false,
+            rename_ids: false,
         };
         let cases = run(&plan, &|_| {}, &AtomicBool::new(false)).unwrap();
         assert_eq!(cases.len(), 8);

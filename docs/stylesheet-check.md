@@ -82,13 +82,16 @@ second step such as XSL-FO to HTML (inputs read as they are, results
 written as `xsl:output` asks). The exit code is 0 only when the engines
 agree everywhere.
 
-Generated IDs (`generate-id()`, such as `d12e345`) name a document and a
-node. Engines number temporary documents differently: one may build a
-tree once per loop where another builds it per iteration, or skip
-numbering trees nothing refers to. That changes the document part of IDs
-without changing which element refers to which. `--ignore-id-documents`
-compares only the node part. Check itself always compares IDs in full
-(with document numbers renumbered in order of appearance).
+Generated IDs (`generate-id()`) differ between engines without changing
+what refers to what: Saxon's `d12e345` names a document and a node, and
+engines number temporary documents differently (one builds a tree once per
+loop, another per iteration); .NET's XSLT processor writes IDs such as
+`ID0EVEAC`. `--rename-ids` treats two outputs as the same when one's
+generated IDs can be renamed one to one into the other's, so every element
+must still carry the ID that its references use, and no two elements may
+share one where the reference engine gives them different IDs. Check itself
+always compares IDs in full (with document numbers renumbered in order of
+appearance).
 
 `xylem-xslt-check run …` and `compile …` take the same arguments as
 `SaxonDotnetHost.exe` and answer with the built-in engine, so the check
