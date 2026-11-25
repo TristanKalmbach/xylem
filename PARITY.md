@@ -15,9 +15,19 @@ scripted harness plus screenshots); **tested** means implemented and covered
 by unit tests but not driven through the app; **partial** and **not done**
 mean what they say; **n/a** means the legacy host didn't use it.
 
-**Platforms.** Built and tested on Windows 11. CI for Windows, macOS and
-Linux is in `.github/workflows/ci.yml`; it has not run yet, so macOS and Linux
-are unverified.
+**Platforms.** Built and tested on Windows 11 and on Linux (Ubuntu 24.04
+under WSL, X11). CI for Windows, macOS and Linux is in
+`.github/workflows/ci.yml`; it has not run yet, so macOS is unverified.
+
+**Where replacement stops.** Xylem replaces XMAX as the editor people author
+in. It is a separate program, not a control the legacy host can embed, so a
+host that drives XMAX through its COM interface (opening documents from its
+own storage, its ribbon commands, check-in) keeps doing so until that host is
+changed to hand documents to Xylem. Nothing in Xylem depends on such a
+change: documents, schemas, CSS and imported customizations work as they
+are. For XSLT, the built-in engine is offered to such hosts as a C library
+with the calling convention of their current engine; see
+[docs/embedding.md](docs/embedding.md).
 
 ## Document views
 
@@ -45,7 +55,7 @@ are unverified.
 | Selectors, generated content, counters, XMetaL `$PROCINS`/`$COMMENT`, `@import` | verified |
 | Display types, fonts, colours, boxes, alignment, `white-space`, sup/sub, list markers | verified |
 | `wrap-option: emergency` | partial (parsed; long words already wrap) |
-| Runtime inline style overrides (`ContainerStyle`) | partial (supported by the engine, no UI) |
+| Runtime inline style overrides (`ContainerStyle`) | n/a (the host used it only to style entity references, which Xylem styles itself) |
 
 ## Editing
 
