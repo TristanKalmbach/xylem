@@ -440,6 +440,11 @@ fn decode_entities(
             i += semi + 1;
         } else {
             if attr && matches!(c, '\n' | '\t' | '\r') {
+                // Line ends are normalised before attribute values are, so
+                // a CR LF pair is one line end and becomes one space.
+                if c == '\r' && raw[i + 1..].starts_with('\n') {
+                    i += 1;
+                }
                 out.push(' ');
             } else {
                 out.push(c);

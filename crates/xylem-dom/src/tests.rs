@@ -283,3 +283,10 @@ fn a_carriage_return_in_an_attribute_is_escaped() {
     doc.set_attr(a, "v", "x\ry");
     assert_eq!(doc.to_xml(), "<a v=\"x&#13;y\"/>");
 }
+
+#[test]
+fn attribute_line_ends_normalise_to_one_space_each() {
+    let doc = Document::from_str("<a v=\"x\r\ny\rz\nw\tq\"/>").unwrap();
+    let root = doc.document_element().unwrap();
+    assert_eq!(doc.attr(root, "v"), Some("x y z w q"));
+}
