@@ -739,7 +739,7 @@ impl Engine<'_> {
             }
             ("document" | "doc", 1 | 2) => {
                 let v = arg(0)?;
-                let base = self.module_base(&args, n)?;
+                let base = self.module_base(args, n)?;
                 let mut out = Vec::new();
                 for it in &v {
                     let (href, b) = match it {
@@ -747,13 +747,25 @@ impl Engine<'_> {
                         Item::Atomic(a) => (a.to_string(), base.clone()),
                     };
                     let href = href.trim().to_string();
-                    let t = if href.is_empty() {
-                        None
-                    } else {
-                        self.document(&href, &b)?
-                    };
-                    if let Some(t) = t {
-                        out.push(Item::Node(NodeRef { tree: t, idx: 0 }));
+                    match self.document(&href, &b)? {
+                        Ok(t) => out.push(Item::Node(NodeRef { tree: t, idx: 0 })),
+                        // `doc()` cannot recover from a missing document.
+                        Err(why) if &*name.local == "doc" => {
+                            return Err(format!("FODC0002: doc('{href}'): {why}"));
+                        }
+                        // The XSLT 1.0 processor fails the transformation, as
+                        // the reference host shows it.
+                        Err(why) if crate::value::compat() => {
+                            return Err(format!(
+                                "An error occurred while loading document '{href}'. See InnerException for a complete description of the error. / {why}"
+                            ));
+                        }
+                        // XSLT 2.0 recovers with an empty sequence (FODC0002 is
+                        // recoverable for document()), as the reference
+                        // processor does, and warns.
+                        Err(why) => self.warnings.borrow_mut().push(format!(
+                            "FODC0002: document('{href}') could not be read, so it gave an empty sequence: {why}"
+                        )),
                     }
                 }
                 Ok(out)
@@ -810,8 +822,8 @@ impl Engine<'_> {
             }
             ("doc-available", 1 | 2) => {
                 let href = s(0)?.trim().to_string();
-                let base = self.module_base(&args, n)?;
-                bool_(!href.is_empty() && matches!(self.document(&href, &base), Ok(Some(_))))
+                let base = self.module_base(args, n)?;
+                bool_(!href.is_empty() && matches!(self.document(&href, &base), Ok(Ok(_))))
             }
             ("format-number", 2 | 3) => {
                 let v = self.atomize(&arg(0)?);

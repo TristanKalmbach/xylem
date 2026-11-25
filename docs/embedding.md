@@ -70,7 +70,12 @@ xylem_xslt_free(ss);
   stylesheets this engine was built for takes about 30 ms.
 - One handle can run many transformations at once on different threads:
   compile each stylesheet once and share the handle.
-- `xylem_xslt_last_error()` is per thread.
+- `xylem_xslt_last_error()` is per thread, and so is
+  `xylem_xslt_last_log()`: after a transformation, a JSON object with its
+  `xsl:message` texts and warnings about errors it recovered from.
+- A `document()` that cannot be read fails an XSLT 1.0 transformation and,
+  in XSLT 2.0, gives an empty sequence with a warning in the log, as the
+  reference publishing service does; `doc()` always fails.
 - No panic crosses the C boundary. `xylem_xslt_transform` returns 1 for
   bad arguments, 2 when the stylesheet or input fails (a dynamic error,
   malformed XML) and 3 for an internal engine failure; the handle stays

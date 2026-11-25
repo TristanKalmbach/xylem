@@ -110,6 +110,9 @@ fn transform(args: &[String]) -> Result<(), String> {
     for m in &out.messages {
         eprintln!("message: {m}");
     }
+    for w in &out.warnings {
+        eprintln!("warning: {w}");
+    }
     match output {
         Some(p) => {
             std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))?;
@@ -256,7 +259,7 @@ fn handle(req: &Request, cache: &mut HashMap<PathBuf, Cached>) -> serde_json::Va
             .and_then(|()| out.write_secondary(p, !req.no_file_access))
         {
             Ok(()) => {
-                serde_json::json!({"id": req.id, "ok": true, "ms": ms, "messages": out.messages})
+                serde_json::json!({"id": req.id, "ok": true, "ms": ms, "messages": out.messages, "warnings": out.warnings})
             }
             Err(e) => fail(e),
         },
@@ -264,7 +267,7 @@ fn handle(req: &Request, cache: &mut HashMap<PathBuf, Cached>) -> serde_json::Va
             fail("the stylesheet writes secondary results; give an output path".into())
         }
         None => {
-            serde_json::json!({"id": req.id, "ok": true, "ms": ms, "messages": out.messages, "output_text": text})
+            serde_json::json!({"id": req.id, "ok": true, "ms": ms, "messages": out.messages, "warnings": out.warnings, "output_text": text})
         }
     }
 }

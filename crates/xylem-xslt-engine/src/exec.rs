@@ -125,6 +125,9 @@ pub struct Engine<'s> {
     keys: RefCell<HashMap<(QName, u32), Arc<KeyIndex>>>,
     docs: RefCell<HashMap<String, u32>>,
     pub messages: RefCell<Vec<String>>,
+    /// Warnings about recovered errors (a `document()` that could not be
+    /// read in XSLT 2.0), in order.
+    pub warnings: RefCell<Vec<String>>,
     /// Secondary results from `xsl:result-document`: (href, tree), in the
     /// order they were finished.
     pub results: RefCell<Vec<(String, Tree)>>,
@@ -152,6 +155,7 @@ impl<'s> Engine<'s> {
             keys: RefCell::default(),
             docs: RefCell::default(),
             messages: RefCell::default(),
+            warnings: RefCell::default(),
             results: RefCell::default(),
             pattern_env: RefCell::default(),
             timing: time.then(|| {
@@ -757,30 +761,43 @@ impl<'s> Engine<'s> {
         Ok(out)
     }
 
-    pub fn document(&self, href: &str, base: &str) -> R<Option<u32>> {
+    /// Loads the document at `href`, relative to `base` (a folder, or a
+    /// file whose folder is used; an empty `href` names `base` itself, so
+    /// `document('')` is the calling module). The outer error is fatal
+    /// (file access turned off, a malformed document); the inner one says
+    /// why the file could not be read, which callers treat their own way.
+    pub fn document(&self, href: &str, base: &str) -> R<Result<u32, String>> {
         if !crate::value::file_access() {
             return Err(format!("document('{href}'): file access is turned off"));
         }
         let base = std::path::Path::new(base);
-        let dir = if base.is_dir() {
+        let path = if href.is_empty() {
             base.to_path_buf()
+        } else if let Some(p) = crate::uri::to_path(href) {
+            p
+        } else if href.contains("://") {
+            return Ok(Err(format!("only file URIs can be read, not '{href}'")));
         } else {
-            base.parent().map(|p| p.to_path_buf()).unwrap_or_default()
+            let dir = if base.is_dir() {
+                base.to_path_buf()
+            } else {
+                base.parent().map(|p| p.to_path_buf()).unwrap_or_default()
+            };
+            dir.join(href)
         };
-        let href = href.strip_prefix("file:///").unwrap_or(href);
-        let path = dir.join(href);
         let key = path.to_string_lossy().to_string();
         if let Some(&t) = self.docs.borrow().get(&key) {
-            return Ok(Some(t));
+            return Ok(Ok(t));
         }
-        let Ok(bytes) = std::fs::read(&path) else {
-            return Ok(None);
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => return Ok(Err(read_error(&path, &e))),
         };
         let doc = xylem_dom::Document::from_bytes(&bytes).map_err(|e| format!("{key}: {e}"))?;
         let t = tree::from_dom(&doc, &key, self.ss)?;
         let i = self.add_tree(t);
         self.docs.borrow_mut().insert(key, i);
-        Ok(Some(i))
+        Ok(Ok(i))
     }
 
     pub fn base_of(&self, n: NodeRef) -> String {
@@ -1954,5 +1971,27 @@ impl Out {
                 Kind::Comment | Kind::Pi => self.leaf(n.kind, n.name.clone(), n.value.clone()),
             }
         }
+    }
+}
+
+/// Why a file could not be read, worded as .NET words it (the reference
+/// host's XSLT 1.0 processor reports this text).
+fn read_error(path: &std::path::Path, e: &std::io::Error) -> String {
+    let shown = path.to_string_lossy();
+    let shown = if cfg!(windows) {
+        shown.replace('/', "\\")
+    } else {
+        shown.into_owned()
+    };
+    match e.kind() {
+        std::io::ErrorKind::NotFound
+            if path
+                .parent()
+                .is_some_and(|p| !p.as_os_str().is_empty() && !p.exists()) =>
+        {
+            format!("Could not find a part of the path '{shown}'.")
+        }
+        std::io::ErrorKind::NotFound => format!("Could not find file '{shown}'."),
+        _ => format!("{shown}: {e}"),
     }
 }

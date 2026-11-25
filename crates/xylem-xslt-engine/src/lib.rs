@@ -62,6 +62,10 @@ pub struct Output {
     pub results: Vec<(String, String)>,
     /// `xsl:message` output, in order.
     pub messages: Vec<String>,
+    /// Warnings about errors the transformation recovered from, such as a
+    /// `document()` that could not be read (XSLT 2.0 gives an empty
+    /// sequence, as the reference processor does), in order.
+    pub warnings: Vec<String>,
     /// Every template and function that ran, when timing was asked for.
     pub timing: Vec<Timed>,
     /// Wall time of the transformation (timing runs only), in milliseconds.
@@ -122,6 +126,7 @@ pub fn transform_bytes(
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
         results: secondary(&engine, compat),
         messages: engine.messages.borrow().clone(),
+        warnings: engine.warnings.borrow().clone(),
         timing,
         total_ms: if time { total_ms } else { 0.0 },
     })
@@ -185,6 +190,7 @@ pub fn transform_from(
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
         results: secondary(&engine, compat),
         messages: engine.messages.borrow().clone(),
+        warnings: engine.warnings.borrow().clone(),
         timing: Vec::new(),
         total_ms: 0.0,
     })

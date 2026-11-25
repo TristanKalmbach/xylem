@@ -43,6 +43,12 @@ pub struct XylemStylesheet {
 
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
+    static LAST_LOG: RefCell<CString> = RefCell::new(CString::default());
+}
+
+fn set_log(messages: &[String], warnings: &[String]) {
+    let s = serde_json::json!({"messages": messages, "warnings": warnings}).to_string();
+    LAST_LOG.with(|l| *l.borrow_mut() = CString::new(s.replace('\0', " ")).unwrap_or_default());
 }
 
 /// Runs `f`, turning a panic into `on_panic` with the panic's message as the
@@ -78,6 +84,18 @@ fn set_error(e: impl Into<String>) {
 pub extern "C" fn xylem_xslt_last_error() -> *const c_char {
     guarded("reading the last error", std::ptr::null(), || {
         LAST_ERROR.with(|l| l.borrow().as_ptr())
+    })
+}
+
+/// What the last successful transformation on this thread reported besides
+/// its result, as JSON: `{"messages":[...],"warnings":[...]}` with the
+/// `xsl:message` texts and warnings about errors it recovered from (such as
+/// a `document()` that could not be read). Valid until the next call on
+/// this thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn xylem_xslt_last_log() -> *const c_char {
+    guarded("reading the last log", std::ptr::null(), || {
+        LAST_LOG.with(|l| l.borrow().as_ptr())
     })
 }
 
@@ -208,6 +226,9 @@ pub unsafe extern "C" fn xylem_xslt_transform(
         let result = with_file_access(flags & XYLEM_NO_FILE_ACCESS == 0, || {
             transform_bytes(&ss.inner, bytes, &params, false)
         });
+        if let Ok(o) = &result {
+            set_log(&o.messages, &o.warnings);
+        }
         let text = match result {
             Ok(o) if !o.results.is_empty() => {
                 set_error(
@@ -372,6 +393,45 @@ mod tests {
             );
             assert_eq!(rc, 0);
             xylem_xslt_free_bytes(out, len);
+            xylem_xslt_free(ss);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_log_reports_messages_and_warnings() {
+        let dir = std::env::temp_dir().join(format!("xylem-ffi-log-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xsl = dir.join("s.xsl");
+        std::fs::write(
+            &xsl,
+            r#"<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/"><xsl:message>hi</xsl:message><r n="{count(document('missing.xml'))}"/></xsl:template></xsl:stylesheet>"#,
+        )
+        .unwrap();
+        let path = CString::new(xsl.to_str().unwrap()).unwrap();
+        unsafe {
+            let ss = xylem_xslt_compile(path.as_ptr());
+            let (mut out, mut len) = (std::ptr::null_mut(), 0usize);
+            let rc = xylem_xslt_transform(
+                ss,
+                b"<a/>".as_ptr(),
+                4,
+                std::ptr::null(),
+                0,
+                &mut out,
+                &mut len,
+            );
+            assert_eq!(rc, 0);
+            xylem_xslt_free_bytes(out, len);
+            let log = CStr::from_ptr(xylem_xslt_last_log())
+                .to_string_lossy()
+                .to_string();
+            let v: serde_json::Value = serde_json::from_str(&log).unwrap();
+            assert_eq!(v["messages"][0], "hi");
+            assert!(
+                v["warnings"][0].as_str().unwrap().starts_with("FODC0002"),
+                "{log}"
+            );
             xylem_xslt_free(ss);
         }
         let _ = std::fs::remove_dir_all(&dir);

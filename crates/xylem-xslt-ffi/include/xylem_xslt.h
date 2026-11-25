@@ -25,6 +25,10 @@ typedef struct XylemStylesheet XylemStylesheet;
 const char *xylem_xslt_version(void);
 /* The last error on the calling thread; valid until the next call on it. */
 const char *xylem_xslt_last_error(void);
+/* What the last transformation on this thread reported besides its result,
+ * as JSON {"messages":[...],"warnings":[...]} (xsl:message texts, warnings
+ * about recovered errors such as an unreadable document()). */
+const char *xylem_xslt_last_log(void);
 
 /* Compiles a stylesheet file and what it includes or imports.
  * Returns NULL on failure. */
