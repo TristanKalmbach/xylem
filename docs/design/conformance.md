@@ -85,6 +85,14 @@ Then `xsl:next-match`, `xsl:apply-imports`, `xsl:for-each-group` (with
 `current-group`, `current-grouping-key`), `xsl:perform-sort`,
 `xsl:document` and simplified stylesheets: XSLT 3,858 of 4,682 (82.5%).
 
+Then `xs:hexBinary` and `xs:base64Binary`, casts to `xs:QName` from string
+literals (prefixes resolved statically), XPST0080 for casts to
+`xs:NOTATION` and `xs:anyAtomicType`, `xs:anyURI` escape checks, `xs:float`
+values that keep their type (float-precision comparison, exact decimal and
+float `round`, `floor`, `ceiling`, `abs`, `round-half-to-even`), and
+`min` / `max` that promote to the widest numeric type: QT3 14,587 of 15,054
+(96.9%), XSLT 3,886 of 4,682 (83.1%).
+
 | Set | Now |
 |---|---:|
 | `regex-syntax-xslt20` | 984 / 987 (3 depend on the Unicode version of `\w`, `\d`, `\c`) |
@@ -95,7 +103,6 @@ The largest remaining groups:
 | Area | Failures | Notes |
 |---|---:|---|
 | Wrong output (`got ...`) | ~400 each suite | Mixed: number formatting, serialization details, edge cases |
-| Casts to `hexBinary`, `base64Binary`, `NOTATION` | ~310 (QT3) | Types not implemented |
 | Expected errors not raised | ~210 (QT3), ~100 (XSLT) | Type checks the engine does not make yet |
 | Type annotations in patterns and sequence types (`element(*, xs:untyped)`) | some (XSLT) | Not parsed |
 | `base-uri`, `resolve-uri`, `static-base-uri`, `document-uri` | ~90 | Base URIs are file paths, not URIs |
