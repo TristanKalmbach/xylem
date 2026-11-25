@@ -249,3 +249,73 @@ fn synthetic_large_schema() {
     );
     assert_eq!(errors, 0);
 }
+
+/// Validates every `*.xml` under `XYLEM_INSTANCE_CORPUS` against the schema
+/// it points to, with `XYLEM_SCHEMA_MAP=<url prefix>=<local folder>` mapping
+/// a server location to a local copy (as `schema_locations` does in the
+/// app), and prints the error count and first messages per document.
+#[test]
+#[ignore = "needs XYLEM_INSTANCE_CORPUS and XYLEM_SCHEMA_MAP"]
+fn instances_validate_against_mapped_schemas() {
+    let (Some(root), Some(map)) = (
+        std::env::var_os("XYLEM_INSTANCE_CORPUS").map(PathBuf::from),
+        std::env::var("XYLEM_SCHEMA_MAP").ok(),
+    ) else {
+        eprintln!("XYLEM_INSTANCE_CORPUS or XYLEM_SCHEMA_MAP is not set; skipping");
+        return;
+    };
+    // Several mappings are separated by `;`.
+    let mut catalog = Catalog::new();
+    for entry in map.split(';').filter(|e| !e.trim().is_empty()) {
+        let (prefix, folder) = entry
+            .split_once('=')
+            .expect("XYLEM_SCHEMA_MAP is <url prefix>=<folder>[;...]");
+        catalog.add_prefix(prefix.trim(), folder.trim());
+    }
+    let mut files = Vec::new();
+    walk(&root, "xml", &mut files);
+    files.sort();
+    let started = Instant::now();
+    let (mut valid, mut invalid, mut unresolved) = (0, 0, 0);
+    let mut messages: BTreeMap<String, usize> = BTreeMap::new();
+    for f in &files {
+        let Ok(bytes) = std::fs::read(f) else {
+            continue;
+        };
+        let Ok(doc) = Document::from_bytes(&bytes) else {
+            continue;
+        };
+        match Grammar::for_document(&doc, Some(f), &catalog) {
+            None => {}
+            Some(Err(e)) => {
+                unresolved += 1;
+                eprintln!("{}: schema not loaded: {e}", f.display());
+            }
+            Some(Ok(g)) => {
+                let errors: Vec<_> = g
+                    .validate(&doc)
+                    .into_iter()
+                    .filter(|e| e.severity == xylem_schema::Severity::Error)
+                    .collect();
+                if errors.is_empty() {
+                    valid += 1;
+                } else {
+                    invalid += 1;
+                    for e in errors {
+                        *messages.entry(e.message).or_default() += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "{} documents in {:.1?}: {valid} valid, {invalid} with errors, {unresolved} whose schema did not load",
+        files.len(),
+        started.elapsed()
+    );
+    let mut common: Vec<_> = messages.into_iter().collect();
+    common.sort_by(|a, b| b.1.cmp(&a.1));
+    for (m, n) in common.into_iter().take(15) {
+        println!("  {n:>5}  {m}");
+    }
+}
