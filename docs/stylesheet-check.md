@@ -59,6 +59,34 @@ Embedded scripts in XSLT 1.0 stylesheets (`msxsl:script`) run only on the
 host, and only when the team configuration sets `xslt_allow_scripts = true`
 or `--allow-scripts` is given on the command line.
 
+### Comparing two engines on every stylesheet
+
+Before replacing one engine with another, run every stylesheet you have
+through both and compare:
+
+```
+xylem-xslt-check differential <stylesheets folder> --inputs <folder of inputs> \
+    --input-pattern "*.xml" --reference tools/saxon-dotnet/bin/SaxonDotnetHost.exe \
+    --params "mode=final" --params "mode=draft" [--threads 4] [--work <folder>]
+```
+
+Every top-level stylesheet under the folder (one no other file includes or
+imports) runs on every input, once per `--params` set, on the reference and
+on the built-in engine, and the outputs are compared as Check compares them.
+Engines that both fail on a case agree. Outputs that agree are deleted as
+they are compared; ones that differ are kept in the work folder. Results go
+to `results.jsonl` there as each stylesheet finishes, so a run that is
+stopped and started again with the same `--work` carries on where it was,
+and `report.md` lists every disagreement. Add `--serialize` to compare a
+second step such as XSL-FO to HTML (inputs read as they are, results
+written as `xsl:output` asks). The exit code is 0 only when the engines
+agree everywhere.
+
+`xylem-xslt-check run …` and `compile …` take the same arguments as
+`SaxonDotnetHost.exe` and answer with the built-in engine, so the check
+program can be used wherever an engine program is expected, to run the
+built-in engine in a process of its own.
+
 ## Test suites
 
 A suite is a TOML file listing the test inputs. Paths are relative to it.

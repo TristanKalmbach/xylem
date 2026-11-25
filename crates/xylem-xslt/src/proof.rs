@@ -95,6 +95,26 @@ fn include_hrefs(file: &Path) -> Vec<String> {
     out
 }
 
+/// Every top-level stylesheet under `scope`: the ones no other file
+/// includes or imports.
+pub fn top_level(scope: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    xsl_files(scope, &mut files);
+    let mut referenced = HashSet::new();
+    for f in &files {
+        let dir = f.parent().unwrap_or(Path::new("."));
+        for h in include_hrefs(f) {
+            referenced.insert(path_key(&dir.join(h.replace("%20", " "))));
+        }
+    }
+    let mut tops: Vec<PathBuf> = files
+        .into_iter()
+        .filter(|f| !referenced.contains(&path_key(f)))
+        .collect();
+    tops.sort();
+    tops
+}
+
 /// Top-level stylesheets under `scope` (ones no other file includes or
 /// imports) that use any of `changed`, directly or through other modules.
 pub fn dependents(scope: &Path, changed: &[PathBuf]) -> Vec<PathBuf> {

@@ -13,6 +13,7 @@
 pub mod analyze;
 pub mod check;
 pub mod compare;
+pub mod differential;
 pub mod git;
 pub mod host;
 pub mod navigate;

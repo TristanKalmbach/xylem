@@ -75,8 +75,11 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<bool, String> {
-    if std::env::args().nth(1).as_deref() == Some("new-suite") {
-        return new_suite(std::env::args().skip(2));
+    match std::env::args().nth(1).as_deref() {
+        Some("new-suite") => return new_suite(std::env::args().skip(2)),
+        Some("run") | Some("compile") => return host_command(std::env::args().skip(1)),
+        Some("differential") => return differential(std::env::args().skip(2)),
+        _ => {}
     }
     let mut args = std::env::args().skip(1);
     let mut suite_path = None;
@@ -672,4 +675,230 @@ fn new_suite(mut args: impl Iterator<Item = String>) -> Result<bool, String> {
         tests.len()
     );
     Ok(true)
+}
+
+/// `run` and `compile`: the engine-program protocol (the same arguments and
+/// JSON lines as `tools/saxon-dotnet`), answered by the built-in engine, so
+/// this program can stand in wherever an engine program is expected and the
+/// built-in engine can run in a process of its own.
+fn host_command(mut args: impl Iterator<Item = String>) -> Result<bool, String> {
+    use serde_json::json;
+    use std::collections::BTreeMap;
+    let compile_only = args.next().as_deref() == Some("compile");
+    let mut stylesheets: Vec<PathBuf> = Vec::new();
+    let mut jobs: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut params = BTreeMap::new();
+    let mut host = Host::builtin();
+    let mut profile = false;
+    while let Some(a) = args.next() {
+        let mut value = |name: &str| args.next().ok_or(format!("{name} needs a value."));
+        match a.as_str() {
+            "--stylesheet" => stylesheets.push(PathBuf::from(value("--stylesheet")?)),
+            "--job" => {
+                let pair = value("--job")?;
+                let (i, o) = pair
+                    .split_once('=')
+                    .filter(|(i, o)| !i.is_empty() && !o.is_empty())
+                    .ok_or(format!("--job takes <input>=<output>, got: {pair}"))?;
+                jobs.push((PathBuf::from(i), PathBuf::from(o)));
+            }
+            "--param" => {
+                let pair = value("--param")?;
+                let (k, v) = pair
+                    .split_once('=')
+                    .filter(|(k, _)| !k.is_empty())
+                    .ok_or(format!("--param takes name=value, got: {pair}"))?;
+                params.insert(k.to_string(), v.to_string());
+            }
+            "--repeat" => {
+                host.repeat = value("--repeat")?
+                    .parse()
+                    .map_err(|_| "--repeat takes a number of runs.".to_string())?
+            }
+            "--serialize" => host.serialize = true,
+            "--allow-scripts" => host.allow_scripts = true,
+            "--profile" => profile = true,
+            other => return Err(format!("Unknown option: {other}")),
+        }
+    }
+    if compile_only {
+        let results = host.compile(&stylesheets);
+        for c in &results {
+            println!(
+                "{}",
+                json!({"stylesheet": c.stylesheet, "ok": c.ok, "error": c.error})
+            );
+        }
+        return Ok(results.iter().all(|c| c.ok));
+    }
+    let stylesheet = stylesheets
+        .first()
+        .ok_or("--stylesheet is required.")?
+        .clone();
+    if jobs.is_empty() {
+        return Err("At least one --job is required.".into());
+    }
+    let run = host.run(&stylesheet, &jobs, &params, profile);
+    if let Some(e) = &run.error {
+        println!(
+            "{}",
+            json!({"summary": true, "xslt": run.xslt, "compiled": false, "error": e})
+        );
+        return Ok(false);
+    }
+    let mut failed = 0;
+    for (i, j) in run.jobs.iter().enumerate() {
+        if !j.ok {
+            failed += 1;
+        }
+        println!(
+            "{}",
+            json!({"job": i + 1, "input": j.input, "output": j.output, "ok": j.ok,
+                   "ms": j.ms, "error": j.error, "profile": j.profile})
+        );
+    }
+    println!(
+        "{}",
+        json!({"summary": true, "xslt": run.xslt, "compiled": true,
+               "compile_ms": run.compile_ms, "jobs": run.jobs.len(), "failed": failed})
+    );
+    Ok(failed == 0)
+}
+
+const DIFFERENTIAL_USAGE: &str = "Usage: xylem-xslt-check differential <stylesheet folder | file.xsl ...> \
+--inputs <folder> [--input-pattern <pattern>] --reference <program> [--candidate <program>] \
+[--params \"name=value name=value\" ...] [--serialize] [--work <folder>] [--threads <n>] [--report <file.md>]";
+
+/// `differential`: every top-level stylesheet × input × parameter set,
+/// through a reference engine and a candidate engine, compared.
+fn differential(mut args: impl Iterator<Item = String>) -> Result<bool, String> {
+    use std::collections::BTreeMap;
+    use xylem_xslt::differential::{Plan, markdown, run as run_plan, totals};
+    use xylem_xslt::suite::{NamePattern, find_tests};
+    let mut sources: Vec<PathBuf> = Vec::new();
+    let mut inputs_dir: Option<PathBuf> = None;
+    let mut pattern = "*.xml".to_string();
+    let mut reference: Option<PathBuf> = None;
+    let mut candidate: Option<PathBuf> = None;
+    let mut param_sets: Vec<BTreeMap<String, String>> = Vec::new();
+    let mut work: Option<PathBuf> = None;
+    let mut threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).max(1));
+    let mut report: Option<PathBuf> = None;
+    let mut serialize = false;
+    while let Some(a) = args.next() {
+        let mut value = |name: &str| {
+            args.next()
+                .ok_or(format!("{name} needs a value.\n{DIFFERENTIAL_USAGE}"))
+        };
+        match a.as_str() {
+            "--serialize" => serialize = true,
+            "--inputs" => inputs_dir = Some(PathBuf::from(value("--inputs")?)),
+            "--input-pattern" => pattern = value("--input-pattern")?,
+            "--reference" => reference = Some(PathBuf::from(value("--reference")?)),
+            "--candidate" => candidate = Some(PathBuf::from(value("--candidate")?)),
+            "--work" => work = Some(PathBuf::from(value("--work")?)),
+            "--report" => report = Some(PathBuf::from(value("--report")?)),
+            "--threads" => {
+                threads = value("--threads")?
+                    .parse()
+                    .map_err(|_| "--threads takes a number.".to_string())?
+            }
+            "--params" => {
+                let mut p = BTreeMap::new();
+                for pair in value("--params")?.split_whitespace() {
+                    let (k, v) = pair
+                        .split_once('=')
+                        .ok_or(format!("--params takes name=value pairs, got: {pair}"))?;
+                    p.insert(k.to_string(), v.to_string());
+                }
+                param_sets.push(p);
+            }
+            "-h" | "--help" => {
+                println!("{DIFFERENTIAL_USAGE}");
+                return Ok(true);
+            }
+            other if !other.starts_with("--") => sources.push(PathBuf::from(other)),
+            other => return Err(format!("Unknown argument: {other}\n{DIFFERENTIAL_USAGE}")),
+        }
+    }
+    if sources.is_empty() {
+        return Err(DIFFERENTIAL_USAGE.into());
+    }
+    let mut stylesheets = Vec::new();
+    for s in &sources {
+        if s.is_dir() {
+            stylesheets.extend(proof::top_level(s));
+        } else {
+            stylesheets.push(s.clone());
+        }
+    }
+    let inputs_dir = inputs_dir.ok_or(format!("--inputs is required.\n{DIFFERENTIAL_USAGE}"))?;
+    let inputs: Vec<PathBuf> = find_tests(
+        &inputs_dir,
+        &NamePattern::parse(&pattern)?,
+        &NamePattern::parse("*.never-an-expected-output")?,
+    )?
+    .into_iter()
+    .map(|(i, _)| i)
+    .collect();
+    if inputs.is_empty() {
+        return Err(format!(
+            "No files under {} match {pattern}.",
+            inputs_dir.display()
+        ));
+    }
+    if param_sets.is_empty() {
+        param_sets.push(BTreeMap::new());
+    }
+    let mut reference = Host::new(reference.ok_or(format!(
+        "--reference is required (the engine to compare with).\n{DIFFERENTIAL_USAGE}"
+    ))?);
+    // By default the candidate is this program's own `run` command: the
+    // built-in engine, each stylesheet in a process of its own.
+    let mut candidate = match candidate {
+        Some(p) => Host::new(p),
+        None => Host::new(std::env::current_exe().map_err(|e| e.to_string())?),
+    };
+    // A second step on text the service already has (XSL-FO to HTML):
+    // the input as it is, the result as the stylesheet's xsl:output asks.
+    reference.serialize = serialize;
+    candidate.serialize = serialize;
+    let work = work.unwrap_or_else(|| std::env::temp_dir().join("xylem-xslt").join("differential"));
+    println!(
+        "{} stylesheets × {} inputs × {} parameter sets = {} cases; results in {}",
+        stylesheets.len(),
+        inputs.len(),
+        param_sets.len(),
+        stylesheets.len() * inputs.len() * param_sets.len(),
+        work.display()
+    );
+    let plan = Plan {
+        stylesheets: &stylesheets,
+        inputs: &inputs,
+        param_sets: &param_sets,
+        reference: &reference,
+        candidate: &candidate,
+        work: &work,
+        threads,
+    };
+    let cases = run_plan(&plan, &|line| println!("{line}"), &AtomicBool::new(false))
+        .map_err(|e| format!("{}: {e}", work.display()))?;
+    let report = report.unwrap_or_else(|| work.join("report.md"));
+    std::fs::write(
+        &report,
+        markdown(&cases, &reference.program, &candidate.program),
+    )
+    .map_err(|e| format!("{}: {e}", report.display()))?;
+    let t = totals(&cases);
+    println!(
+        "\n{} cases: {} same, {} both failed, {} different, {} only the reference failed, {} only the candidate failed.\nReport: {}",
+        t.cases,
+        t.same,
+        t.both_failed,
+        t.different,
+        t.reference_failed,
+        t.candidate_failed,
+        report.display()
+    );
+    Ok(t.different == 0 && t.reference_failed == 0 && t.candidate_failed == 0)
 }
