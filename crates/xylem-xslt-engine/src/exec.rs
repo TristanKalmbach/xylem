@@ -1880,34 +1880,73 @@ impl Out {
         Ok(())
     }
 
+    /// Copies node `i` of `src` and its subtree. The walk keeps its own
+    /// stack, so a tree's depth is limited by memory, not by the thread's
+    /// stack, and carries each element's in-scope namespaces down instead
+    /// of walking every ancestor again.
     fn copy_node(&mut self, src: &Tree, i: u32) {
-        let n = src.node(i);
-        match n.kind {
-            Kind::Document => {
-                for &c in &n.children {
-                    self.copy_node(src, c);
+        type Scope = Rc<Vec<(Rc<str>, Rc<str>)>>;
+        enum Step {
+            Node(u32, Option<Scope>),
+            End,
+        }
+        let mut stack = vec![Step::Node(i, None)];
+        while let Some(step) = stack.pop() {
+            let (i, outer) = match step {
+                Step::End => {
+                    self.stack.pop();
+                    continue;
                 }
-            }
-            Kind::Element => {
-                self.start(n.name.clone().unwrap(), src.in_scope(i));
-                for &a in &n.attrs {
-                    let an = src.node(a);
-                    let _ = self.attr(an.name.clone().unwrap(), an.value.clone());
+                Step::Node(i, outer) => (i, outer),
+            };
+            let n = src.node(i);
+            match n.kind {
+                Kind::Document => {
+                    stack.extend(n.children.iter().rev().map(|&c| Step::Node(c, None)));
                 }
-                for &c in &n.children {
-                    self.copy_node(src, c);
+                Kind::Element => {
+                    // In-scope bindings, innermost first, as `Tree::in_scope`.
+                    let scope = match outer {
+                        None => src.in_scope(i),
+                        Some(outer) => {
+                            let mut v: Vec<(Rc<str>, Rc<str>)> = Vec::new();
+                            for (p, u) in &n.ns {
+                                if !v.iter().any(|(q, _)| q == p) {
+                                    v.push((p.clone(), u.clone()));
+                                }
+                            }
+                            let own = v.len();
+                            for (p, u) in outer.iter() {
+                                if !v[..own].iter().any(|(q, _)| q == p) {
+                                    v.push((p.clone(), u.clone()));
+                                }
+                            }
+                            v
+                        }
+                    };
+                    let scope = Rc::new(scope);
+                    self.start(n.name.clone().unwrap(), (*scope).clone());
+                    for &a in &n.attrs {
+                        let an = src.node(a);
+                        let _ = self.attr(an.name.clone().unwrap(), an.value.clone());
+                    }
+                    stack.push(Step::End);
+                    stack.extend(
+                        n.children
+                            .iter()
+                            .rev()
+                            .map(|&c| Step::Node(c, Some(scope.clone()))),
+                    );
                 }
-                let i = self.stack.pop().unwrap();
-                let _ = i;
+                Kind::Attribute => {
+                    let _ = self.attr(n.name.clone().unwrap(), n.value.clone());
+                }
+                Kind::Text => {
+                    let p = *self.stack.last().unwrap();
+                    tree::append_text(&mut self.tree, p, &n.value);
+                }
+                Kind::Comment | Kind::Pi => self.leaf(n.kind, n.name.clone(), n.value.clone()),
             }
-            Kind::Attribute => {
-                let _ = self.attr(n.name.clone().unwrap(), n.value.clone());
-            }
-            Kind::Text => {
-                let p = *self.stack.last().unwrap();
-                tree::append_text(&mut self.tree, p, &n.value);
-            }
-            Kind::Comment | Kind::Pi => self.leaf(n.kind, n.name.clone(), n.value.clone()),
         }
     }
 }

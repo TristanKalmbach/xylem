@@ -160,12 +160,14 @@ impl Tree {
         }
     }
 
+    /// Appends the text descendants of `i` in document order.
     fn collect_text(&self, i: u32, out: &mut String) {
-        for &c in &self.node(i).children {
+        let mut stack: Vec<u32> = self.node(i).children.iter().rev().copied().collect();
+        while let Some(c) = stack.pop() {
             let n = self.node(c);
             match n.kind {
                 Kind::Text => out.push_str(&n.value),
-                Kind::Element => self.collect_text(c, out),
+                Kind::Element => stack.extend(n.children.iter().rev().copied()),
                 _ => {}
             }
         }
@@ -491,6 +493,22 @@ fn expand(
     copied
 }
 
+/// One step of [`copy`]'s walk.
+enum CopyStep {
+    /// Copy this node under `parent`; `preserve` is the `xml:space` in effect.
+    Node {
+        id: NodeId,
+        parent: u32,
+        preserve: bool,
+    },
+    /// An element's children are done: drop its namespace bindings.
+    Leave { scope: usize },
+}
+
+/// Copies `id` and its subtree under `parent`. The walk keeps its own
+/// stack, so a document's depth is limited by memory, not by the thread's
+/// stack. Nodes are added in document order (an element, its attributes,
+/// then its children), as `generate-id` numbering expects.
 fn copy(
     doc: &Document,
     id: NodeId,
@@ -499,90 +517,137 @@ fn copy(
     strip: &Strip,
     preserve: bool,
 ) -> Result<(), String> {
-    match doc.kind(id) {
-        NodeKind::Element(el) => {
-            let me = t.push(TNode::new(Kind::Element, Some(parent)));
-            t.nodes[parent as usize].children.push(me);
-            let mut preserve = preserve;
-            for a in &el.attrs {
-                if a.name == "xmlns" {
-                    t.nodes[me as usize]
-                        .ns
-                        .push(("".into(), a.value.as_str().into()));
-                } else if let Some(p) = a.name.strip_prefix("xmlns:") {
-                    t.nodes[me as usize]
-                        .ns
-                        .push((p.into(), a.value.as_str().into()));
+    // The namespace bindings in scope, innermost last, so resolving a
+    // prefix does not walk every ancestor.
+    let mut scope: Vec<(Rc<str>, Rc<str>)> = if t.node(parent).kind == Kind::Element {
+        let mut v = t.in_scope(parent);
+        v.reverse();
+        v
+    } else {
+        Vec::new()
+    };
+    let resolve = |scope: &[(Rc<str>, Rc<str>)], prefix: &str| -> Option<Rc<str>> {
+        if prefix == "xml" {
+            return Some(XML_NS.into());
+        }
+        scope
+            .iter()
+            .rev()
+            .find(|(p, _)| &**p == prefix)
+            .map(|(_, u)| u.clone())
+            .filter(|u| !u.is_empty() || prefix.is_empty())
+    };
+    let mut stack = vec![CopyStep::Node {
+        id,
+        parent,
+        preserve,
+    }];
+    while let Some(step) = stack.pop() {
+        let (id, parent, preserve) = match step {
+            CopyStep::Leave { scope: len } => {
+                scope.truncate(len);
+                continue;
+            }
+            CopyStep::Node {
+                id,
+                parent,
+                preserve,
+            } => (id, parent, preserve),
+        };
+        match doc.kind(id) {
+            NodeKind::Element(el) => {
+                let me = t.push(TNode::new(Kind::Element, Some(parent)));
+                t.nodes[parent as usize].children.push(me);
+                let outer = scope.len();
+                let mut preserve = preserve;
+                for a in &el.attrs {
+                    let decl = if a.name == "xmlns" {
+                        Some("")
+                    } else {
+                        a.name.strip_prefix("xmlns:")
+                    };
+                    if let Some(p) = decl {
+                        let binding: (Rc<str>, Rc<str>) = (p.into(), a.value.as_str().into());
+                        t.nodes[me as usize].ns.push(binding.clone());
+                        scope.push(binding);
+                    }
+                }
+                let (prefix, local) = split(&el.name);
+                let uri = resolve(&scope, prefix).unwrap_or_else(|| "".into());
+                if !prefix.is_empty() && uri.is_empty() {
+                    return Err(format!("undeclared namespace prefix '{prefix}'"));
+                }
+                let name = QName::new(&uri, local, prefix);
+                for a in &el.attrs {
+                    if a.name == "xmlns" || a.name.starts_with("xmlns:") {
+                        continue;
+                    }
+                    let (p, l) = split(&a.name);
+                    let u = if p.is_empty() {
+                        "".into()
+                    } else {
+                        resolve(&scope, p)
+                            .ok_or_else(|| format!("undeclared namespace prefix '{p}'"))?
+                    };
+                    if a.name == "xml:space" {
+                        preserve = a.value == "preserve";
+                    }
+                    let mut an = TNode::new(Kind::Attribute, Some(me));
+                    an.name = Some(QName::new(&u, l, p));
+                    an.value = strip.ents.expand_attribute(&a.value, 0)?;
+                    let ai = t.push(an);
+                    t.nodes[me as usize].attrs.push(ai);
+                }
+                let stripping = !preserve && strip.s.strip(&name);
+                t.nodes[me as usize].name = Some(name);
+                if let Some(l) = strip.lines {
+                    if t.lines.len() <= me as usize {
+                        t.lines.resize(me as usize + 1, 0);
+                    }
+                    t.lines[me as usize] = l.get(id.index()).copied().unwrap_or(0);
+                }
+                stack.push(CopyStep::Leave { scope: outer });
+                for &c in doc.children(id).iter().rev() {
+                    if stripping
+                        && let NodeKind::Text(s) = doc.kind(c)
+                        && s.chars().all(is_xml_space)
+                    {
+                        continue;
+                    }
+                    stack.push(CopyStep::Node {
+                        id: c,
+                        parent: me,
+                        preserve,
+                    });
                 }
             }
-            let (prefix, local) = split(&el.name);
-            let uri = t.resolve(me, prefix).unwrap_or_else(|| "".into());
-            if !prefix.is_empty() && uri.is_empty() {
-                return Err(format!("undeclared namespace prefix '{prefix}'"));
-            }
-            let name = QName::new(&uri, local, prefix);
-            for a in &el.attrs {
-                if a.name == "xmlns" || a.name.starts_with("xmlns:") {
-                    continue;
-                }
-                let (p, l) = split(&a.name);
-                let u = if p.is_empty() {
-                    "".into()
+            // `xylem-dom` keeps line ends as written; XML parsers report CR LF
+            // as LF. A lone CR can only come from `&#13;` and is kept.
+            NodeKind::Text(s) | NodeKind::CData(s) => {
+                if s.contains("\r\n") {
+                    append_text(t, parent, &s.replace("\r\n", "\n"))
                 } else {
-                    t.resolve(me, p)
-                        .ok_or_else(|| format!("undeclared namespace prefix '{p}'"))?
-                };
-                if a.name == "xml:space" {
-                    preserve = a.value == "preserve";
+                    append_text(t, parent, s)
                 }
-                let mut an = TNode::new(Kind::Attribute, Some(me));
-                an.name = Some(QName::new(&u, l, p));
-                an.value = strip.ents.expand_attribute(&a.value, 0)?;
-                let ai = t.push(an);
-                t.nodes[me as usize].attrs.push(ai);
             }
-            let stripping = !preserve && strip.s.strip(&name);
-            t.nodes[me as usize].name = Some(name);
-            if let Some(l) = strip.lines {
-                if t.lines.len() <= me as usize {
-                    t.lines.resize(me as usize + 1, 0);
-                }
-                t.lines[me as usize] = l.get(id.index()).copied().unwrap_or(0);
+            // Entities nest at most `MAX_ENTITY_DEPTH` deep, so this
+            // recursion is bounded.
+            NodeKind::EntityRef(name) => expand(name, t, parent, strip, preserve)?,
+            NodeKind::Comment(s) => {
+                let mut n = TNode::new(Kind::Comment, Some(parent));
+                n.value = s.clone();
+                let i = t.push(n);
+                t.nodes[parent as usize].children.push(i);
             }
-            for &c in doc.children(id) {
-                if stripping
-                    && let NodeKind::Text(s) = doc.kind(c)
-                    && s.chars().all(is_xml_space)
-                {
-                    continue;
-                }
-                copy(doc, c, t, me, strip, preserve)?;
+            NodeKind::Pi { target, data } => {
+                let mut n = TNode::new(Kind::Pi, Some(parent));
+                n.name = Some(QName::local(target));
+                n.value = data.clone();
+                let i = t.push(n);
+                t.nodes[parent as usize].children.push(i);
             }
+            NodeKind::Document | NodeKind::Doctype(_) => {}
         }
-        // `xylem-dom` keeps line ends as written; XML parsers report CR LF
-        // as LF. A lone CR can only come from `&#13;` and is kept.
-        NodeKind::Text(s) | NodeKind::CData(s) => {
-            if s.contains("\r\n") {
-                append_text(t, parent, &s.replace("\r\n", "\n"))
-            } else {
-                append_text(t, parent, s)
-            }
-        }
-        NodeKind::EntityRef(name) => expand(name, t, parent, strip, preserve)?,
-        NodeKind::Comment(s) => {
-            let mut n = TNode::new(Kind::Comment, Some(parent));
-            n.value = s.clone();
-            let i = t.push(n);
-            t.nodes[parent as usize].children.push(i);
-        }
-        NodeKind::Pi { target, data } => {
-            let mut n = TNode::new(Kind::Pi, Some(parent));
-            n.name = Some(QName::local(target));
-            n.value = data.clone();
-            let i = t.push(n);
-            t.nodes[parent as usize].children.push(i);
-        }
-        NodeKind::Document | NodeKind::Doctype(_) => {}
     }
     Ok(())
 }

@@ -90,104 +90,60 @@ pub fn node_xml(t: &Tree, i: u32) -> String {
     out
 }
 
+/// One step of a writer's walk. The walks keep their own stack, so a
+/// tree's depth is limited by memory, not by the thread's stack.
+enum Step {
+    /// Write this node; `raw` is set inside an HTML `script` or `style`.
+    Open(u32, bool),
+    /// Write this element's end tag and drop the bindings it added, those
+    /// above `scope`.
+    Close(u32, usize),
+}
+
 fn node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String) {
-    let n = t.node(i);
-    match n.kind {
-        Kind::Text => host_text(&n.value, out),
-        Kind::Comment => {
-            out.push_str("<!--");
-            out.push_str(&n.value);
-            out.push_str("-->");
-        }
-        Kind::Pi => {
-            out.push_str("<?");
-            out.push_str(&n.name.as_ref().unwrap().local);
-            if !n.value.is_empty() {
-                out.push(' ');
-                out.push_str(&n.value);
-            }
-            out.push_str("?>");
-        }
-        Kind::Element => {
-            let name = n.name.as_ref().unwrap();
-            let depth = scope.len();
-            let mut decls: Vec<(Rc<str>, Rc<str>)> = Vec::new();
-            let need = |p: &Rc<str>,
-                        u: &Rc<str>,
-                        scope: &Vec<(Rc<str>, Rc<str>)>,
-                        decls: &mut Vec<(Rc<str>, Rc<str>)>| {
-                if &**p == "xml" || (u.is_empty() && !p.is_empty()) {
-                    return;
-                }
-                let cur = decls
-                    .iter()
-                    .rev()
-                    .find(|(q, _)| q == p)
-                    .map(|(_, u)| &**u)
-                    .or(bound(scope, p));
-                if cur != Some(&**u) {
-                    decls.retain(|(q, _)| q != p);
-                    decls.push((p.clone(), u.clone()));
-                }
-            };
-            need(&name.prefix, &name.uri, scope, &mut decls);
-            for (p, u) in &n.ns {
-                need(p, u, scope, &mut decls);
-            }
-            for &a in &n.attrs {
-                let q = t.node(a).name.as_ref().unwrap();
-                if !q.prefix.is_empty() && &*q.uri != XML_NS {
-                    need(&q.prefix, &q.uri, scope, &mut decls);
-                }
-            }
-            out.push('<');
-            out.push_str(&name.lexical());
-            // The XSLT 1.0 processor builds the result through an XmlWriter,
-            // which adds an element's namespace declarations after its
-            // attributes; the XSLT 2.0 path writes them first.
-            let write_decls = |out: &mut String| {
-                for (p, u) in &decls {
-                    if p.is_empty() {
-                        out.push_str(" xmlns=\"");
-                    } else {
-                        out.push_str(" xmlns:");
-                        out.push_str(p);
-                        out.push_str("=\"");
-                    }
-                    escape(u, true, out);
-                    out.push('"');
-                }
-            };
-            let decls_last = crate::value::compat();
-            if !decls_last {
-                write_decls(out);
-            }
-            for &a in &n.attrs {
-                let an = t.node(a);
-                out.push(' ');
-                out.push_str(&an.name.as_ref().unwrap().lexical());
-                out.push_str("=\"");
-                escape(&an.value, true, out);
-                out.push('"');
-            }
-            if decls_last {
-                write_decls(out);
-            }
-            scope.extend(decls);
-            if n.children.is_empty() {
-                out.push_str(" />");
-            } else {
-                out.push('>');
-                for &c in &n.children {
-                    node(t, c, scope, out);
-                }
+    let mut stack = vec![Step::Open(i, false)];
+    while let Some(step) = stack.pop() {
+        let i = match step {
+            Step::Close(i, depth) => {
                 out.push_str("</");
-                out.push_str(&name.lexical());
+                out.push_str(&t.node(i).name.as_ref().unwrap().lexical());
                 out.push('>');
+                scope.truncate(depth);
+                continue;
             }
-            scope.truncate(depth);
+            Step::Open(i, _) => i,
+        };
+        let n = t.node(i);
+        match n.kind {
+            Kind::Text => host_text(&n.value, out),
+            Kind::Comment => {
+                out.push_str("<!--");
+                out.push_str(&n.value);
+                out.push_str("-->");
+            }
+            Kind::Pi => {
+                out.push_str("<?");
+                out.push_str(&n.name.as_ref().unwrap().local);
+                if !n.value.is_empty() {
+                    out.push(' ');
+                    out.push_str(&n.value);
+                }
+                out.push_str("?>");
+            }
+            Kind::Element => {
+                let depth = scope.len();
+                start_tag(t, i, scope, out);
+                if n.children.is_empty() {
+                    out.push_str(" />");
+                    scope.truncate(depth);
+                } else {
+                    out.push('>');
+                    stack.push(Step::Close(i, depth));
+                    stack.extend(n.children.iter().rev().map(|&c| Step::Open(c, false)));
+                }
+            }
+            Kind::Document | Kind::Attribute => {}
         }
-        Kind::Document | Kind::Attribute => {}
     }
 }
 
@@ -212,6 +168,76 @@ fn host_text(s: &str, out: &mut String) {
             c => out.push(c),
         }
     }
+}
+
+/// Writes an element's start tag up to its closing `>` and adds the
+/// namespace declarations it writes to `scope`.
+fn start_tag(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String) {
+    let n = t.node(i);
+    let name = n.name.as_ref().unwrap();
+    let mut decls: Vec<(Rc<str>, Rc<str>)> = Vec::new();
+    let need = |p: &Rc<str>,
+                u: &Rc<str>,
+                scope: &Vec<(Rc<str>, Rc<str>)>,
+                decls: &mut Vec<(Rc<str>, Rc<str>)>| {
+        if &**p == "xml" || (u.is_empty() && !p.is_empty()) {
+            return;
+        }
+        let cur = decls
+            .iter()
+            .rev()
+            .find(|(q, _)| q == p)
+            .map(|(_, u)| &**u)
+            .or(bound(scope, p));
+        if cur != Some(&**u) {
+            decls.retain(|(q, _)| q != p);
+            decls.push((p.clone(), u.clone()));
+        }
+    };
+    need(&name.prefix, &name.uri, scope, &mut decls);
+    for (p, u) in &n.ns {
+        need(p, u, scope, &mut decls);
+    }
+    for &a in &n.attrs {
+        let q = t.node(a).name.as_ref().unwrap();
+        if !q.prefix.is_empty() && &*q.uri != XML_NS {
+            need(&q.prefix, &q.uri, scope, &mut decls);
+        }
+    }
+    out.push('<');
+    out.push_str(&name.lexical());
+    // The XSLT 1.0 processor builds the result through an XmlWriter,
+    // which adds an element's namespace declarations after its
+    // attributes; the XSLT 2.0 path writes them first.
+    let write_decls = |out: &mut String| {
+        for (p, u) in &decls {
+            if p.is_empty() {
+                out.push_str(" xmlns=\"");
+            } else {
+                out.push_str(" xmlns:");
+                out.push_str(p);
+                out.push_str("=\"");
+            }
+            escape(u, true, out);
+            out.push('"');
+        }
+    };
+    let decls_last = crate::value::compat();
+    if !decls_last {
+        write_decls(out);
+    }
+    for &a in &n.attrs {
+        let an = t.node(a);
+        out.push(' ');
+        out.push_str(&an.name.as_ref().unwrap().lexical());
+        out.push_str("=\"");
+        escape(&an.value, true, out);
+        out.push('"');
+    }
+    if decls_last {
+        write_decls(out);
+    }
+    scope.extend(decls);
 }
 
 fn escape(s: &str, attr: bool, out: &mut String) {
@@ -294,7 +320,7 @@ pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
             }
             let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];
             for &c in &t.node(0).children {
-                html_node(t, c, &mut scope, &mut out, false);
+                html_node(t, c, &mut scope, &mut out);
             }
             return out;
         }
@@ -318,83 +344,91 @@ pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
     out.replace('\n', "\r\n")
 }
 
-fn html_node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String, raw: bool) {
-    let n = t.node(i);
-    match n.kind {
-        Kind::Text => {
-            if raw {
+fn html_node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String) {
+    let mut stack = vec![Step::Open(i, false)];
+    while let Some(step) = stack.pop() {
+        let (i, raw) = match step {
+            Step::Close(i, depth) => {
+                out.push_str("</");
+                out.push_str(&t.node(i).name.as_ref().unwrap().lexical());
+                out.push('>');
+                scope.truncate(depth);
+                continue;
+            }
+            Step::Open(i, raw) => (i, raw),
+        };
+        let n = t.node(i);
+        match n.kind {
+            Kind::Text => {
+                if raw {
+                    out.push_str(&n.value);
+                } else {
+                    html_escape_text(&n.value, out);
+                }
+            }
+            Kind::Comment => {
+                out.push_str("<!--");
                 out.push_str(&n.value);
-            } else {
-                html_escape_text(&n.value, out);
+                out.push_str("-->");
             }
-        }
-        Kind::Comment => {
-            out.push_str("<!--");
-            out.push_str(&n.value);
-            out.push_str("-->");
-        }
-        Kind::Pi => {
-            out.push_str("<?");
-            out.push_str(&n.name.as_ref().unwrap().local);
-            if !n.value.is_empty() {
-                out.push(' ');
-                out.push_str(&n.value);
+            Kind::Pi => {
+                out.push_str("<?");
+                out.push_str(&n.name.as_ref().unwrap().local);
+                if !n.value.is_empty() {
+                    out.push(' ');
+                    out.push_str(&n.value);
+                }
+                out.push('>');
             }
-            out.push('>');
-        }
-        Kind::Element => {
-            let name = n.name.as_ref().unwrap();
-            if !name.uri.is_empty() {
-                // Elements in a namespace are written as XML.
-                node(t, i, scope, out);
-                return;
-            }
-            let depth = scope.len();
-            out.push('<');
-            out.push_str(&name.lexical());
-            for (p, u) in &n.ns {
-                if p.is_empty() || bound(scope, p) == Some(&**u) {
+            Kind::Element => {
+                let name = n.name.as_ref().unwrap();
+                if !name.uri.is_empty() {
+                    // Elements in a namespace are written as XML.
+                    node(t, i, scope, out);
                     continue;
                 }
-                out.push_str(" xmlns:");
-                out.push_str(p);
-                out.push_str("=\"");
-                escape(u, true, out);
-                out.push('"');
-                scope.push((p.clone(), u.clone()));
+                let depth = scope.len();
+                out.push('<');
+                out.push_str(&name.lexical());
+                for (p, u) in &n.ns {
+                    if p.is_empty() || bound(scope, p) == Some(&**u) {
+                        continue;
+                    }
+                    out.push_str(" xmlns:");
+                    out.push_str(p);
+                    out.push_str("=\"");
+                    escape(u, true, out);
+                    out.push('"');
+                    scope.push((p.clone(), u.clone()));
+                }
+                for &a in &n.attrs {
+                    let an = t.node(a);
+                    let q = an.name.as_ref().unwrap();
+                    out.push(' ');
+                    out.push_str(&q.lexical());
+                    out.push_str("=\"");
+                    let uri = q.uri.is_empty()
+                        && URI_ATTRS.iter().any(|u| q.local.eq_ignore_ascii_case(u));
+                    html_escape_attr(&an.value, uri, out);
+                    out.push('"');
+                }
+                out.push('>');
+                let local = name.local.to_ascii_lowercase();
+                if local == "head" {
+                    out.push_str(
+                        "<META http-equiv=\"Content-Type\" content=\"text/html; charset=utf-16\">",
+                    );
+                }
+                if VOID.contains(&local.as_str()) {
+                    scope.truncate(depth);
+                    continue;
+                }
+                let raw = local == "script" || local == "style";
+                stack.push(Step::Close(i, depth));
+                stack.extend(n.children.iter().rev().map(|&c| Step::Open(c, raw)));
             }
-            for &a in &n.attrs {
-                let an = t.node(a);
-                let q = an.name.as_ref().unwrap();
-                out.push(' ');
-                out.push_str(&q.lexical());
-                out.push_str("=\"");
-                let uri =
-                    q.uri.is_empty() && URI_ATTRS.iter().any(|u| q.local.eq_ignore_ascii_case(u));
-                html_escape_attr(&an.value, uri, out);
-                out.push('"');
-            }
-            out.push('>');
-            let local = name.local.to_ascii_lowercase();
-            if local == "head" {
-                out.push_str(
-                    "<META http-equiv=\"Content-Type\" content=\"text/html; charset=utf-16\">",
-                );
-            }
-            if VOID.contains(&local.as_str()) {
-                scope.truncate(depth);
-                return;
-            }
-            let raw = local == "script" || local == "style";
-            for &c in &n.children {
-                html_node(t, c, scope, out, raw);
-            }
-            out.push_str("</");
-            out.push_str(&name.lexical());
-            out.push('>');
-            scope.truncate(depth);
+            Kind::Document | Kind::Attribute => {}
         }
-        Kind::Document | Kind::Attribute => {}
     }
 }
 
