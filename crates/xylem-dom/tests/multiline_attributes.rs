@@ -19,7 +19,11 @@ fn a_multi_line_attribute_survives_an_edit_to_another_attribute() {
             "<doc>{nl}  <item note=\"first line{nl}second line{nl}  third\" status=\"open\">x</item>{nl}</doc>{nl}"
         );
         let saved = edit_and_save(&text);
-        assert_eq!(saved, text.replace("status=\"open\"", "status=\"done\""), "line end {nl:?}");
+        assert_eq!(
+            saved,
+            text.replace("status=\"open\"", "status=\"done\""),
+            "line end {nl:?}"
+        );
     }
 }
 

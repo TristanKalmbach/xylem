@@ -195,7 +195,10 @@ fn new_modules_are_valid_for_every_issue_and_type() {
             }
         }
     }
-    println!("{passed} passed, {} failed, {skipped} skipped", failures.len());
+    println!(
+        "{passed} passed, {} failed, {skipped} skipped",
+        failures.len()
+    );
     negative_control(&cat, &root);
     assert!(failures.is_empty(), "{failures:#?}");
 }
