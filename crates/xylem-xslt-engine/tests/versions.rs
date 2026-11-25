@@ -12,7 +12,9 @@ fn run(stylesheet: &str, rule: VersionRule) -> String {
     std::fs::write(&path, stylesheet).unwrap();
     let mut ss = Stylesheet::compile(&path).unwrap();
     ss.version_rule = rule;
-    transform_bytes(&ss, b"<a/>", &HashMap::new(), false).unwrap().text
+    transform_bytes(&ss, b"<a/>", &HashMap::new(), false)
+        .unwrap()
+        .text
 }
 
 fn with_version(v: &str) -> String {
@@ -27,7 +29,11 @@ const XSLT2: &str = "<r>0.333333333333333333</r>";
 #[test]
 fn only_version_2_0_runs_as_xslt_2_by_default() {
     for (v, want) in [("1.0", XSLT1), ("2.0", XSLT2), ("2", XSLT1), ("3.0", XSLT1)] {
-        assert_eq!(run(&with_version(v), VersionRule::ReferenceHost), want, "version {v}");
+        assert_eq!(
+            run(&with_version(v), VersionRule::ReferenceHost),
+            want,
+            "version {v}"
+        );
     }
     let simplified = r#"<r xsl:version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:value-of select="1 div 3"/></r>"#;
     assert_eq!(run(simplified, VersionRule::ReferenceHost), XSLT1);
@@ -36,6 +42,10 @@ fn only_version_2_0_runs_as_xslt_2_by_default() {
 #[test]
 fn two_and_above_runs_later_versions_as_xslt_2() {
     for (v, want) in [("1.0", XSLT1), ("2.0", XSLT2), ("2", XSLT2), ("3.0", XSLT2)] {
-        assert_eq!(run(&with_version(v), VersionRule::TwoAndAbove), want, "version {v}");
+        assert_eq!(
+            run(&with_version(v), VersionRule::TwoAndAbove),
+            want,
+            "version {v}"
+        );
     }
 }

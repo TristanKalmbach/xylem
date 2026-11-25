@@ -93,6 +93,10 @@ xylem_xslt_free(ss);
 - A `document()` that cannot be read fails an XSLT 1.0 transformation and,
   in XSLT 2.0, gives an empty sequence with a warning in the log, as the
   reference publishing service does; `doc()` always fails.
+- Recursion cannot crash the host: each transformation runs on its own
+  thread with a large stack, and more than 10,000 nested template or
+  function calls fail with an error (`XTDE0000: more than 10000 nested
+  template or function calls`) instead of overflowing it.
 - No panic crosses the C boundary. `xylem_xslt_transform` returns 1 for
   bad arguments, 2 when the stylesheet or input fails (a dynamic error,
   malformed XML) and 3 for an internal engine failure; the handle stays

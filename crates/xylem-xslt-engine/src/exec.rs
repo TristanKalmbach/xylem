@@ -13,6 +13,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// The deepest nesting of template and function calls a transformation may
+/// reach. Deeper recursion fails with an error instead of exhausting the
+/// thread's stack, which would end the whole process (fatal for a host
+/// that embeds the engine). Transformations run on a thread with
+/// [`crate::STACK_SIZE`] bytes of stack, enough for this depth.
+pub const MAX_CALL_DEPTH: usize = 10_000;
+
+/// Undoes one [`Engine::enter_call`] when dropped.
+struct CallGuard<'a>(&'a std::cell::Cell<usize>);
+
+impl Drop for CallGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
+}
+
 /// A linked list of variable bindings; cloning is cheap.
 #[derive(Clone, Default)]
 pub struct Env(Option<Arc<(QName, Arc<Seq>, Env)>>);
@@ -135,6 +151,9 @@ pub struct Engine<'s> {
     /// whose `count` / `from` patterns are being matched.
     pattern_env: RefCell<Env>,
     pub timing: Option<RefCell<Profiler>>,
+    /// Templates and functions being run, innermost last (see
+    /// [`MAX_CALL_DEPTH`]).
+    depth: std::cell::Cell<usize>,
     source: u32,
 }
 
@@ -165,7 +184,22 @@ impl<'s> Engine<'s> {
                 })
             }),
             source: 0,
+            depth: std::cell::Cell::new(0),
         }
+    }
+
+    /// Counts one more nested template or function call, failing past
+    /// [`MAX_CALL_DEPTH`]; the count drops when the guard does.
+    fn enter_call(&self) -> R<CallGuard<'_>> {
+        let depth = self.depth.get() + 1;
+        if depth > MAX_CALL_DEPTH {
+            return Err(format!(
+                "XTDE0000: more than {MAX_CALL_DEPTH} nested template or function calls: \
+                 the stylesheet may recurse without end"
+            ));
+        }
+        self.depth.set(depth);
+        Ok(CallGuard(&self.depth))
     }
 
     pub fn tree(&self, i: u32) -> Ref<'_, Tree> {
@@ -616,6 +650,7 @@ impl<'s> Engine<'s> {
         params: &[(QName, Arc<Seq>, bool)],
         out: &mut Out,
     ) -> R<()> {
+        let _call = self.enter_call()?;
         if let Some(p) = &self.timing {
             p.borrow_mut().enter(t);
         }
@@ -693,6 +728,7 @@ impl<'s> Engine<'s> {
             };
             d = d.bind(p.name.clone(), v);
         }
+        let _call = self.enter_call()?;
         let mut out = Out::sequence();
         if let Some(p) = &self.timing {
             p.borrow_mut().enter(self.ss.templates.len() + f.id);

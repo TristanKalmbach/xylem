@@ -94,6 +94,42 @@ pub fn transform_bytes(
     params: &HashMap<String, String>,
     time: bool,
 ) -> Result<Output, String> {
+    on_transform_thread(|| run_bytes(ss, input, params, time))
+}
+
+/// The stack of the thread each transformation runs on: enough for
+/// [`exec::MAX_CALL_DEPTH`] nested calls even in a debug build. Only the
+/// pages a transformation touches are committed.
+pub const STACK_SIZE: usize = 1 << 30;
+
+/// Runs one transformation on a fresh thread with [`STACK_SIZE`] bytes of
+/// stack, carrying the caller's file-access setting over. Deep recursion
+/// then ends in the engine's depth error rather than in a stack overflow,
+/// which would end the process; and per-run thread state (XSLT 1.0 mode,
+/// `current-dateTime()`) starts fresh each time. A panic in the engine is
+/// passed on to the caller's thread.
+fn on_transform_thread(
+    f: impl FnOnce() -> Result<Output, String> + Send,
+) -> Result<Output, String> {
+    let files = value::file_access();
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .name("xylem-xslt".into())
+            .stack_size(STACK_SIZE)
+            .spawn_scoped(scope, move || value::with_file_access(files, f))
+            .map_err(|e| format!("could not start the transformation thread: {e}"))?;
+        worker
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+fn run_bytes(
+    ss: &Stylesheet,
+    input: &[u8],
+    params: &HashMap<String, String>,
+    time: bool,
+) -> Result<Output, String> {
     let doc = xylem_dom::Document::from_bytes(input).map_err(|e| format!("input: {e}"))?;
     // The host gives the input the stylesheet's folder as its base URI.
     let source = tree::from_dom(&doc, &ss.base.to_string_lossy(), ss)?;
@@ -165,6 +201,15 @@ pub fn transform_named(
 /// Runs a transformation from `start`. With no input there is no context
 /// item (only a named template can start without one).
 pub fn transform_from(
+    ss: &Stylesheet,
+    input: Option<&[u8]>,
+    params: &HashMap<String, String>,
+    start: &Start,
+) -> Result<Output, String> {
+    on_transform_thread(|| run_from(ss, input, params, start))
+}
+
+fn run_from(
     ss: &Stylesheet,
     input: Option<&[u8]>,
     params: &HashMap<String, String>,
