@@ -314,7 +314,7 @@ fn instances_validate_against_mapped_schemas() {
         started.elapsed()
     );
     let mut common: Vec<_> = messages.into_iter().collect();
-    common.sort_by(|a, b| b.1.cmp(&a.1));
+    common.sort_by_key(|a| std::cmp::Reverse(a.1));
     for (m, n) in common.into_iter().take(15) {
         println!("  {n:>5}  {m}");
     }
