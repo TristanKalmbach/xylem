@@ -2,7 +2,9 @@
 //! stylesheets without Saxon, .NET or Java: compile a stylesheet once, then
 //! transform any number of inputs with it.
 //!
-//! All strings are UTF-8. Every function is safe to call from any thread;
+//! All strings are UTF-8. No panic crosses the C boundary: a failure inside
+//! the engine becomes an error return with a message. Every function is
+//! safe to call from any thread;
 //! one compiled stylesheet runs one transformation at a time (calls on the
 //! same handle wait for each other), so compile one per thread for
 //! parallel work. See `docs/embedding.md` for a C# example.
@@ -49,6 +51,29 @@ thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
 }
 
+/// Runs `f`, turning a panic into `on_panic` with the panic's message as the
+/// last error, so no unwinding ever reaches the caller's frames.
+fn guarded<T>(what: &str, on_panic: T, f: impl FnOnce() -> T) -> T {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(v) => v,
+        Err(payload) => {
+            let detail = payload
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_default();
+            if detail.is_empty() {
+                set_error(format!("the engine failed unexpectedly while {what}"));
+            } else {
+                set_error(format!(
+                    "the engine failed unexpectedly while {what}: {detail}"
+                ));
+            }
+            on_panic
+        }
+    }
+}
+
 fn set_error(e: impl Into<String>) {
     let s = e.into().replace('\0', " ");
     LAST_ERROR.with(|l| *l.borrow_mut() = CString::new(s).unwrap_or_default());
@@ -57,7 +82,9 @@ fn set_error(e: impl Into<String>) {
 /// The last error on this thread, valid until the next call on it.
 #[unsafe(no_mangle)]
 pub extern "C" fn xylem_xslt_last_error() -> *const c_char {
-    LAST_ERROR.with(|l| l.borrow().as_ptr())
+    guarded("reading the last error", std::ptr::null(), || {
+        LAST_ERROR.with(|l| l.borrow().as_ptr())
+    })
 }
 
 /// The library version, such as `0.5.0`.
@@ -78,28 +105,26 @@ pub extern "C" fn xylem_xslt_version() -> *const c_char {
 /// `path` must be a valid, NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xylem_xslt_compile(path: *const c_char) -> *mut XylemStylesheet {
-    if path.is_null() {
-        set_error("path is null");
-        return std::ptr::null_mut();
-    }
-    // SAFETY: the caller passes a NUL-terminated string.
-    let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
-        set_error("path is not UTF-8");
-        return std::ptr::null_mut();
-    };
-    match std::panic::catch_unwind(|| Stylesheet::compile(Path::new(path))) {
-        Ok(Ok(ss)) => Box::into_raw(Box::new(XylemStylesheet {
-            inner: Mutex::new(Compiled(ss)),
-        })),
-        Ok(Err(e)) => {
-            set_error(e);
-            std::ptr::null_mut()
+    guarded("compiling", std::ptr::null_mut(), || {
+        if path.is_null() {
+            set_error("path is null");
+            return std::ptr::null_mut();
         }
-        Err(_) => {
-            set_error("the engine failed unexpectedly while compiling");
-            std::ptr::null_mut()
+        // SAFETY: the caller passes a NUL-terminated string.
+        let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
+            set_error("path is not UTF-8");
+            return std::ptr::null_mut();
+        };
+        match Stylesheet::compile(Path::new(path)) {
+            Ok(ss) => Box::into_raw(Box::new(XylemStylesheet {
+                inner: Mutex::new(Compiled(ss)),
+            })),
+            Err(e) => {
+                set_error(e);
+                std::ptr::null_mut()
+            }
         }
-    }
+    })
 }
 
 /// The XSLT version the stylesheet runs as: 1 or 2 (0 for a null handle).
@@ -108,12 +133,14 @@ pub unsafe extern "C" fn xylem_xslt_compile(path: *const c_char) -> *mut XylemSt
 /// `ss` must be null or a handle from [`xylem_xslt_compile`] not yet freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xylem_xslt_version_of(ss: *const XylemStylesheet) -> u32 {
-    // SAFETY: see above.
-    let Some(ss) = (unsafe { ss.as_ref() }) else {
-        return 0;
-    };
-    let g = ss.inner.lock().unwrap_or_else(|p| p.into_inner());
-    if g.0.version.starts_with('1') { 1 } else { 2 }
+    guarded("reading the version", 0, || {
+        // SAFETY: see above.
+        let Some(ss) = (unsafe { ss.as_ref() }) else {
+            return 0;
+        };
+        let g = ss.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if g.0.version.starts_with('1') { 1 } else { 2 }
+    })
 }
 
 /// Transforms `input` (an XML document, `input_len` bytes) with `ss`.
@@ -124,7 +151,9 @@ pub unsafe extern "C" fn xylem_xslt_version_of(ss: *const XylemStylesheet) -> u3
 /// type, and are strings otherwise). `flags` combines the `XYLEM_*`
 /// constants. On success returns 0 and sets `*out`/`*out_len` to the UTF-8
 /// result, which the caller frees with [`xylem_xslt_free_bytes`]; on
-/// failure returns non-zero (see [`xylem_xslt_last_error`]).
+/// failure returns non-zero (see [`xylem_xslt_last_error`]): 1 for bad
+/// arguments, 2 when the stylesheet or input fails, 3 when the engine
+/// itself fails unexpectedly (an engine bug; the handle stays usable).
 ///
 /// # Safety
 /// `ss` must be a live handle; `input` must point to `input_len` readable
@@ -140,77 +169,75 @@ pub unsafe extern "C" fn xylem_xslt_transform(
     out: *mut *mut u8,
     out_len: *mut usize,
 ) -> i32 {
-    // SAFETY: the caller upholds the pointer contracts above.
-    let (Some(ss), false, false) = (unsafe { ss.as_ref() }, out.is_null(), out_len.is_null())
-    else {
-        set_error("null handle or output pointer");
-        return 1;
-    };
-    if input.is_null() && input_len > 0 {
-        set_error("input is null");
-        return 1;
-    }
-    let bytes: &[u8] = if input_len == 0 {
-        &[]
-    } else {
-        // SAFETY: `input` points to `input_len` readable bytes.
-        unsafe { std::slice::from_raw_parts(input, input_len) }
-    };
-    let params: HashMap<String, String> = if params_json.is_null() {
-        HashMap::new()
-    } else {
-        // SAFETY: NUL-terminated per the contract.
-        let text = unsafe { CStr::from_ptr(params_json) }.to_string_lossy();
-        match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text) {
-            Ok(m) => m
-                .into_iter()
-                .map(|(k, v)| {
-                    let v = match v {
-                        serde_json::Value::String(s) => s,
-                        other => other.to_string(),
-                    };
-                    (k, v)
-                })
-                .collect(),
-            Err(e) => {
-                set_error(format!("parameters are not a JSON object: {e}"));
-                return 1;
+    guarded("transforming", 3, || {
+        // SAFETY: the caller upholds the pointer contracts above.
+        let (Some(ss), false, false) = (unsafe { ss.as_ref() }, out.is_null(), out_len.is_null())
+        else {
+            set_error("null handle or output pointer");
+            return 1;
+        };
+        if input.is_null() && input_len > 0 {
+            set_error("input is null");
+            return 1;
+        }
+        let bytes: &[u8] = if input_len == 0 {
+            &[]
+        } else {
+            // SAFETY: `input` points to `input_len` readable bytes.
+            unsafe { std::slice::from_raw_parts(input, input_len) }
+        };
+        let params: HashMap<String, String> = if params_json.is_null() {
+            HashMap::new()
+        } else {
+            // SAFETY: NUL-terminated per the contract.
+            let text = unsafe { CStr::from_ptr(params_json) }.to_string_lossy();
+            match serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text) {
+                Ok(m) => m
+                    .into_iter()
+                    .map(|(k, v)| {
+                        let v = match v {
+                            serde_json::Value::String(s) => s,
+                            other => other.to_string(),
+                        };
+                        (k, v)
+                    })
+                    .collect(),
+                Err(e) => {
+                    set_error(format!("parameters are not a JSON object: {e}"));
+                    return 1;
+                }
             }
-        }
-    };
-    let guard = ss.inner.lock().unwrap_or_else(|p| p.into_inner());
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        with_file_access(flags & XYLEM_NO_FILE_ACCESS == 0, || {
+        };
+        let guard = ss.inner.lock().unwrap_or_else(|p| p.into_inner());
+        // A panic here unwinds to `guarded`, which returns 3; the lock is
+        // released on the way and recovered by the next call.
+        let result = with_file_access(flags & XYLEM_NO_FILE_ACCESS == 0, || {
             transform_bytes(&guard.0, bytes, &params, false)
-        })
-    }));
-    drop(guard);
-    let text = match result {
-        Ok(Ok(o)) if !o.results.is_empty() => {
-            set_error(
-                "the stylesheet writes secondary results (xsl:result-document), which the C API does not return",
-            );
-            return 2;
+        });
+        drop(guard);
+        let text = match result {
+            Ok(o) if !o.results.is_empty() => {
+                set_error(
+                    "the stylesheet writes secondary results (xsl:result-document), which the C API does not return",
+                );
+                return 2;
+            }
+            Ok(o) if flags & XYLEM_OUTPUT_SERIALIZE != 0 => o.serialized,
+            Ok(o) => o.text,
+            Err(e) => {
+                set_error(e);
+                return 2;
+            }
+        };
+        let mut v = text.into_bytes().into_boxed_slice();
+        // SAFETY: both pointers were checked for null above.
+        unsafe {
+            *out_len = v.len();
+            *out = v.as_mut_ptr();
         }
-        Ok(Ok(o)) if flags & XYLEM_OUTPUT_SERIALIZE != 0 => o.serialized,
-        Ok(Ok(o)) => o.text,
-        Ok(Err(e)) => {
-            set_error(e);
-            return 2;
-        }
-        Err(_) => {
-            set_error("the engine failed unexpectedly while transforming");
-            return 3;
-        }
-    };
-    let mut v = text.into_bytes().into_boxed_slice();
-    // SAFETY: both pointers were checked for null above.
-    unsafe {
-        *out_len = v.len();
-        *out = v.as_mut_ptr();
-    }
-    std::mem::forget(v);
-    0
+        std::mem::forget(v);
+        0
+    })
 }
 
 /// Frees a result from [`xylem_xslt_transform`].
@@ -219,10 +246,12 @@ pub unsafe extern "C" fn xylem_xslt_transform(
 /// `ptr`/`len` must be exactly what a transform returned, freed once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xylem_xslt_free_bytes(ptr: *mut u8, len: usize) {
-    if !ptr.is_null() {
-        // SAFETY: rebuilt from the boxed slice handed out by transform.
-        drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) });
-    }
+    guarded("freeing a result", (), || {
+        if !ptr.is_null() {
+            // SAFETY: rebuilt from the boxed slice handed out by transform.
+            drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) });
+        }
+    })
 }
 
 /// Frees a compiled stylesheet.
@@ -231,15 +260,68 @@ pub unsafe extern "C" fn xylem_xslt_free_bytes(ptr: *mut u8, len: usize) {
 /// `ss` must be null or a live handle, freed once, with no call using it.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xylem_xslt_free(ss: *mut XylemStylesheet) {
-    if !ss.is_null() {
-        // SAFETY: created by Box::into_raw in compile.
-        drop(unsafe { Box::from_raw(ss) });
-    }
+    guarded("freeing a stylesheet", (), || {
+        if !ss.is_null() {
+            // SAFETY: created by Box::into_raw in compile.
+            drop(unsafe { Box::from_raw(ss) });
+        }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn panics_become_errors() {
+        let r = guarded("testing", 7, || -> i32 { panic!("boom {}", 1) });
+        assert_eq!(r, 7);
+        let err = unsafe { CStr::from_ptr(xylem_xslt_last_error()) }
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(err, "the engine failed unexpectedly while testing: boom 1");
+        let r = guarded("testing", 0, || -> i32 { std::panic::panic_any(5u8) });
+        assert_eq!(r, 0);
+    }
+
+    #[test]
+    fn handle_survives_a_poisoned_lock() {
+        let dir = std::env::temp_dir().join(format!("xylem-ffi-poison-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xsl = dir.join("s.xsl");
+        std::fs::write(
+            &xsl,
+            r#"<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/"><r/></xsl:template></xsl:stylesheet>"#,
+        )
+        .unwrap();
+        let path = CString::new(xsl.to_str().unwrap()).unwrap();
+        unsafe {
+            let ss = xylem_xslt_compile(path.as_ptr());
+            assert!(!ss.is_null());
+            // A panic while the handle is locked poisons the lock, as an
+            // engine failure mid-transform would.
+            let r = guarded("testing", 3, || {
+                let _g = (*ss).inner.lock().unwrap();
+                panic!("mid-transform");
+            });
+            assert_eq!(r, 3);
+            let (mut out, mut len) = (std::ptr::null_mut(), 0usize);
+            let rc = xylem_xslt_transform(
+                ss,
+                b"<a/>".as_ptr(),
+                4,
+                std::ptr::null(),
+                0,
+                &mut out,
+                &mut len,
+            );
+            assert_eq!(rc, 0);
+            assert_eq!(std::slice::from_raw_parts(out, len), b"<r />");
+            xylem_xslt_free_bytes(out, len);
+            xylem_xslt_free(ss);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn compile_transform_free() {

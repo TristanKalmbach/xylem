@@ -1,4 +1,5 @@
-/* Xylem's XSLT engine as a C library. All strings are UTF-8.
+/* Xylem's XSLT engine as a C library. All strings are UTF-8. No panic or
+ * exception crosses this boundary: an internal failure is an error return.
  * See docs/embedding.md. MIT licence. */
 #ifndef XYLEM_XSLT_H
 #define XYLEM_XSLT_H
@@ -34,7 +35,9 @@ uint32_t xylem_xslt_version_of(const XylemStylesheet *ss);
 /* Transforms an XML document. params_json is NULL or a JSON object of
  * parameters ({"mode":"final"}). flags combines the XYLEM_* values.
  * Returns 0 and sets *out/*out_len (free with xylem_xslt_free_bytes),
- * or non-zero on failure. One handle runs one transformation at a time. */
+ * or on failure 1 (bad arguments), 2 (the stylesheet or input failed) or
+ * 3 (an internal engine failure; the handle stays usable).
+ * One handle runs one transformation at a time. */
 int32_t xylem_xslt_transform(const XylemStylesheet *ss,
                              const uint8_t *input, size_t input_len,
                              const char *params_json, uint32_t flags,

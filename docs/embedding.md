@@ -71,6 +71,10 @@ xylem_xslt_free(ss);
 - A handle runs one transformation at a time (other calls on it wait).
   For parallel work, compile one handle per worker thread.
 - `xylem_xslt_last_error()` is per thread.
+- No panic crosses the C boundary. `xylem_xslt_transform` returns 1 for
+  bad arguments, 2 when the stylesheet or input fails (a dynamic error,
+  malformed XML) and 3 for an internal engine failure; the handle stays
+  usable after any of them.
 - Add `XYLEM_NO_FILE_ACCESS` to the flags when the input comes from users:
   `document()` and external entities then fail instead of reading files.
   (Stylesheet modules are still read when compiling.)
