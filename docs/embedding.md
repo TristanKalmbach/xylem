@@ -152,6 +152,20 @@ a 64-bit .NET process) and copy `xylem_xslt.dll` next to the application.
 Parameters can be built with any JSON serializer (string values; numbers
 and booleans are accepted too).
 
+### A complete .NET host
+
+[`tools/dotnet-embed`](../tools/dotnet-embed/README.md) is a .NET Framework
+4 program, written in C# 5 and built with the `csc.exe` that ships with
+Windows. It calls this library the way a .NET publishing service calls
+Saxon-HE. It takes the same command line as `SaxonDotnetHost.exe`, so
+`xylem-xslt-check differential --candidate` can compare the two on real
+stylesheets and inputs. Its `selftest` command checks that the library is
+safe inside a long-running .NET process: one handle shared by 8 threads,
+no memory growth over many compile/transform/free cycles, and errors that
+come back as exceptions. Its README has the results, timings against Saxon,
+and the engine problems found. Two of those problems end the host process:
+endless recursion, and input nested more than about 1,000 elements deep.
+
 ## The command line
 
 ```
