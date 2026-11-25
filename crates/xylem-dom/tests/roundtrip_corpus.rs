@@ -29,10 +29,11 @@ fn xml_files(dir: &Path, out: &mut Vec<PathBuf>) {
                 continue;
             }
             xml_files(&p, out);
-        } else if p
-            .extension()
-            .is_some_and(|x| x.eq_ignore_ascii_case("xml") || x.eq_ignore_ascii_case("dita"))
-        {
+        } else if p.extension().and_then(|x| x.to_str()).is_some_and(|x| {
+            ["xml", "dita", "xsl", "xslt", "xsd", "fo"]
+                .iter()
+                .any(|e| x.eq_ignore_ascii_case(e))
+        }) {
             out.push(p);
         }
     }
