@@ -171,15 +171,17 @@ pub unsafe extern "C" fn xylem_xslt_compile_flags(
     path: *const c_char,
     flags: u32,
 ) -> *mut XylemStylesheet {
-    // SAFETY: the caller upholds `xylem_xslt_compile`'s contract.
-    let ss = unsafe { xylem_xslt_compile(path) };
-    if flags & XYLEM_VERSIONS_2_AND_ABOVE != 0
-        // SAFETY: a non-null handle was just created and is not shared yet.
-        && let Some(h) = unsafe { ss.as_mut() }
-    {
-        h.inner.version_rule = xylem_xslt_engine::VersionRule::TwoAndAbove;
-    }
-    ss
+    guarded("compiling", std::ptr::null_mut(), || {
+        // SAFETY: the caller upholds `xylem_xslt_compile`'s contract.
+        let ss = unsafe { xylem_xslt_compile(path) };
+        if flags & XYLEM_VERSIONS_2_AND_ABOVE != 0
+            // SAFETY: a non-null handle was just created and is not shared yet.
+            && let Some(h) = unsafe { ss.as_mut() }
+        {
+            h.inner.version_rule = xylem_xslt_engine::VersionRule::TwoAndAbove;
+        }
+        ss
+    })
 }
 
 /// The XSLT version the stylesheet runs as: 1 or 2 (0 for a null handle).
@@ -348,6 +350,64 @@ mod tests {
         assert_eq!(err, "the engine failed unexpectedly while testing: boom 1");
         let r = guarded("testing", 0, || -> i32 { std::panic::panic_any(5u8) });
         assert_eq!(r, 0);
+    }
+
+    /// Endless recursion is the likeliest way a stylesheet could take its
+    /// host down; through the C API it is an ordinary error return, and
+    /// the handle keeps working.
+    #[test]
+    fn endless_recursion_is_an_error_return() {
+        let dir = std::env::temp_dir().join(format!("xylem-ffi-recursion-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xsl = dir.join("s.xsl");
+        std::fs::write(
+            &xsl,
+            r#"<xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+                 <xsl:param name="loop" select="'yes'"/>
+                 <xsl:template name="t"><xsl:call-template name="t"/></xsl:template>
+                 <xsl:template match="/"><r><xsl:if test="$loop = 'yes'"><xsl:call-template name="t"/></xsl:if></r></xsl:template>
+               </xsl:stylesheet>"#,
+        )
+        .unwrap();
+        let path = CString::new(xsl.to_str().unwrap()).unwrap();
+        // The flag makes version 3.0 run as XSLT 2.0.
+        let ss = unsafe { xylem_xslt_compile_flags(path.as_ptr(), XYLEM_VERSIONS_2_AND_ABOVE) };
+        assert!(!ss.is_null());
+        assert_eq!(unsafe { xylem_xslt_version_of(ss) }, 2);
+        let run = |params: &str| {
+            let params = CString::new(params).unwrap();
+            let (mut out, mut len) = (std::ptr::null_mut(), 0usize);
+            let rc = unsafe {
+                xylem_xslt_transform(
+                    ss,
+                    b"<a/>".as_ptr(),
+                    4,
+                    params.as_ptr(),
+                    0,
+                    &mut out,
+                    &mut len,
+                )
+            };
+            if rc == 0 {
+                unsafe { xylem_xslt_free_bytes(out, len) };
+            }
+            rc
+        };
+        assert_eq!(run("{}"), 2);
+        let err = unsafe { CStr::from_ptr(xylem_xslt_last_error()) }
+            .to_string_lossy()
+            .to_string();
+        assert!(err.contains("XTDE0000"), "{err}");
+        assert!(
+            err.len() < 8_000,
+            "the error stays short: {} bytes",
+            err.len()
+        );
+        assert_eq!(run(r#"{"loop":"no"}"#), 0);
+        unsafe { xylem_xslt_free(ss) };
+        // A null path is an error, not a crash.
+        assert!(unsafe { xylem_xslt_compile_flags(std::ptr::null(), 0) }.is_null());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
