@@ -42,7 +42,14 @@ fn run_preview(
         ));
     }
     let Some(html_sheet) = &cfg.html else {
-        return Ok(fo);
+        // One step: the stylesheet's own output, named for what it is (an
+        // HTML page opens in the browser, XSL-FO or XML in Xylem).
+        let bytes = std::fs::read(&fo).map_err(|e| format!("{}: {e}", fo.display()))?;
+        let named = fo.with_extension(super::run_ui::result_extension(&bytes));
+        if named != fo {
+            std::fs::rename(&fo, &named).map_err(|e| format!("{}: {e}", named.display()))?;
+        }
+        return Ok(named);
     };
     let html = dir.join(format!("{stem}.html"));
     // The second step runs as a publishing service runs it on text it
