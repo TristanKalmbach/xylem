@@ -44,6 +44,10 @@ pub struct Settings {
     pub review_author: String,
     /// Test suite last used by Check stylesheet output.
     pub stylesheet_suite: Option<PathBuf>,
+    /// Tools > Run stylesheet: the stylesheet, document and parameters last used.
+    pub run_stylesheet: Option<String>,
+    pub run_input: Option<String>,
+    pub run_params: String,
     /// Program that runs stylesheets (Preferences, or the Check stylesheet
     /// window's Engine field); used before the team's.
     pub xslt_host: Option<PathBuf>,
@@ -125,6 +129,9 @@ impl Default for Settings {
             project_dir: None,
             review_author: String::new(),
             stylesheet_suite: None,
+            run_stylesheet: None,
+            run_input: None,
+            run_params: String::new(),
             xslt_host: None,
             xslt_reference: None,
             preview: Vec::new(),

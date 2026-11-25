@@ -21,6 +21,7 @@ mod export_ui;
 mod find_files_ui;
 mod preview_ui;
 mod references_ui;
+mod run_ui;
 mod stylesheet_check_ui;
 
 /// Commands reachable from menus, the toolbar, shortcuts and context menus.
@@ -89,6 +90,8 @@ pub enum Cmd {
     CheckStylesheet(String),
     /// Tools > Stylesheet references: what the element at the caret refers to.
     StylesheetReferences,
+    /// Tools > Run stylesheet: a stylesheet on a document, result shown.
+    RunStylesheet,
     CheckUpdates,
     ReloadPackages,
     S1000dInfo,
@@ -202,6 +205,7 @@ impl Cmd {
             "OpenLogFolder" => Cmd::OpenLogFolder,
             "CheckStylesheet" => Cmd::CheckStylesheet(arg.to_string()),
             "StylesheetReferences" => Cmd::StylesheetReferences,
+            "RunStylesheet" => Cmd::RunStylesheet,
             "InsertElement" => Cmd::InsertElement(arg.to_string()),
             "Surround" => Cmd::Surround(arg.to_string()),
             "Toggle" => Cmd::Toggle(arg.to_string()),
@@ -310,6 +314,7 @@ pub struct XylemApp {
     stylesheet_check: stylesheet_check_ui::StylesheetCheckState,
     preview: preview_ui::PreviewState,
     references: references_ui::ReferencesState,
+    run: run_ui::RunState,
     dialogs: Dialogs,
     toasts: Vec<(String, f64, bool)>,
     context_menu: Option<ContextMenu>,
@@ -404,6 +409,7 @@ impl XylemApp {
             stylesheet_check: Default::default(),
             preview: Default::default(),
             references: Default::default(),
+            run: Default::default(),
             dialogs: Dialogs::default(),
             toasts: Vec::new(),
             context_menu: None,
@@ -1183,6 +1189,7 @@ impl XylemApp {
             Cmd::PreviousVersions => self.dialogs.versions = true,
             Cmd::CheckStylesheet(suite) => self.open_stylesheet_check(Some(suite)),
             Cmd::StylesheetReferences => self.show_stylesheet_references(),
+            Cmd::RunStylesheet => self.open_run_stylesheet(),
             Cmd::OpenLogFolder => {
                 if let Some(dir) = crate::logging::log_dir() {
                     let _ = std::fs::create_dir_all(&dir);
@@ -1841,6 +1848,9 @@ impl XylemApp {
             if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::NONE, Key::F12)) {
                 cmds.push(Cmd::StylesheetReferences);
             }
+            if i.consume_shortcut(&shs(Key::R)) {
+                cmds.push(Cmd::RunStylesheet);
+            }
             if i.consume_shortcut(&KeyboardShortcut::new(
                 Modifiers::COMMAND | Modifiers::SHIFT,
                 Key::F5,
@@ -2287,6 +2297,15 @@ impl XylemApp {
                     Some("F12"),
                 ) {
                     cmds.push(Cmd::StylesheetReferences);
+                }
+                if item(
+                    ui,
+                    true,
+                    Some(icon::PLAY),
+                    "Run stylesheet…",
+                    Some("Ctrl+Shift+R"),
+                ) {
+                    cmds.push(Cmd::RunStylesheet);
                 }
             });
             ui.menu_button("Review", |ui| self.review_menu(ui, has_doc, cmds));
@@ -4122,6 +4141,7 @@ impl XylemApp {
         self.stylesheet_check_window(ctx);
         self.poll_preview(ctx);
         self.stylesheet_references_window(ctx);
+        self.run_stylesheet_window(ctx);
         let p = palette(ctx);
         if self.dialogs.about {
             let (x, close) = Dialog::new("About Xylem").width(380.0).show(ctx, |ui| {
@@ -5315,6 +5335,7 @@ impl XylemApp {
                     ("Ctrl+Shift+F", "Find in files"),
                     ("Ctrl+Shift+F5", "Publication preview"),
                     ("F12", "Stylesheet references (in a stylesheet)"),
+                    ("Ctrl+Shift+R", "Run stylesheet on a document"),
                 ],
             ),
             (

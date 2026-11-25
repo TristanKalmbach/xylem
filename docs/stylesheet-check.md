@@ -210,6 +210,20 @@ xylem-xslt-check suite.toml --analyze --fix --scope <stylesheets folder> [--repe
 `--repeat 5` times each test five times and reports the median, for
 comparing speed before and after.
 
+## Running a stylesheet on a document
+
+**Tools › Run stylesheet** (Ctrl+Shift+R) runs a stylesheet on a document
+and opens the result: in Xylem, or in the browser when it is an HTML page.
+The stylesheet and document are filled in from the open documents (the
+active one is the stylesheet or the document, whichever it is), with the
+parameters as `name=value` pairs. A document open in Xylem is read as it is
+in the editor, unsaved edits included; the stylesheet runs as saved, and
+the window says so when it has unsaved changes. **Output** chooses between
+the way a publishing service saves a result (as Check compares it) and the
+way the stylesheet's `xsl:output` asks. Results go to `xylem-run` in the
+temporary folder, named after the document, and a result already open in
+Xylem is reloaded.
+
 ## Finding your way around a stylesheet
 
 **Tools › Stylesheet references** (F12), in a stylesheet, lists what the
