@@ -34,8 +34,127 @@ impl Drop for CallGuard<'_> {
 pub struct Env(Option<Arc<(QName, Arc<Seq>, Env)>>);
 
 type Tunnel = Arc<HashMap<QName, Arc<Seq>>>;
-/// Template rules of one mode, best first: (template, pattern alternative).
-type RuleList = Vec<(usize, usize)>;
+/// A mode's template rules (template, pattern alternative) in the order
+/// they are tried, with an index from what a node is to the positions of
+/// the rules that could match it.
+struct RuleList {
+    rules: Vec<(usize, usize)>,
+    /// Rules whose pattern ends in a named element or attribute test,
+    /// by (node kind, namespace URI, local name).
+    by_name: HashMap<(u8, Arc<str>, Arc<str>), Vec<u32>>,
+    /// Rules whose pattern ends in a wildcard or kind test for one node
+    /// kind (`*`, `p:*`, `@*`, `text()`, `comment()`, `/`), by kind.
+    by_kind: [Vec<u32>; KIND_SLOTS],
+    /// Rules that could match any node (`node()`, `id(...)`, ...).
+    any: Vec<u32>,
+}
+
+const KIND_SLOTS: usize = 6;
+
+fn kind_slot(k: Kind) -> usize {
+    match k {
+        Kind::Document => 0,
+        Kind::Element => 1,
+        Kind::Attribute => 2,
+        Kind::Text => 3,
+        Kind::Comment => 4,
+        Kind::Pi => 5,
+    }
+}
+
+/// Where a pattern alternative goes in a [`RuleList`]'s index.
+enum Bucket {
+    Name(Kind, Arc<str>, Arc<str>),
+    Kind(Kind),
+    Any,
+}
+
+fn bucket(p: &Expr) -> Bucket {
+    use crate::xpath::NodeTest;
+    match p {
+        Expr::Root => Bucket::Kind(Kind::Document),
+        Expr::Path { steps, .. } => match steps.last() {
+            Some(PathStep::Axis(s)) => {
+                let principal = if s.axis == Axis::Attribute {
+                    Kind::Attribute
+                } else {
+                    Kind::Element
+                };
+                match &s.test {
+                    NodeTest::Name {
+                        uri: Some(u),
+                        local: Some(l),
+                    } => Bucket::Name(principal, u.as_str().into(), l.as_str().into()),
+                    NodeTest::Name { .. } => Bucket::Kind(principal),
+                    NodeTest::Element(Some(q)) if principal == Kind::Element => {
+                        Bucket::Name(Kind::Element, q.uri.clone(), q.local.clone())
+                    }
+                    NodeTest::Attribute(Some(q)) if principal == Kind::Attribute => {
+                        Bucket::Name(Kind::Attribute, q.uri.clone(), q.local.clone())
+                    }
+                    NodeTest::Element(None) if principal == Kind::Element => {
+                        Bucket::Kind(Kind::Element)
+                    }
+                    NodeTest::Attribute(None) if principal == Kind::Attribute => {
+                        Bucket::Kind(Kind::Attribute)
+                    }
+                    NodeTest::Text if principal == Kind::Element => Bucket::Kind(Kind::Text),
+                    NodeTest::Comment if principal == Kind::Element => Bucket::Kind(Kind::Comment),
+                    NodeTest::Pi(_) if principal == Kind::Element => Bucket::Kind(Kind::Pi),
+                    NodeTest::Document => Bucket::Kind(Kind::Document),
+                    _ => Bucket::Any,
+                }
+            }
+            _ => Bucket::Any,
+        },
+        _ => Bucket::Any,
+    }
+}
+
+impl RuleList {
+    fn new(rules: Vec<(usize, usize)>, ss: &Stylesheet) -> RuleList {
+        let mut l = RuleList {
+            rules,
+            by_name: HashMap::new(),
+            by_kind: Default::default(),
+            any: Vec::new(),
+        };
+        for (i, &(t, k)) in l.rules.iter().enumerate() {
+            let i = i as u32;
+            match bucket(&ss.templates[t].matches[k].0) {
+                Bucket::Name(kind, u, n) => l
+                    .by_name
+                    .entry((kind_slot(kind) as u8, u, n))
+                    .or_default()
+                    .push(i),
+                Bucket::Kind(kind) => l.by_kind[kind_slot(kind)].push(i),
+                Bucket::Any => l.any.push(i),
+            }
+        }
+        l
+    }
+
+    /// Positions of the rules that could match node `n` of `t`, in the
+    /// order they are tried.
+    fn candidates(&self, t: &Tree, n: u32) -> Vec<u32> {
+        let node = t.node(n);
+        let slot = kind_slot(node.kind);
+        let named = match (&node.name, node.kind) {
+            (Some(q), Kind::Element | Kind::Attribute) => self
+                .by_name
+                .get(&(slot as u8, q.uri.clone(), q.local.clone()))
+                .map(Vec::as_slice),
+            _ => None,
+        };
+        let lists = [named.unwrap_or(&[]), &self.by_kind[slot], &self.any];
+        let mut out: Vec<u32> = Vec::with_capacity(lists.iter().map(|l| l.len()).sum());
+        for l in lists {
+            out.extend_from_slice(l);
+        }
+        out.sort_unstable();
+        out
+    }
+}
 /// One key's index over one tree: key value to nodes in document order.
 type KeyIndex = HashMap<String, Vec<NodeRef>>;
 
@@ -384,7 +503,7 @@ impl<'s> Engine<'s> {
 
     // ---- template rules -------------------------------------------------
 
-    fn rules_for(&self, mode: &Option<QName>) -> Arc<Vec<(usize, usize)>> {
+    fn rules_for(&self, mode: &Option<QName>) -> Arc<RuleList> {
         if let Some(r) = self.rules.borrow().get(mode) {
             return r.clone();
         }
@@ -408,7 +527,7 @@ impl<'s> Engine<'s> {
             (tt.prec, tt.matches[k].1, t)
         };
         v.sort_by(|a, b| key(b).partial_cmp(&key(a)).unwrap());
-        let r = Arc::new(v);
+        let r = Arc::new(RuleList::new(v, self.ss));
         self.rules.borrow_mut().insert(mode.clone(), r.clone());
         r
     }
@@ -424,7 +543,14 @@ impl<'s> Engine<'s> {
         below: Option<usize>,
         skip: Option<usize>,
     ) -> R<Option<(usize, usize)>> {
-        for (i, &(t, k)) in self.rules_for(mode).iter().enumerate().skip(from) {
+        let list = self.rules_for(mode);
+        let candidates = list.candidates(&self.tree(n.tree), n.idx);
+        for i in candidates {
+            let i = i as usize;
+            if i < from {
+                continue;
+            }
+            let (t, k) = list.rules[i];
             if below.is_some_and(|p| self.ss.templates[t].prec >= p) || skip == Some(t) {
                 continue;
             }
@@ -447,6 +573,14 @@ impl<'s> Engine<'s> {
             env: self.pattern_env.borrow().clone(),
             ..self.root_dyn()
         };
+        // Most patterns are matched right to left, step by step up the
+        // node's ancestors; evaluating the pattern from an ancestor instead
+        // costs time in proportion to the ancestor's children.
+        if self.tree(n.tree).node(n.idx).parent.is_some()
+            && let Some(r) = self.match_steps_fast(n, p, &d)
+        {
+            return r;
+        }
         let holds = |ctx: NodeRef| -> R<bool> {
             let v = self.eval(p, &d.focus(Item::Node(ctx), 1, 1))?;
             Ok(v.contains(&Item::Node(n)))
@@ -555,6 +689,101 @@ impl<'s> Engine<'s> {
         };
         let v = self.eval(&rest, &d.focus(Item::Node(r), 1, 1))?;
         Ok(v.contains(&Item::Node(n)))
+    }
+
+    /// Matches `p` against `n` right to left (the last step against `n`,
+    /// the steps before against its parent and so on), or `None` when the
+    /// pattern needs the general method: steps other than child, attribute
+    /// and `//`, or a predicate that may depend on position.
+    fn match_steps_fast(&self, n: NodeRef, p: &Expr, d: &Dyn) -> Option<R<bool>> {
+        let (absolute, steps) = match p {
+            Expr::Path { start: None, steps } => (false, steps.as_slice()),
+            Expr::Path {
+                start: Some(b),
+                steps,
+            } if **b == Expr::Root => (true, steps.as_slice()),
+            _ => return None,
+        };
+        for st in steps {
+            let PathStep::Axis(s) = st else {
+                return None;
+            };
+            let ok_axis = match s.axis {
+                Axis::Child | Axis::Attribute => true,
+                Axis::DescendantOrSelf => {
+                    s.preds.is_empty() && s.test == crate::xpath::NodeTest::AnyKind
+                }
+                _ => false,
+            };
+            if !ok_axis || !s.preds.iter().all(non_positional) {
+                return None;
+            }
+        }
+        Some(self.match_right_to_left(n.tree, Some(n.idx), steps, absolute, d))
+    }
+
+    /// Whether node `cur` is what the last of `steps` selects, from a
+    /// context the earlier steps reach (see [`Engine::match_steps_fast`]).
+    fn match_right_to_left(
+        &self,
+        tree: u32,
+        cur: Option<u32>,
+        steps: &[PathStep],
+        absolute: bool,
+        d: &Dyn,
+    ) -> R<bool> {
+        let Some(cur) = cur else {
+            return Ok(false);
+        };
+        let Some((last, rest)) = steps.split_last() else {
+            // Every step matched: `cur` is the context the pattern starts
+            // from, the document node for an absolute pattern.
+            return Ok(!absolute || self.tree(tree).node(cur).kind == Kind::Document);
+        };
+        let PathStep::Axis(s) = last else {
+            return Ok(false);
+        };
+        if s.axis == Axis::DescendantOrSelf {
+            // `//`: the earlier steps reach `cur` or any ancestor of it.
+            let mut c = Some(cur);
+            while let Some(x) = c {
+                if self.match_right_to_left(tree, Some(x), rest, absolute, d)? {
+                    return Ok(true);
+                }
+                c = self.tree(tree).node(x).parent;
+            }
+            return Ok(false);
+        }
+        let parent = {
+            let t = self.tree(tree);
+            let node = t.node(cur);
+            let (principal, fits) = if s.axis == Axis::Attribute {
+                (Kind::Attribute, node.kind == Kind::Attribute)
+            } else {
+                (
+                    Kind::Element,
+                    !matches!(node.kind, Kind::Attribute | Kind::Document),
+                )
+            };
+            if !fits || !crate::eval::test(node, &s.test, principal) {
+                return Ok(false);
+            }
+            node.parent
+        };
+        if !s.preds.is_empty() {
+            let me = Item::Node(NodeRef { tree, idx: cur });
+            let inner = d.focus(me, 1, 1);
+            for pred in &s.preds {
+                if !self.ebv(&self.eval(pred, &inner)?)? {
+                    return Ok(false);
+                }
+            }
+        }
+        if parent.is_none() {
+            // A parentless node: only a one-step relative pattern matches.
+            return Ok(rest.is_empty() && !absolute);
+        }
+        self.match_right_to_left(tree, parent, rest, absolute, d)
     }
 
     /// A cheap test of the pattern's last step before evaluating it.
@@ -2132,5 +2361,59 @@ fn read_error(path: &std::path::Path, e: &std::io::Error) -> String {
         }
         std::io::ErrorKind::NotFound => format!("Could not find file '{shown}'."),
         _ => format!("{shown}: {e}"),
+    }
+}
+
+/// Whether predicate `p` filters by a condition rather than by position:
+/// its value is a boolean, string or nodes (never a number, which would
+/// select by position) and it does not call `position()` or `last()`.
+fn non_positional(p: &Expr) -> bool {
+    use crate::xpath::BinOp::*;
+    if crate::xpath::absent_focus_use(p) == Some(crate::xpath::FocusUse::Position) {
+        return false;
+    }
+    match p {
+        Expr::Bin(
+            Or | And | GenEq | GenNe | GenLt | GenLe | GenGt | GenGe | ValEq | ValNe | ValLt
+            | ValLe | ValGt | ValGe | Is | Precedes | Follows | Union | Intersect | Except,
+            _,
+            _,
+        ) => true,
+        Expr::Path { .. } | Expr::Filter(..) | Expr::Root | Expr::Context => true,
+        Expr::Literal(a) => !a.is_numeric(),
+        Expr::InstanceOf(..) | Expr::Castable(..) => true,
+        Expr::Quant(..) => true,
+        Expr::Call(q, _) => {
+            &*q.uri == crate::xpath::FN_NS
+                && matches!(
+                    &*q.local,
+                    "not"
+                        | "boolean"
+                        | "true"
+                        | "false"
+                        | "contains"
+                        | "starts-with"
+                        | "ends-with"
+                        | "matches"
+                        | "exists"
+                        | "empty"
+                        | "lang"
+                        | "string"
+                        | "normalize-space"
+                        | "name"
+                        | "local-name"
+                        | "concat"
+                        | "substring"
+                        | "substring-before"
+                        | "substring-after"
+                        | "translate"
+                        | "upper-case"
+                        | "lower-case"
+                        | "key"
+                        | "id"
+                        | "deep-equal"
+                )
+        }
+        _ => false,
     }
 }
