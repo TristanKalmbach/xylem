@@ -11,6 +11,7 @@
 <xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
     xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:fo="http://www.w3.org/1999/XSL/Format"
     xmlns:f="urn:x-functions" exclude-result-prefixes="xs f">
+  <xsl:include href="sub/inc.xsl"/>
 
   <!-- Patterns match parentless nodes built by a function. -->
   <xsl:function name="f:is-html" as="xs:boolean" version="1.0">
@@ -87,6 +88,10 @@ s2"><xsl:text>t1&#13;t2&#10;t3</xsl:text></lines>
           <n><xsl:number count="x|y" from="nomatch" level="any"/>|<xsl:number count="x" from="nomatch" level="single"/>|<xsl:number count="x|y" from="nomatch" level="multiple" format="1.1"/>|<xsl:number count="x|y" from="s" level="multiple" format="1.1"/>|<xsl:number count="x" from="s" level="any"/></n>
         </xsl:for-each>
       </numbers>
+      <modules>
+        <xsl:call-template name="module-relative"/>
+        <top><xsl:value-of select="document('data.xml')/data/v"/></top>
+      </modules>
       <entities>
         <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
         <avt v="{concat('&U;', '&sep;')}"/>

@@ -30,6 +30,34 @@ pub fn from_path(path: &Path) -> String {
     out
 }
 
+/// The path of a `file:` URI (`file:///C:/a%20b/x.xsl` gives
+/// `C:/a b/x.xsl`), percent-decoded; `None` for other schemes.
+pub fn to_path(uri: &str) -> Option<std::path::PathBuf> {
+    let rest = uri.strip_prefix("file:")?;
+    let rest = rest.strip_prefix("//").unwrap_or(rest);
+    // `file:///C:/x` and `file:/C:/x` name a drive path; `file:///x` a root.
+    let rest = match rest.strip_prefix('/') {
+        Some(r) if r.as_bytes().get(1) == Some(&b':') => r,
+        _ => rest,
+    };
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let Some(h) = rest.get(i + 1..i + 3)
+            && let Ok(b) = u8::from_str_radix(h, 16)
+        {
+            out.push(b);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    Some(String::from_utf8_lossy(&out).into_owned().into())
+}
+
 /// The parts of a URI reference (RFC 3986, appendix B).
 struct Parts<'a> {
     scheme: Option<&'a str>,
@@ -168,6 +196,17 @@ mod tests {
             "file:///C:/a%20b/x.xsl"
         );
         assert_eq!(from_path(Path::new("/tmp/é")), "file:///tmp/%C3%A9");
+    }
+
+    #[test]
+    fn file_uris_become_paths() {
+        assert_eq!(
+            to_path("file:///C:/a%20b/x.xsl").unwrap(),
+            Path::new("C:/a b/x.xsl")
+        );
+        assert_eq!(to_path("file:/C:/x").unwrap(), Path::new("C:/x"));
+        assert_eq!(to_path("file:///tmp/x").unwrap(), Path::new("/tmp/x"));
+        assert!(to_path("http://e.com/x").is_none());
     }
 
     #[test]

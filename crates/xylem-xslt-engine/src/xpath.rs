@@ -946,7 +946,15 @@ impl Parser<'_> {
                         Expr::Literal(Atomic::Sub("anyURI", Arc::new(Atomic::str(base.as_str()))));
                     match (&*q.local, args.len()) {
                         ("static-base-uri", 0) => return Ok(base),
-                        ("resolve-uri", 1) => args.push(base),
+                        // A relative URI given as a string resolves against
+                        // the module that contains the call. The base rides
+                        // along as an extra argument: an `xs:anyURI` second
+                        // argument cannot come from a stylesheet (it would be
+                        // a type error for `document`; `doc` and
+                        // `doc-available` take one argument).
+                        ("resolve-uri" | "document" | "doc" | "doc-available", 1) => {
+                            args.push(base)
+                        }
                         _ => {}
                     }
                 }

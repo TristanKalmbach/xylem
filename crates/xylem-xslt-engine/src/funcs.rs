@@ -24,6 +24,20 @@ pub fn round_half_up(x: f64) -> f64 {
 }
 
 impl Engine<'_> {
+    /// The folder or file a relative URI in `document()`, `doc()` or
+    /// `doc-available()` resolves against: the calling module, when the
+    /// parser bound its URI as an extra `xs:anyURI` argument, otherwise the
+    /// top module's folder.
+    fn module_base(&self, args: &[Expr], n: usize) -> R<String> {
+        if n == 2
+            && let Expr::Literal(Atomic::Sub("anyURI", u)) = &args[1]
+            && let Some(p) = crate::uri::to_path(&u.to_string())
+        {
+            return Ok(p.to_string_lossy().to_string());
+        }
+        Ok(self.ss.base.to_string_lossy().to_string())
+    }
+
     pub fn call(&self, name: &QName, args: &[Expr], d: &Dyn) -> R<Seq> {
         let n = args.len();
         if &*name.uri == XS_NS {
@@ -725,7 +739,7 @@ impl Engine<'_> {
             }
             ("document" | "doc", 1 | 2) => {
                 let v = arg(0)?;
-                let base = self.ss.base.to_string_lossy().to_string();
+                let base = self.module_base(&args, n)?;
                 let mut out = Vec::new();
                 for it in &v {
                     let (href, b) = match it {
@@ -794,9 +808,9 @@ impl Engine<'_> {
                 let (x, y) = (arg(0)?, arg(1)?);
                 bool_(self.deep_equal(&x, &y))
             }
-            ("doc-available", 1) => {
+            ("doc-available", 1 | 2) => {
                 let href = s(0)?.trim().to_string();
-                let base = self.ss.base.to_string_lossy().to_string();
+                let base = self.module_base(&args, n)?;
                 bool_(!href.is_empty() && matches!(self.document(&href, &base), Ok(Some(_))))
             }
             ("format-number", 2 | 3) => {
