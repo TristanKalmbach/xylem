@@ -79,6 +79,14 @@
       <!-- A CR is written as it is; CR LF in an attribute is one space. -->
       <lines a="s1
 s2"><xsl:text>t1&#13;t2&#10;t3</xsl:text></lines>
+      <!-- xsl:number when no node matches `from`: any and multiple count
+           as if there were no `from`; single gives nothing. -->
+      <numbers>
+        <xsl:variable name="d"><doc><x/><s><x/><x><y/><y/></x></s><x><y/></x></doc></xsl:variable>
+        <xsl:for-each select="$d//x | $d//y">
+          <n><xsl:number count="x|y" from="nomatch" level="any"/>|<xsl:number count="x" from="nomatch" level="single"/>|<xsl:number count="x|y" from="nomatch" level="multiple" format="1.1"/>|<xsl:number count="x|y" from="s" level="multiple" format="1.1"/>|<xsl:number count="x" from="s" level="any"/></n>
+        </xsl:for-each>
+      </numbers>
       <entities>
         <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
         <avt v="{concat('&U;', '&sep;')}"/>

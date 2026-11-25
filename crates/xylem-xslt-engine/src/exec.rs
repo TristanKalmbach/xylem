@@ -1605,9 +1605,8 @@ impl<'s> Engine<'s> {
                             break;
                         }
                     }
-                    if from.is_none() {
-                        return Ok(vec![]);
-                    }
+                    // With no `from` node before it, the reference processor
+                    // counts from the start of the document.
                 }
                 // The reference processor counts every matching node from
                 // the `from` node onwards in document order (the XSLT 1.0
@@ -1621,9 +1620,10 @@ impl<'s> Engine<'s> {
                 Ok(if c == 0 { vec![] } else { vec![c] })
             }
             "multiple" => {
-                let Some(from) = from_ancestor()? else {
-                    return Ok(vec![]);
-                };
+                // With no ancestor matching `from`, every ancestor counts, as
+                // if there were no `from` (the reference processor's way;
+                // `single` gives nothing then).
+                let from = from_ancestor()?.unwrap_or(None);
                 let mut v = Vec::new();
                 for x in ancestors_or_self(node) {
                     if within(from, x) && self.count_matches(x, n, node)? {
