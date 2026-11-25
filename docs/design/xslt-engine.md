@@ -441,6 +441,18 @@ named in brackets; notes marked *unverified* still need a probe.
     width truncating the year before the picture's digits pad it
     (`[Y0001,2-2]` gives `0002`), `[f01]` giving exactly two digits, and
     `[Z01]` adding minutes when they are not zero.
+24. **Text sort order** [`parity`, `parity1`]. The XSLT 1.0 processor
+    always sorts text like a culture, and Saxon does when `xsl:sort` gives
+    `case-order` (otherwise it sorts by code point): letters and digits
+    first, ignoring accents and case (spaces and symbols before digits,
+    digits before letters, hyphens and apostrophes ignored, ligatures and
+    `ß` as their expansions), then accents (unaccented first), then case
+    (lower first unless `upper-first`), then the ignored characters
+    (`coop` before `co-op`). See `collate.rs`.
+25. **Number formatting in XSLT 1.0** (not reproduced). When a double
+    needs 17 significant digits, .NET may write a different one of the
+    two 17-digit forms that read back as the same double
+    (`6.4990000000000005` where the engine writes `6.4990000000000006`).
 
 ## Known gaps in the prototype
 

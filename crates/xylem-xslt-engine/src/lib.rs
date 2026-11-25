@@ -14,6 +14,7 @@
 //! ```
 
 pub mod api;
+mod collate;
 mod compile;
 mod datetime;
 mod error;

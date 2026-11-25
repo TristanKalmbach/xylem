@@ -106,6 +106,8 @@ s2"><xsl:text>t1&#13;t2&#10;t3</xsl:text></lines>
         <xsl:variable name="l"><d xml:lang="en-US"><p/><q xml:lang="de"/></d></xsl:variable>
         <xsl:value-of select="lang('en', $l/d/p), lang('EN-us', $l/d), lang('en', $l/d/q), lang('fr', $l/d/p)"/>
       </lang>
+      <!-- Text sorts by culture (1.0 always, 2.0 with case-order). -->
+      <sorts><xsl:variable name="w"><w>Vac</w><w>VHMC</w><w>apple</w><w>Apple</w><w>APPLE</w><w>b</w><w>B</w><w>co-op</w><w>coop</w><w>café</w><w>cafe</w><w>a1</w><w>a10</w><w>a2</w><w>_x</w><w>Zebra</w><w>zebra</w><w>élan</w><w>elan</w><w>Élan</w><w>Ab</w><w>aB</w><w>ab</w><w>AB</w><w>1</w><w>10</w><w>9</w><w>-a</w><w>a-</w><w>résumé</w><w>resume</w><w>Resume</w><w>ß</w><w>ss</w></xsl:variable><a><xsl:for-each select="$w/w"><xsl:sort select="."/><xsl:value-of select="."/>|</xsl:for-each></a><u><xsl:for-each select="$w/w"><xsl:sort select="." case-order="upper-first"/><xsl:value-of select="."/>|</xsl:for-each></u></sorts>
       <entities>
         <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
         <avt v="{concat('&U;', '&sep;')}"/>

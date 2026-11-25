@@ -1485,7 +1485,10 @@ impl<'s> Engine<'s> {
     /// Sorts `entries` by `sorts`, each entry's keys evaluated with its own
     /// dynamic context (an item's focus, or a group's).
     fn sort_keyed<T>(&self, entries: Vec<(Dyn, T)>, sorts: &[Sort], d: &Dyn) -> R<Vec<T>> {
-        let mut keyed: Vec<(Vec<Option<Atomic>>, T)> = Vec::with_capacity(entries.len());
+        // Each entry: its keys, their culture sort keys where text sorts
+        // like a culture, and the entry.
+        type Keys = (Vec<Option<Atomic>>, Vec<Option<crate::collate::Key>>);
+        let mut keyed: Vec<(Keys, T)> = Vec::with_capacity(entries.len());
         let mut specs = Vec::new();
         for s in sorts {
             let desc = s
@@ -1500,12 +1503,26 @@ impl<'s> Engine<'s> {
                 .map(|a| self.avt(a, d))
                 .transpose()?
                 .is_some_and(|o| o.trim() == "number");
-            let _ = &s.case_order;
-            specs.push((desc, num));
+            let case_order = s
+                .case_order
+                .as_ref()
+                .map(|a| self.avt(a, d))
+                .transpose()?
+                .map(|c| c.trim().to_string());
+            // Text compares like a culture in XSLT 1.0 (the .NET processor)
+            // and, in Saxon, whenever case-order is given; otherwise by code
+            // point (spec note 24).
+            let culture = if crate::value::compat() || case_order.is_some() {
+                Some(case_order.as_deref() == Some("upper-first"))
+            } else {
+                None
+            };
+            specs.push((desc, num, culture));
         }
         for (nd, it) in entries {
             let mut keys = Vec::new();
-            for (s, (_, num)) in sorts.iter().zip(&specs) {
+            let mut ckeys = Vec::new();
+            for (s, (_, num, culture)) in sorts.iter().zip(&specs) {
                 let v = match &s.select {
                     Some(e) => self.atomize(&self.eval(e, &nd)?),
                     None => self.atomize(&nd.item.iter().cloned().collect()),
@@ -1519,14 +1536,28 @@ impl<'s> Engine<'s> {
                         a
                     }
                 });
+                ckeys.push(match (&a, culture) {
+                    (Some(a), Some(upper_first)) if !*num && a.is_stringlike() => {
+                        Some(crate::collate::key(&a.to_string(), *upper_first))
+                    }
+                    _ => None,
+                });
                 keys.push(a);
             }
-            keyed.push((keys, it));
+            keyed.push(((keys, ckeys), it));
         }
         let mut err = None;
         keyed.sort_by(|a, b| {
-            for (k, (desc, _)) in specs.iter().enumerate() {
-                let o = match (&a.0[k], &b.0[k]) {
+            for (k, (desc, _, _)) in specs.iter().enumerate() {
+                if let (Some(x), Some(y)) = (&(a.0).1[k], &(b.0).1[k]) {
+                    let o = x.cmp(y);
+                    let o = if *desc { o.reverse() } else { o };
+                    if o != std::cmp::Ordering::Equal {
+                        return o;
+                    }
+                    continue;
+                }
+                let o = match (&(a.0).0[k], &(b.0).0[k]) {
                     (None, None) => std::cmp::Ordering::Equal,
                     (None, _) => std::cmp::Ordering::Less,
                     (_, None) => std::cmp::Ordering::Greater,
