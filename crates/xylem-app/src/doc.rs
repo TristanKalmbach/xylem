@@ -45,6 +45,9 @@ pub struct Issue {
     pub severity: Severity,
     pub message: String,
     pub source: &'static str,
+    /// A file and line the issue is at, when it has one (stylesheet errors,
+    /// which may be in another module); clicking the issue goes there.
+    pub at: Option<(std::path::PathBuf, u32)>,
 }
 
 pub struct SourceState {
@@ -539,7 +542,9 @@ impl DocState {
             return;
         }
         self.validated_revision = Some(rev);
-        self.issues.retain(|i| i.source == "BREX");
+        // BREX and stylesheet results come from their own checks.
+        self.issues
+            .retain(|i| i.source == "BREX" || i.source == crate::app::STYLESHEET_ISSUES);
         let t = std::time::Instant::now();
         if let Some(g) = &self.grammar {
             for e in g.validate(&self.editor.doc) {
@@ -551,6 +556,7 @@ impl DocState {
                     },
                     message: e.message,
                     source: "Schema",
+                    at: None,
                 });
             }
         }

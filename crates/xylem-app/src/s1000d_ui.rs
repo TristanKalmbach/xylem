@@ -45,6 +45,7 @@ pub fn run_brex(doc: &Document, path: &Path) -> Result<Vec<Issue>, String> {
             },
             message: format!("{}: {}", v.rule_id, v.message),
             source: "BREX",
+            at: None,
         })
         .collect())
 }

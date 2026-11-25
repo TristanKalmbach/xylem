@@ -17,6 +17,8 @@ pub enum PanelAction {
     SetAttr(NodeId, String, String),
     RemoveAttr(NodeId, String),
     GotoIssue(Option<NodeId>),
+    /// Open a file at a line (an issue in a stylesheet module).
+    OpenAt(std::path::PathBuf, u32),
     RemoveTags(NodeId),
     DeleteElement(NodeId),
     MoveElement(NodeId, bool),
@@ -646,6 +648,15 @@ pub fn issues(ui: &mut Ui, ds: &DocState, out: &mut Vec<PanelAction>) {
                         }
                     })
                     .unwrap_or_default();
+                let place = match &issue.at {
+                    Some((file, line)) => format!(
+                        "{}:{line}",
+                        file.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    ),
+                    None => place,
+                };
                 let detail = format!("{}  ·  {place}", issue.source);
                 let row = list_row(
                     ui,
@@ -661,7 +672,10 @@ pub fn issues(ui: &mut Ui, ds: &DocState, out: &mut Vec<PanelAction>) {
                     .on_hover_text(format!("{}\n{}  {place}", issue.message, issue.source))
                     .clicked()
                 {
-                    out.push(PanelAction::GotoIssue(issue.node));
+                    out.push(match &issue.at {
+                        Some((file, line)) => PanelAction::OpenAt(file.clone(), *line),
+                        None => PanelAction::GotoIssue(issue.node),
+                    });
                 }
                 if i > 2000 {
                     crate::ui::muted(ui, format!("… and {} more", ds.issues.len() - i));

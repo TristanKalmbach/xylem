@@ -1,0 +1,257 @@
+//! Stylesheet errors as you type: while a stylesheet is open, every
+//! top-level stylesheet that uses it (it included) is compiled in the
+//! background with Xylem's engine, using the editor's text for stylesheets
+//! with unsaved changes, and the errors go to the Issues panel at the
+//! element they are on. An error in another module names its file and line,
+//! and clicking it opens that file there.
+
+use super::XylemApp;
+use crate::doc::{Issue, Severity, View};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, channel};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use xylem_xslt::stylesheet::path_key;
+
+/// The `source` of these issues in the Issues panel.
+pub const STYLESHEET_ISSUES: &str = "Stylesheet";
+
+/// How long typing must pause before the stylesheet is compiled again.
+const SETTLE: Duration = Duration::from_millis(700);
+
+/// The errors reported at most, so a broken shared module does not flood
+/// the panel.
+const MAX_ERRORS: usize = 200;
+
+#[derive(Default)]
+pub struct StylesheetIssuesState {
+    /// The text last checked for each stylesheet (by path key): a hash.
+    checked: HashMap<String, u64>,
+    /// A change waiting for typing to pause: path key, text hash, since.
+    pending: Option<(String, u64, Instant)>,
+    job: Option<Receiver<Finished>>,
+    /// Top-level stylesheets using each file, found once per file.
+    tops: Arc<Mutex<HashMap<String, Vec<PathBuf>>>>,
+}
+
+/// One compile error, as reported.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub file: Option<PathBuf>,
+    pub line: Option<u32>,
+    pub message: String,
+}
+
+struct Finished {
+    key: String,
+    hash: u64,
+    found: Vec<Found>,
+}
+
+fn is_stylesheet(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("xsl") || e.eq_ignore_ascii_case("xslt"))
+}
+
+fn hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+/// Compiles each of `tops` (reading `unsaved` texts instead of the files
+/// they name) and collects the errors, each once.
+pub fn compile_errors(tops: &[PathBuf], unsaved: &HashMap<String, Vec<u8>>) -> Vec<Found> {
+    let read = |p: &Path| unsaved.get(&path_key(p)).cloned();
+    let mut found: Vec<Found> = Vec::new();
+    for top in tops {
+        if let Err(e) = xylem_xslt_engine::Stylesheet::compile_with(top, &read) {
+            let f = Found {
+                file: e.file.as_deref().map(PathBuf::from),
+                line: e.line,
+                message: e.message.clone(),
+            };
+            if !found.contains(&f) {
+                found.push(f);
+            }
+            if found.len() >= MAX_ERRORS {
+                break;
+            }
+        }
+    }
+    found
+}
+
+impl XylemApp {
+    /// Called every frame: starts a check when the stylesheet being edited
+    /// has changed and typing has paused, and takes in finished results.
+    pub(super) fn stylesheet_issues(&mut self, ctx: &egui::Context) {
+        self.take_stylesheet_issues();
+        let Some(ds) = self.docs.get(self.active) else {
+            return;
+        };
+        let Some(path) = ds.path.clone().filter(|p| is_stylesheet(p)) else {
+            return;
+        };
+        // The text as it is now: the source view's buffer while editing there.
+        let text: Vec<u8> = match (&ds.view, &ds.source) {
+            (View::Source, Some(src)) => src.text.clone().into_bytes(),
+            _ => ds.editor.doc.to_xml_with_offsets().0.into_bytes(),
+        };
+        let key = path_key(&path);
+        let h = hash(&text);
+        let st = &mut self.stylesheet_issues;
+        if st.checked.get(&key) == Some(&h) || st.job.is_some() {
+            return;
+        }
+        match &st.pending {
+            Some((k, ph, since)) if *k == key && *ph == h => {
+                let waited = since.elapsed();
+                if waited < SETTLE {
+                    ctx.request_repaint_after(SETTLE - waited);
+                    return;
+                }
+            }
+            _ => {
+                st.pending = Some((key, h, Instant::now()));
+                ctx.request_repaint_after(SETTLE);
+                return;
+            }
+        }
+        st.pending = None;
+        // Other open stylesheets with unsaved changes are read as edited too.
+        let mut unsaved: HashMap<String, Vec<u8>> = self
+            .docs
+            .iter()
+            .filter(|d| d.editor.is_dirty())
+            .filter_map(|d| {
+                let p = d.path.as_ref().filter(|p| is_stylesheet(p))?;
+                Some((
+                    path_key(p),
+                    d.editor.doc.to_xml_with_offsets().0.into_bytes(),
+                ))
+            })
+            .collect();
+        unsaved.insert(key.clone(), text);
+        let st = &mut self.stylesheet_issues;
+        let cache = st.tops.clone();
+        let (tx, rx) = channel();
+        st.job = Some(rx);
+        std::thread::spawn(move || {
+            let cached = cache.lock().ok().and_then(|c| c.get(&key).cloned());
+            let tops = cached.unwrap_or_else(|| {
+                let t = xylem_xslt::navigate::tops_using(&path);
+                if let Ok(mut c) = cache.lock() {
+                    c.insert(key.clone(), t.clone());
+                }
+                t
+            });
+            let found = compile_errors(&tops, &unsaved);
+            let _ = tx.send(Finished {
+                key,
+                hash: h,
+                found,
+            });
+        });
+    }
+
+    fn take_stylesheet_issues(&mut self) {
+        let st = &mut self.stylesheet_issues;
+        let Some(rx) = &st.job else { return };
+        let done = match rx.try_recv() {
+            Ok(done) => done,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                st.job = None;
+                return;
+            }
+        };
+        st.job = None;
+        st.checked.insert(done.key.clone(), done.hash);
+        let Some(ds) = self
+            .docs
+            .iter_mut()
+            .find(|d| d.path.as_deref().is_some_and(|p| path_key(p) == done.key))
+        else {
+            return;
+        };
+        let here = ds.path.clone();
+        // Lines of this file are found in the structured view's text, which
+        // is what was compiled unless the source view holds other edits.
+        let (xml, offsets) = ds.editor.doc.to_xml_with_offsets();
+        let mapped = ds.view != View::Source && hash(xml.as_bytes()) == done.hash;
+        let mut line_starts = vec![0usize];
+        line_starts.extend(xml.match_indices('\n').map(|(i, _)| i + 1));
+        let doc = &ds.editor.doc;
+        let node_at_line = |line: u32| {
+            let end = line_starts.get(line as usize).copied().unwrap_or(xml.len());
+            doc.descendants(doc.root())
+                .filter(|&n| doc.is_element(n))
+                .filter(|n| offsets.get(n.index()).is_some_and(|&o| o < end))
+                .last()
+        };
+        let issues: Vec<Issue> = done
+            .found
+            .iter()
+            .map(|f| {
+                let file = f.file.clone().or_else(|| here.clone());
+                let in_this_file = file
+                    .as_ref()
+                    .zip(here.as_ref())
+                    .is_some_and(|(a, b)| path_key(a) == path_key(b));
+                let node = match (in_this_file && mapped, f.line) {
+                    (true, Some(l)) => node_at_line(l),
+                    _ => None,
+                };
+                Issue {
+                    node,
+                    severity: Severity::Error,
+                    message: f.message.clone(),
+                    source: STYLESHEET_ISSUES,
+                    at: file.zip(f.line),
+                }
+            })
+            .collect();
+        ds.issues.retain(|i| i.source != STYLESHEET_ISSUES);
+        ds.issues.extend(issues);
+        ds.canvas.flagged = ds.issues.iter().filter_map(|i| i.node).collect();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_come_from_the_unsaved_text_of_every_stylesheet_using_the_file() {
+        let dir = std::env::temp_dir().join(format!("xylem-xsl-issues-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let top = dir.join("top.xsl");
+        let module = dir.join("module.xsl");
+        std::fs::write(
+            &top,
+            "<xsl:stylesheet version=\"2.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">\n<xsl:include href=\"module.xsl\"/>\n<xsl:template match=\"/\"><r/></xsl:template>\n</xsl:stylesheet>\n",
+        )
+        .unwrap();
+        let good = "<xsl:stylesheet version=\"2.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">\n<xsl:template name=\"t\"><x/></xsl:template>\n</xsl:stylesheet>\n";
+        std::fs::write(&module, good).unwrap();
+        let tops = vec![module.clone(), top.clone()];
+        assert!(compile_errors(&tops, &HashMap::new()).is_empty());
+        // The editor's unsaved text has an error on line 2; the file on disk
+        // does not.
+        let bad = good.replace("<x/>", "<xsl:value-of select=\"1 +\"/>");
+        let unsaved = HashMap::from([(path_key(&module), bad.into_bytes())]);
+        let found = compile_errors(&tops, &unsaved);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].line, Some(2));
+        assert_eq!(
+            found[0].file.as_deref().map(path_key),
+            Some(path_key(&module))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

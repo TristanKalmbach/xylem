@@ -4312,6 +4312,7 @@ dependencies = [
  "xylem-style",
  "xylem-xpath",
  "xylem-xslt",
+ "xylem-xslt-engine",
 ]
 
 [[package]]

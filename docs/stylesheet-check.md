@@ -221,6 +221,16 @@ xylem-xslt-check suite.toml --analyze --fix --scope <stylesheets folder> [--repe
 `--repeat 5` times each test five times and reports the median, for
 comparing speed before and after.
 
+## Errors as you type
+
+While a stylesheet is open, Xylem compiles it in the background whenever
+typing pauses, together with every top-level stylesheet that includes or
+imports it (so a module is checked in the context it is used in), using the
+text in the editor for any stylesheet with unsaved changes. Errors appear in
+the Issues panel with their file and line: those in the open file mark the
+element they are on, and clicking any of them opens its file at that line,
+in the structured or the Source view.
+
 ## Running a stylesheet on a document
 
 **Tools › Run stylesheet** (Ctrl+Shift+R) runs a stylesheet on a document

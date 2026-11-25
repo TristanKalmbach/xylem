@@ -22,6 +22,8 @@ mod find_files_ui;
 mod preview_ui;
 mod references_ui;
 mod run_ui;
+mod stylesheet_issues;
+pub use stylesheet_issues::STYLESHEET_ISSUES;
 mod stylesheet_check_ui;
 
 /// Commands reachable from menus, the toolbar, shortcuts and context menus.
@@ -315,6 +317,7 @@ pub struct XylemApp {
     preview: preview_ui::PreviewState,
     references: references_ui::ReferencesState,
     run: run_ui::RunState,
+    stylesheet_issues: stylesheet_issues::StylesheetIssuesState,
     dialogs: Dialogs,
     toasts: Vec<(String, f64, bool)>,
     context_menu: Option<ContextMenu>,
@@ -410,6 +413,7 @@ impl XylemApp {
             preview: Default::default(),
             references: Default::default(),
             run: Default::default(),
+            stylesheet_issues: Default::default(),
             dialogs: Dialogs::default(),
             toasts: Vec::new(),
             context_menu: None,
@@ -3453,6 +3457,7 @@ impl XylemApp {
             PanelAction::RemoveAttr(el, k) => {
                 self.with_editor(|ed, r| ed.remove_attribute(r, el, &k));
             }
+            PanelAction::OpenAt(file, line) => self.open_stylesheet_at(&file, line),
             PanelAction::GotoIssue(node) => {
                 let Some(ds) = self.doc() else { return };
                 let Some(n) = node.filter(|n| ds.editor.doc.contains(*n)) else {
@@ -4146,6 +4151,7 @@ impl XylemApp {
         self.poll_preview(ctx);
         self.stylesheet_references_window(ctx);
         self.run_stylesheet_window(ctx);
+        self.stylesheet_issues(ctx);
         let p = palette(ctx);
         if self.dialogs.about {
             let (x, close) = Dialog::new("About Xylem").width(380.0).show(ctx, |ui| {
@@ -5993,6 +5999,7 @@ impl eframe::App for XylemApp {
             severity: Severity::Info,
             message: String::new(),
             source: "",
+            at: None,
         };
     }
 }
