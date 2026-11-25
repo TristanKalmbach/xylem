@@ -346,10 +346,73 @@ impl Stylesheet {
         };
         c.ss.base = path.parent().map(Path::to_path_buf).unwrap_or_default();
         c.ss.path = path.to_path_buf();
-        c.module(path, None)
-            .map_err(|e| XsltError::from_message(&e))?;
+        SCOPE.with(|s| *s.borrow_mut() = VarScope::default());
+        let compiled = c.module(path, None).and_then(|()| {
+            // Every module is read: references left must name globals.
+            let unresolved = SCOPE.with(|s| std::mem::take(&mut s.borrow_mut().unresolved));
+            match unresolved
+                .into_iter()
+                .find(|(q, _)| !c.ss.globals.iter().any(|(g, _)| g.name.same(q)))
+            {
+                Some((_, err)) => Err(err),
+                None => Ok(()),
+            }
+        });
+        SCOPE.with(|s| *s.borrow_mut() = VarScope::default());
+        compiled.map_err(|e| XsltError::from_message(&e))?;
         Ok(c.ss)
     }
+}
+
+/// Variables in scope while a stylesheet compiles, to report references to
+/// undeclared ones (XPST0008) with their location, as the reference
+/// processors do when compiling. Local variables are known as their
+/// declarations are passed; global ones only once every module is read
+/// (they may be declared after use), so references that are not local wait
+/// in `unresolved` until then.
+#[derive(Default)]
+struct VarScope {
+    locals: Vec<QName>,
+    unresolved: Vec<(QName, String)>,
+}
+
+thread_local! {
+    /// The scope of the compilation running on this thread.
+    static SCOPE: std::cell::RefCell<VarScope> = std::cell::RefCell::default();
+}
+
+/// Records the variables `e` refers to that no enclosing declaration binds.
+fn note_vars(e: &Expr, el: &El) {
+    let mut free = Vec::new();
+    xpath::free_vars(e, &mut free);
+    if free.is_empty() {
+        return;
+    }
+    SCOPE.with(|s| {
+        let mut s = s.borrow_mut();
+        for q in free {
+            if !s.locals.iter().any(|l| l.same(&q)) {
+                let err = el.err(&format!(
+                    "XPST0008: variable ${} has not been declared",
+                    q.lexical()
+                ));
+                s.unresolved.push((q, err));
+            }
+        }
+    });
+}
+
+/// The number of local variables in scope, to restore with [`leave_scope`].
+fn scope_mark() -> usize {
+    SCOPE.with(|s| s.borrow().locals.len())
+}
+
+fn leave_scope(mark: usize) {
+    SCOPE.with(|s| s.borrow_mut().locals.truncate(mark));
+}
+
+fn declare_local(name: &QName) {
+    SCOPE.with(|s| s.borrow_mut().locals.push(name.clone()));
 }
 
 /// A path as modules are named to a [`ModuleReader`] and in errors.
@@ -508,7 +571,9 @@ impl<'a> El<'a> {
         None
     }
     fn expr(&self, src: &str) -> Result<Expr, String> {
-        xpath::parse(src, &self.resolver()).map_err(|e| self.err(&e))
+        let e = xpath::parse(src, &self.resolver()).map_err(|e| self.err(&e))?;
+        note_vars(&e, self);
+        Ok(e)
     }
     fn opt_expr(&self, attr: &str) -> Result<Option<Expr>, String> {
         self.attr(attr).map(|s| self.expr(s)).transpose()
@@ -530,7 +595,15 @@ impl<'a> El<'a> {
         Ok(QName::new(&u, l, p))
     }
     fn avt(&self, src: &str) -> Result<Avt, String> {
-        parse_avt(src, &self.resolver()).map_err(|e| self.err(&e))
+        let a = parse_avt(src, &self.resolver()).map_err(|e| self.err(&e))?;
+        if let Avt::Parts(parts) = &a {
+            for p in parts {
+                if let AvtPart::Expr(e) = p {
+                    note_vars(e, self);
+                }
+            }
+        }
+        Ok(a)
     }
     fn err(&self, msg: &str) -> String {
         let line = self.t.lines.get(self.i as usize).copied().unwrap_or(0);
@@ -928,13 +1001,20 @@ impl Compiler<'_> {
     }
 
     fn params_and_body(&mut self, d: El) -> Result<(Vec<Param>, Vec<Instr>), String> {
+        let mark = scope_mark();
         let mut params = Vec::new();
-        for c in d.child_els() {
-            if c.is_xsl("param") {
-                params.push(self.param(c)?);
+        let r = (|| {
+            for c in d.child_els() {
+                if c.is_xsl("param") {
+                    let p = self.param(c)?;
+                    declare_local(&p.name);
+                    params.push(p);
+                }
             }
-        }
-        Ok((params, self.body(d)?))
+            self.body(d)
+        })();
+        leave_scope(mark);
+        Ok((params, r?))
     }
 
     fn param(&mut self, d: El) -> Result<Param, String> {
@@ -971,6 +1051,15 @@ impl Compiler<'_> {
     /// The sequence constructor inside `d`, skipping `xsl:param`,
     /// `xsl:sort` and `xsl:with-param`.
     fn body(&mut self, d: El) -> Result<Vec<Instr>, String> {
+        let mark = scope_mark();
+        let r = self.body_in_scope(d);
+        leave_scope(mark);
+        r
+    }
+
+    /// [`Compiler::body`], each `xsl:variable` coming into scope for the
+    /// instructions after it.
+    fn body_in_scope(&mut self, d: El) -> Result<Vec<Instr>, String> {
         let mut out = Vec::new();
         let preserve_text = d.is_xsl("text");
         // Comments and processing instructions are removed before
@@ -1003,6 +1092,9 @@ impl Compiler<'_> {
                         file: d.file,
                     };
                     if let Some(i) = self.instr(e)? {
+                        if let Instr::Variable(p) = &i {
+                            declare_local(&p.name);
+                        }
                         out.push(i);
                     }
                 }

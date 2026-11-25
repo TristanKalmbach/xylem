@@ -22,7 +22,11 @@ fn run(name: &str, body: &str) -> Result<String, String> {
 
 fn assert_depth_error(r: Result<String, String>) {
     let e = r.expect_err("endless recursion must fail");
-    assert!(e.contains("nested template or function calls"), "{}", &e[..e.len().min(300)]);
+    assert!(
+        e.contains("nested template or function calls"),
+        "{}",
+        &e[..e.len().min(300)]
+    );
 }
 
 #[test]

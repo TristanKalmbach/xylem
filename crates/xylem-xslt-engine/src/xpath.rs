@@ -999,3 +999,65 @@ pub fn parse_seq_type(src: &str, ns: Resolver) -> Result<SeqType, String> {
     }
     Ok(t)
 }
+
+/// Adds to `out` every variable `e` refers to that it does not bind itself
+/// (`for`, `some`, `every` bind theirs for what follows them).
+pub fn free_vars(e: &Expr, out: &mut Vec<QName>) {
+    fn walk(e: &Expr, bound: &mut Vec<QName>, out: &mut Vec<QName>) {
+        let preds = |ps: &[Expr], bound: &mut Vec<QName>, out: &mut Vec<QName>| {
+            for p in ps {
+                walk(p, bound, out);
+            }
+        };
+        match e {
+            Expr::Var(q) => {
+                if !bound.iter().any(|b| b.same(q)) && !out.iter().any(|o| o.same(q)) {
+                    out.push(q.clone());
+                }
+            }
+            Expr::Literal(_) | Expr::Context | Expr::Root => {}
+            Expr::Path { start, steps } => {
+                if let Some(s) = start {
+                    walk(s, bound, out);
+                }
+                for st in steps {
+                    match st {
+                        PathStep::Axis(s) => preds(&s.preds, bound, out),
+                        PathStep::Expr(x, ps) => {
+                            walk(x, bound, out);
+                            preds(ps, bound, out);
+                        }
+                    }
+                }
+            }
+            Expr::Filter(b, ps) => {
+                walk(b, bound, out);
+                preds(ps, bound, out);
+            }
+            Expr::Seq(v) | Expr::Call(_, v) => preds(v, bound, out),
+            Expr::Bin(_, a, b) => {
+                walk(a, bound, out);
+                walk(b, bound, out);
+            }
+            Expr::Neg(a)
+            | Expr::InstanceOf(a, _)
+            | Expr::Cast(a, _, _)
+            | Expr::Castable(a, _, _) => walk(a, bound, out),
+            Expr::If(c, t, f) => {
+                walk(c, bound, out);
+                walk(t, bound, out);
+                walk(f, bound, out);
+            }
+            Expr::For(bs, ret) | Expr::Quant(_, bs, ret) => {
+                let mark = bound.len();
+                for (q, x) in bs {
+                    walk(x, bound, out);
+                    bound.push(q.clone());
+                }
+                walk(ret, bound, out);
+                bound.truncate(mark);
+            }
+        }
+    }
+    walk(e, &mut Vec::new(), out);
+}

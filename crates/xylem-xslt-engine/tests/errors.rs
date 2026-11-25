@@ -112,3 +112,40 @@ fn runtime_errors_carry_the_template_chain() {
     assert_eq!(e.line, Some(2));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn undeclared_variables_are_compile_errors() {
+    let dir = temp("undeclared");
+    let compile = |name: &str, body: &str| {
+        let path = dir.join(format!("{name}.xsl"));
+        let text = format!(
+            "<xsl:stylesheet version=\"2.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">\n{body}\n</xsl:stylesheet>"
+        );
+        std::fs::write(&path, text).unwrap();
+        Stylesheet::compile_with(&path, &|_| None)
+    };
+    // In scope: params, earlier variables, globals declared anywhere,
+    // variables bound inside the expression.
+    let ok = compile(
+        "ok",
+        r#"<xsl:template match="/"><xsl:param name="p" select="1"/><xsl:variable name="v" select="$p + $g"/>
+  <r a="{$v}"><xsl:value-of select="for $i in (1, 2) return $i + $v, some $j in 1 satisfies $j"/></r></xsl:template>
+<xsl:variable name="g" select="2"/>"#,
+    );
+    assert!(ok.is_ok(), "{:?}", ok.err());
+    // A variable used outside the element that declares it.
+    let e = compile(
+        "scope",
+        "<xsl:template match=\"/\">\n<xsl:if test=\"1\"><xsl:variable name=\"x\" select=\"1\"/></xsl:if>\n<r><xsl:value-of select=\"$x\"/></r></xsl:template>",
+    )
+    .err()
+    .unwrap();
+    assert!(e.message.contains("XPST0008") && e.message.contains("$x"), "{e}");
+    assert_eq!(e.line, Some(4), "{e}");
+    // In an attribute value template.
+    let e = compile("avt", "<xsl:template match=\"/\"><r a=\"{$nope}\"/></xsl:template>")
+        .err()
+        .unwrap();
+    assert!(e.message.contains("$nope"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
