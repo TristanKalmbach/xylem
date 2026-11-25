@@ -2,8 +2,8 @@
 
 Xylem is a structured XML editor written in Rust. It was built to replace
 XMetaL XMAX for writing narrative XML, and it also handles S1000D (issues 2.0
-to 6.0). Everything is pure Rust, so it should run on Windows, macOS and
-Linux; so far it has been built and tested on Windows.
+to 6.0). Everything is pure Rust. It is built and tested on Windows and Linux;
+macOS should work but has not been built yet.
 
 ![The normal view of a sample manual](docs/images/normal-view.png)
 
@@ -63,7 +63,22 @@ To make the sample doctype package available, add its folder to the package path
 XYLEM_PACKAGES=samples/doctypes cargo run --release -p xylem-app -- samples/manual-sample.xml
 ```
 
-The binary is `target/release/xylem` (`xylem.exe` on Windows). It has no runtime dependencies.
+The binary is `target/release/xylem` (`xylem.exe` on Windows). On Windows it
+has no runtime dependencies.
+
+On Linux (tested on Ubuntu 24.04 under WSL), building needs the usual GUI
+development packages and running needs a couple of shared libraries:
+
+```
+sudo apt install build-essential pkg-config libxkbcommon-dev libwayland-dev \
+    libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev \
+    libfontconfig-dev libgtk-3-dev          # to build
+sudo apt install libxkbcommon-x11-0 libgl1  # to run
+```
+
+Xylem draws with OpenGL. Where no GPU driver is available (for example a
+virtual machine), run it on X11 with software rendering:
+`env -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xylem`.
 
 ## Importing XMAX customizations
 
