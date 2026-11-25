@@ -371,6 +371,41 @@ impl Engine<'_> {
         parts.join(sep)
     }
 
+    /// The string value of simple content (`xsl:value-of`, `xsl:attribute`,
+    /// `xsl:comment`, `xsl:processing-instruction`, `xsl:message` with
+    /// `select`): zero-length text nodes are dropped and adjacent text nodes
+    /// merged before the items are joined with `sep`, so text nodes are not
+    /// separated from each other (XSLT 2.0 §5.7.2). XSLT 1.0 rules take the
+    /// first item only. Attribute value templates follow the same rule, as
+    /// the reference processor does.
+    pub fn simple_content(&self, v: &Seq, sep: &str) -> String {
+        let mut parts: Vec<String> = Vec::with_capacity(v.len());
+        let mut in_text = false;
+        for it in v {
+            let is_text =
+                matches!(it, Item::Node(n) if self.tree(n.tree).node(n.idx).kind == Kind::Text);
+            if is_text {
+                let s = self.string_of(it);
+                if s.is_empty() {
+                    continue;
+                }
+                match parts.last_mut() {
+                    Some(last) if in_text => last.push_str(&s),
+                    _ => parts.push(s),
+                }
+                in_text = true;
+            } else {
+                parts.extend(
+                    self.atomize(&vec![it.clone()])
+                        .iter()
+                        .map(Atomic::to_string),
+                );
+                in_text = false;
+            }
+        }
+        parts.join(sep)
+    }
+
     fn binary(&self, op: BinOp, a: &Expr, b: &Expr, d: &Dyn) -> R<Seq> {
         let bool_ = |b: bool| Ok(vec![Item::Atomic(Atomic::Bool(b))]);
         match op {

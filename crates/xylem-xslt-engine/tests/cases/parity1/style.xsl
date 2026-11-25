@@ -17,6 +17,12 @@
       <lines a="s1
 s2" c="&#10;|&#13;">lit1
 lit2<xsl:text>t1&#10;t2&#13;t3&#13;&#10;t4</xsl:text></lines>
+      <!-- xsl:number with no node matching `from` gives nothing. -->
+      <numbers>
+        <xsl:for-each select="//*">
+          <n><xsl:number count="*" from="nomatch" level="any"/>|<xsl:number count="*" from="nomatch" level="multiple"/></n>
+        </xsl:for-each>
+      </numbers>
     </fo:root>
   </xsl:template>
 </xsl:stylesheet>

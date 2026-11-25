@@ -372,7 +372,7 @@ impl<'s> Engine<'s> {
                 for p in parts {
                     match p {
                         AvtPart::Lit(l) => s.push_str(l),
-                        AvtPart::Expr(e) => s.push_str(&self.joined(&self.eval(e, d)?, " ")),
+                        AvtPart::Expr(e) => s.push_str(&self.simple_content(&self.eval(e, d)?, " ")),
                     }
                 }
                 Ok(s)
@@ -939,7 +939,7 @@ impl<'s> Engine<'s> {
                         if self.ss.runs_as_xslt1() {
                             v.first().map(|i| self.string_of(i)).unwrap_or_default()
                         } else {
-                            self.joined(&v, &sep)
+                            self.simple_content(&v, &sep)
                         }
                     }
                     None => self.content_string(body, d, sep.as_ref())?,
@@ -1182,7 +1182,7 @@ impl<'s> Engine<'s> {
                             Some(a) => self.avt(a, d)?,
                             None => " ".into(),
                         };
-                        self.joined(&self.eval(e, d)?, &sep)
+                        self.simple_content(&self.eval(e, d)?, &sep)
                     }
                     None => self.content_string(body, d, sep.as_ref())?,
                 };
@@ -1242,7 +1242,7 @@ impl<'s> Engine<'s> {
             }
             Instr::Comment { select, body } => {
                 let s = match select {
-                    Some(e) => self.joined(&self.eval(e, d)?, " "),
+                    Some(e) => self.simple_content(&self.eval(e, d)?, " "),
                     None => self.content_string(body, d, None)?,
                 };
                 out.leaf(Kind::Comment, None, s);
@@ -1250,7 +1250,7 @@ impl<'s> Engine<'s> {
             Instr::Pi { name, select, body } => {
                 let n = self.avt(name, d)?;
                 let s = match select {
-                    Some(e) => self.joined(&self.eval(e, d)?, " "),
+                    Some(e) => self.simple_content(&self.eval(e, d)?, " "),
                     None => self.content_string(body, d, None)?,
                 };
                 out.leaf(Kind::Pi, Some(QName::local(&n)), s.trim_start().to_string());
@@ -1261,7 +1261,7 @@ impl<'s> Engine<'s> {
                 terminate,
             } => {
                 let mut s = match select {
-                    Some(e) => self.joined(&self.eval(e, d)?, " "),
+                    Some(e) => self.simple_content(&self.eval(e, d)?, " "),
                     None => String::new(),
                 };
                 s.push_str(&self.content_string(body, d, None)?);
@@ -1673,8 +1673,12 @@ impl<'s> Engine<'s> {
                             break;
                         }
                     }
-                    // With no `from` node before it, the reference processor
-                    // counts from the start of the document.
+                    // With no `from` node before it, Saxon (XSLT 2.0) counts
+                    // from the start of the document; the XSLT 1.0
+                    // processor gives nothing.
+                    if from.is_none() && crate::value::compat() {
+                        return Ok(vec![]);
+                    }
                 }
                 // The reference processor counts every matching node from
                 // the `from` node onwards in document order (the XSLT 1.0
@@ -1688,10 +1692,14 @@ impl<'s> Engine<'s> {
                 Ok(if c == 0 { vec![] } else { vec![c] })
             }
             "multiple" => {
-                // With no ancestor matching `from`, every ancestor counts, as
-                // if there were no `from` (the reference processor's way;
-                // `single` gives nothing then).
-                let from = from_ancestor()?.unwrap_or(None);
+                // With no ancestor matching `from`, Saxon (XSLT 2.0) counts
+                // every ancestor, as if there were no `from`; the XSLT 1.0
+                // processor gives nothing, as both do for `single`.
+                let from = match from_ancestor()? {
+                    Some(f) => f,
+                    None if crate::value::compat() => return Ok(vec![]),
+                    None => None,
+                };
                 let mut v = Vec::new();
                 for x in ancestors_or_self(node) {
                     if within(from, x) && self.count_matches(x, n, node)? {

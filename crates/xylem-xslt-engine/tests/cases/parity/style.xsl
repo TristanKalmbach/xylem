@@ -92,6 +92,14 @@ s2"><xsl:text>t1&#13;t2&#10;t3</xsl:text></lines>
         <xsl:call-template name="module-relative"/>
         <top><xsl:value-of select="document('data.xml')/data/v"/></top>
       </modules>
+      <!-- Simple content merges adjacent text nodes before separating
+           items, in attribute value templates too. -->
+      <simple>
+        <xsl:variable name="t"><a>x</a><a>y</a><a>z</a></xsl:variable>
+        <v><xsl:value-of select="$t/a/text()"/></v>
+        <w><xsl:value-of select="$t/a/text(), 1, 2, $t/a[1]/text()" separator="|"/></w>
+        <x a="{$t/a/text()}"><xsl:attribute name="b" select="$t/a/text()"/></x>
+      </simple>
       <entities>
         <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
         <avt v="{concat('&U;', '&sep;')}"/>

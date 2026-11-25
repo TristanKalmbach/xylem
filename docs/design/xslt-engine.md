@@ -328,9 +328,10 @@ named in brackets; notes marked *unverified* still need a probe.
    also outside the `from` node's subtree (the XSLT 1.0 wording; XSLT 2.0's
    formal definition would stop at the subtree). For `level="single"` and
    `"multiple"`, the `from` node may be the numbered node itself [`edge`].
-   When no node matches `from`, `level="any"` counts from the start of the
-   document and `"multiple"` counts every ancestor, as if there were no
-   `from`; `"single"` gives nothing [`parity`].
+   When no node matches `from`, Saxon (XSLT 2.0) counts from the start of
+   the document for `level="any"` and every ancestor for `"multiple"`, as
+   if there were no `from`, and gives nothing for `"single"` [`parity`];
+   the XSLT 1.0 processor gives nothing at every level [`parity1`].
 6. **Empty `xsl:value-of` in a typed variable** [`edge`]. Inside a
    variable with `as="xs:string"` it gives a zero-length string, not an
    empty sequence.
