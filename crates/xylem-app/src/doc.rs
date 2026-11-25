@@ -51,6 +51,8 @@ pub struct SourceState {
     pub text: String,
     pub error: Option<(String, usize)>,
     pub revision: u64,
+    /// A byte offset to move the cursor to and show, once.
+    pub goto: Option<usize>,
 }
 
 pub struct DocState {

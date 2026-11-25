@@ -577,6 +577,7 @@ impl XylemApp {
                     text,
                     error: Some((e.to_string(), e.offset)),
                     revision: u64::MAX,
+                    goto: None,
                 });
                 self.toast(
                     format!(
@@ -1402,6 +1403,7 @@ impl XylemApp {
                 text: ds.editor.doc.to_xml(),
                 error: None,
                 revision: ds.editor.doc.revision(),
+                goto: None,
             });
         }
         ds.view = v;
@@ -2892,12 +2894,14 @@ impl XylemApp {
                 text: ds.editor.doc.to_xml(),
                 error: None,
                 revision: ds.editor.doc.revision(),
+                goto: None,
             });
-            let mut goto = src
-                .error
-                .as_ref()
-                .map(|e| e.1)
-                .filter(|_| ui.input(|i| i.key_pressed(Key::F4)));
+            let mut goto = src.goto.take().or_else(|| {
+                src.error
+                    .as_ref()
+                    .map(|e| e.1)
+                    .filter(|_| ui.input(|i| i.key_pressed(Key::F4)))
+            });
             let err = src.error.clone();
             if source::show(ui, &mut src.text, err.as_ref(), zoom, &mut goto) {
                 src.revision = u64::MAX;

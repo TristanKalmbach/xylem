@@ -613,6 +613,23 @@ impl XylemApp {
         let Some(i) = find(&self.docs) else {
             return;
         };
+        // In Source view, put the text cursor at the start of the line.
+        if self.docs[i].view == crate::doc::View::Source
+            && let Some(src) = self.docs[i].source.as_mut()
+        {
+            let offset = src
+                .text
+                .match_indices('\n')
+                .nth((line as usize).saturating_sub(2))
+                .map_or(0, |(at, _)| if line <= 1 { 0 } else { at + 1 });
+            // Past the indentation, where the element starts.
+            let indent = src.text[offset..]
+                .find(|c: char| c != ' ' && c != '\t')
+                .unwrap_or(0);
+            src.goto = Some(offset + indent);
+            self.active = i;
+            return;
+        }
         self.active = i;
         let ds = &mut self.docs[i];
         let doc = &ds.editor.doc;

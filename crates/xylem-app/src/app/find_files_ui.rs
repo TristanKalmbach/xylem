@@ -613,6 +613,7 @@ impl XylemApp {
                 text: fresh.editor.doc.to_xml(),
                 error: None,
                 revision: fresh.editor.doc.revision(),
+                goto: None,
             });
         }
         self.docs[i] = fresh;
