@@ -3,7 +3,7 @@
      comparing the engine with it over many stylesheets. -->
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
     xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:x="urn:x-ext" xmlns:my="urn:x-words" exclude-result-prefixes="my">
-  <my:words xmlns:my="urn:x-words"><w>Vac</w><w>VHMC</w><w>apple</w><w>Apple</w><w>APPLE</w><w>b</w><w>B</w><w>co-op</w><w>coop</w><w>café</w><w>cafe</w><w>a1</w><w>a10</w><w>a2</w><w>_x</w><w>Zebra</w><w>zebra</w><w>élan</w><w>elan</w><w>Élan</w><w>Ab</w><w>aB</w><w>ab</w><w>AB</w><w>1</w><w>10</w><w>9</w><w>-a</w><w>a-</w><w>résumé</w><w>resume</w><w>Resume</w><w>ß</w><w>ss</w></my:words>
+  <my:words xmlns:my="urn:x-words"><w>Vac</w><w>VHF</w><w>apple</w><w>Apple</w><w>APPLE</w><w>b</w><w>B</w><w>co-op</w><w>coop</w><w>café</w><w>cafe</w><w>a1</w><w>a10</w><w>a2</w><w>_x</w><w>Zebra</w><w>zebra</w><w>élan</w><w>elan</w><w>Élan</w><w>Ab</w><w>aB</w><w>ab</w><w>AB</w><w>1</w><w>10</w><w>9</w><w>-a</w><w>a-</w><w>résumé</w><w>resume</w><w>Resume</w><w>ß</w><w>ss</w></my:words>
   <xsl:template match="/">
     <fo:root font-size="10pt">
       <!-- Namespace declarations follow the attributes. -->

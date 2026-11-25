@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn matches_the_reference_order() {
         let mut words = vec![
-            "Vac", "VHMC", "apple", "Apple", "APPLE", "b", "B", "co-op", "coop", "café", "cafe",
+            "Vac", "VHF", "apple", "Apple", "APPLE", "b", "B", "co-op", "coop", "café", "cafe",
             "a1", "a10", "a2", "_x", "Zebra", "zebra", "élan", "elan", "Élan", "x y", "xy", "Ab",
             "aB", "ab", "AB", "1", "10", "9", "-a", "a-", "résumé", "resume", "Resume", "ﬁ", "fi",
             "ß", "ss", "straße", "strasse",
@@ -146,12 +146,12 @@ mod tests {
         words.sort_by(|a, b| compare(a, b, false));
         assert_eq!(
             words.join("|"),
-            "_x|1|10|9|a-|-a|a1|a10|a2|ab|aB|Ab|AB|apple|Apple|APPLE|b|B|cafe|café|coop|co-op|elan|élan|Élan|ﬁ|fi|resume|Resume|résumé|ß|ss|straße|strasse|Vac|VHMC|x y|xy|zebra|Zebra"
+            "_x|1|10|9|a-|-a|a1|a10|a2|ab|aB|Ab|AB|apple|Apple|APPLE|b|B|cafe|café|coop|co-op|elan|élan|Élan|ﬁ|fi|resume|Resume|résumé|ß|ss|straße|strasse|Vac|VHF|x y|xy|zebra|Zebra"
         );
         words.sort_by(|a, b| compare(a, b, true));
         assert_eq!(
             words.join("|"),
-            "_x|1|10|9|a-|-a|a1|a10|a2|AB|Ab|aB|ab|APPLE|Apple|apple|B|b|cafe|café|coop|co-op|elan|Élan|élan|ﬁ|fi|Resume|resume|résumé|ß|ss|straße|strasse|Vac|VHMC|x y|xy|Zebra|zebra"
+            "_x|1|10|9|a-|-a|a1|a10|a2|AB|Ab|aB|ab|APPLE|Apple|apple|B|b|cafe|café|coop|co-op|elan|Élan|élan|ﬁ|fi|Resume|resume|résumé|ß|ss|straße|strasse|Vac|VHF|x y|xy|Zebra|zebra"
         );
     }
 }
