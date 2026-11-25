@@ -56,6 +56,14 @@
         <attr><xsl:apply-templates select="f:lookup('unknown')/@color" mode="pred"/></attr>
         <deep><xsl:apply-templates select="f:lookup('unknown')/descendant-or-self::fo:inline" mode="deep"/></deep>
       </parentless>
+      <!-- Comments go before whitespace stripping: text around one merges. -->
+      <comments>
+        <!-- c -->
+        x
+        <!-- d --><?pi data?>
+        <y/>
+        <z>   <!-- only whitespace -->   </z>
+      </comments>
       <entities>
         <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
         <avt v="{concat('&U;', '&sep;')}"/>

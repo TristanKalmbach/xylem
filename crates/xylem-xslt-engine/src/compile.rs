@@ -887,18 +887,30 @@ impl Compiler {
     fn body(&mut self, d: El) -> Result<Vec<Instr>, String> {
         let mut out = Vec::new();
         let preserve_text = d.is_xsl("text");
+        // Comments and processing instructions are removed before
+        // whitespace is stripped, so the text on either side of one is a
+        // single text node: "\n  <!-- c -->\n  x" keeps all its whitespace.
+        let mut pending: Option<(String, u32)> = None;
+        let flush = |pending: &mut Option<(String, u32)>, out: &mut Vec<Instr>| {
+            if let Some((text, first)) = pending.take() {
+                let keep = preserve_text
+                    || !text.chars().all(tree::is_xml_space)
+                    || d.inherited_space_preserve(first);
+                if keep {
+                    out.push(Instr::Text(text));
+                }
+            }
+        };
         for c in d.children() {
             let n = d.t.node(c);
             match n.kind {
-                Kind::Text => {
-                    let keep = preserve_text
-                        || !n.value.chars().all(tree::is_xml_space)
-                        || d.inherited_space_preserve(c);
-                    if keep {
-                        out.push(Instr::Text(n.value.clone()));
-                    }
-                }
+                Kind::Text => match &mut pending {
+                    Some((text, _)) => text.push_str(&n.value),
+                    None => pending = Some((n.value.clone(), c)),
+                },
+                Kind::Comment | Kind::Pi => {}
                 Kind::Element => {
+                    flush(&mut pending, &mut out);
                     let e = El {
                         t: d.t,
                         i: c,
@@ -911,6 +923,7 @@ impl Compiler {
                 _ => {}
             }
         }
+        flush(&mut pending, &mut out);
         Ok(out)
     }
 
