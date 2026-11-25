@@ -188,18 +188,45 @@ pub(crate) fn for_document(
     if external.is_none() && dt.internal_subset.is_none() {
         return None;
     }
-    Some(dtd::load_doctype(
+    let loaded = dtd::load_doctype(
         dt.internal_subset.as_deref(),
         external.as_deref(),
         base.unwrap_or(Path::new(".")),
         catalog,
         &dt.name,
-    ))
+    );
+    // An internal subset that only declares entities (as stylesheets often
+    // do, for shorthand) is not a grammar: validating against it would call
+    // every element undeclared.
+    if external.is_none()
+        && let Ok(g) = &loaded
+        && g.all_element_names().is_empty()
+    {
+        return None;
+    }
+    Some(loaded)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_entities_only_internal_subset_is_not_a_grammar() {
+        let text = concat!(
+            "<!DOCTYPE xsl:stylesheet [\n<!ENTITY anchor \"x\">\n]>\n",
+            "<xsl:stylesheet version=\"1.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\"/>"
+        );
+        let doc = Document::from_str(text).unwrap();
+        assert!(for_document(&doc, None, &Catalog::new()).is_none());
+        // With element declarations it is a grammar.
+        let text = "<!DOCTYPE a [\n<!ELEMENT a EMPTY>\n]>\n<a/>";
+        let doc = Document::from_str(text).unwrap();
+        assert!(matches!(
+            for_document(&doc, None, &Catalog::new()),
+            Some(Ok(_))
+        ));
+    }
 
     #[test]
     fn locations() {
