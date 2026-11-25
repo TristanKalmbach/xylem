@@ -84,6 +84,16 @@ fn a_2_0_run_with_only_secondary_results_fails_to_publish() {
             .unwrap()
             .contains("Object reference not set")
     );
+    // A result-document without href opens the principal result, even
+    // when it writes nothing: that publishes (empty).
+    std::fs::write(
+        &xsl,
+        format!(r#"<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/">{only}<xsl:result-document/></xsl:template></xsl:stylesheet>"#),
+    )
+    .unwrap();
+    let ss = Stylesheet::compile(&xsl).unwrap();
+    let o = transform_bytes(&ss, b"<a/>", &HashMap::new(), false).unwrap();
+    assert_eq!(o.published().unwrap(), "");
     // An empty result alone is fine, as on the host.
     std::fs::write(
         &xsl,

@@ -316,7 +316,11 @@ fn run_from(
 /// secondary results leaves Saxon's DOM destination without a document,
 /// which the host then reads (spec note 16).
 fn publish_error(result: &tree::Tree, engine: &exec::Engine, compat: bool) -> Option<String> {
-    if !compat && result.node(0).children.is_empty() && !engine.results.borrow().is_empty() {
+    if !compat
+        && result.node(0).children.is_empty()
+        && !engine.principal_opened.get()
+        && !engine.results.borrow().is_empty()
+    {
         return Some(
             concat!(
                 "The stylesheet produced no principal result, only secondary ones ",

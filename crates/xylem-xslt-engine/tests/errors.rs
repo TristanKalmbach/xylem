@@ -180,3 +180,23 @@ fn a_function_body_has_no_context_item() {
     assert!(compile("own", "$p//x, $p/(//x), count($p[position() = 1])").is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_version_1_function_takes_the_first_of_several_items() {
+    let dir = temp("backwards");
+    let path = dir.join("s.xsl");
+    std::fs::write(
+        &path,
+        r#"<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:f="urn:f" exclude-result-prefixes="f">
+<xsl:function name="f:old" version="1.0"><xsl:param name="p"/><xsl:sequence select="string-length($p)"/></xsl:function>
+<xsl:function name="f:new"><xsl:param name="p"/><xsl:sequence select="string-length($p)"/></xsl:function>
+<xsl:template match="/"><xsl:variable name="v" select="('ab', 'cde')"/><r a="{f:old($v)}"><xsl:value-of select="f:new($v)"/></r></xsl:template></xsl:stylesheet>"#,
+    )
+    .unwrap();
+    let ss = Stylesheet::compile(&path).unwrap();
+    let e = transform_bytes(&ss, b"<a/>", &HashMap::new(), false)
+        .err()
+        .unwrap();
+    assert!(e.contains("XPTY0004") && e.contains("f:new"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

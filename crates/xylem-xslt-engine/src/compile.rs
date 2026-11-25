@@ -219,6 +219,9 @@ pub struct Template {
     /// Where the rule is declared, for reports (`file:line`).
     pub location: String,
     pub source: Source,
+    /// Declared with `version="1.0"` in a 2.0 stylesheet: backwards-
+    /// compatible mode for its body.
+    pub backwards: bool,
 }
 
 #[derive(Debug)]
@@ -231,6 +234,8 @@ pub struct Function {
     pub params: Vec<Param>,
     pub body: Vec<Instr>,
     pub as_: Option<SeqType>,
+    /// Declared with `version="1.0"`: backwards-compatible mode.
+    pub backwards: bool,
 }
 
 #[derive(Debug)]
@@ -640,6 +645,18 @@ impl<'a> El<'a> {
         }
         Ok(a)
     }
+    /// Whether the element declares `version` (XSLT elements) or
+    /// `xsl:version` (literal result elements) below 2.0.
+    fn declares_version_1(&self) -> bool {
+        let v = if &*self.name().uri == XSL_NS {
+            self.attr("version")
+        } else {
+            self.attr_ns(XSL_NS, "version")
+        };
+        v.and_then(|v| v.trim().parse::<f64>().ok())
+            .is_some_and(|v| v < 2.0)
+    }
+
     fn err(&self, msg: &str) -> String {
         let line = self.t.lines.get(self.i as usize).copied().unwrap_or(0);
         crate::error::located(
@@ -807,6 +824,7 @@ impl Compiler<'_> {
                 prec,
                 location: file.clone(),
                 source: el.source(),
+                backwards: false,
             });
             if let Some(p) = prec_out {
                 *p = prec;
@@ -915,6 +933,7 @@ impl Compiler<'_> {
                             params,
                             body,
                             as_: d.seq_type()?,
+                            backwards: d.declares_version_1(),
                         },
                     );
                 }
@@ -1031,6 +1050,7 @@ impl Compiler<'_> {
             prec,
             location,
             source: d.source(),
+            backwards: d.declares_version_1(),
         });
         Ok(())
     }

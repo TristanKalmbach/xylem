@@ -20,6 +20,22 @@ use std::time::{Duration, Instant};
 /// [`crate::STACK_SIZE`] bytes of stack, enough for this depth.
 pub const MAX_CALL_DEPTH: usize = 10_000;
 
+/// Sets backwards-compatible mode for one template or function call and
+/// restores the caller's when dropped.
+struct BackwardsGuard<'a>(&'a std::cell::Cell<bool>, bool);
+
+impl<'a> BackwardsGuard<'a> {
+    fn enter(cell: &'a std::cell::Cell<bool>, on: bool) -> BackwardsGuard<'a> {
+        BackwardsGuard(cell, cell.replace(on))
+    }
+}
+
+impl Drop for BackwardsGuard<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.1);
+    }
+}
+
 /// Undoes one [`Engine::enter_call`] when dropped.
 struct CallGuard<'a>(&'a std::cell::Cell<usize>);
 
@@ -294,6 +310,13 @@ pub struct Engine<'s> {
     /// dynamic context (for every pattern test) allocates nothing.
     no_tunnel: Tunnel,
     no_groups: Arc<Vec<String>>,
+    /// Set when an `xsl:result-document` without `href` ran: the principal
+    /// result was opened, even if nothing was written to it.
+    pub principal_opened: std::cell::Cell<bool>,
+    /// Set while a template or function declared with `version="1.0"`
+    /// runs: backwards-compatible mode, where a function taking one item
+    /// is given the first of several.
+    pub backwards: std::cell::Cell<bool>,
     source: u32,
 }
 
@@ -327,6 +350,8 @@ impl<'s> Engine<'s> {
             depth: std::cell::Cell::new(0),
             no_tunnel: Arc::default(),
             no_groups: Arc::default(),
+            principal_opened: std::cell::Cell::new(false),
+            backwards: std::cell::Cell::new(false),
         }
     }
 
@@ -913,6 +938,7 @@ impl<'s> Engine<'s> {
         out: &mut Out,
     ) -> R<()> {
         let _call = self.enter_call()?;
+        let _mode = BackwardsGuard::enter(&self.backwards, self.ss.templates[t].backwards);
         if let Some(p) = &self.timing {
             p.borrow_mut().enter(t);
         }
@@ -994,6 +1020,7 @@ impl<'s> Engine<'s> {
             d = d.bind(p.name.clone(), v);
         }
         let _call = self.enter_call()?;
+        let _mode = BackwardsGuard::enter(&self.backwards, f.backwards);
         let mut out = Out::sequence();
         if let Some(p) = &self.timing {
             p.borrow_mut().enter(self.ss.templates.len() + f.id);
@@ -1298,6 +1325,7 @@ impl<'s> Engine<'s> {
                     None => String::new(),
                 };
                 if href.trim().is_empty() {
+                    self.principal_opened.set(true);
                     self.body(body, d, out)?;
                 } else {
                     let href = href.trim().to_string();

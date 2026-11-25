@@ -88,7 +88,7 @@ impl Engine<'_> {
         // processor's message.
         let s = |i: usize| -> R<String> {
             let v = arg(i)?;
-            if v.len() > 1 && !crate::value::compat() {
+            if v.len() > 1 && !crate::value::compat() && !self.backwards.get() {
                 return Err(self.too_many_items(&v, i, &name.local));
             }
             Ok(v.first().map(|x| self.string_of(x)).unwrap_or_default())
@@ -321,17 +321,15 @@ impl Engine<'_> {
                     return str_(String::new());
                 };
                 let t = self.tree(x.tree);
-                let q = t.node(x.idx).name.clone();
-                str_(
-                    q.map(|q| {
-                        if &*name.local == "name" {
-                            q.lexical()
-                        } else {
-                            q.local.to_string()
-                        }
-                    })
-                    .unwrap_or_default(),
-                )
+                // An unprefixed name shares the node's string.
+                let v: Arc<str> = match &t.node(x.idx).name {
+                    None => "".into(),
+                    Some(q) if &*name.local == "local-name" || q.prefix.is_empty() => {
+                        q.local.clone()
+                    }
+                    Some(q) => q.lexical().into(),
+                };
+                Ok(vec![Item::Atomic(Atomic::Str(v))])
             }
             ("namespace-uri", 0 | 1) => {
                 let Some(x) = node_arg(0)? else {
