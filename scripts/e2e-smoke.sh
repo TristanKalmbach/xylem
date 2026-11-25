@@ -3,9 +3,13 @@
 #
 # Steps find their targets by text, label or command name rather than by
 # screen position (see crates/xylem-app/src/script.rs), so the cases survive
-# layout changes. Set XYLEM_WINDOW_POS=x,y to open the test windows somewhere
-# out of the way, such as a second monitor. Run from the
-# repository root after `cargo build --release -p xylem-app`.
+# layout changes. Run from the repository root after
+# `cargo build --release -p xylem-app`. On Linux, run it headless so no
+# window opens on screen:
+#
+#     LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a bash scripts/e2e-smoke.sh
+#
+# Elsewhere, XYLEM_WINDOW_POS=x,y places the test windows.
 set -u
 out="${TMPDIR:-/tmp}/xylem-e2e"
 mkdir -p "$out"
@@ -135,6 +139,26 @@ for case in "split|caret lines.;;key Enter" "join|caret Torque values;;key Backs
     check "tracked-$name" "$out/tracked-$name.xml" '<?xm-insertion_mark_start author="'
     same "reject-$name" "$out/rejected-$name.xml"
 done
+# More tracked editing, each driven through the app: the Delete key and
+# paste are tracked; a paragraph break inside your own insertion goes with
+# it on Reject all; deleting what you just typed leaves no trace; deleting
+# across inline markup is tracked and Reject all restores it.
+tracked() { # name, steps
+    XYLEM_CONFIG_DIR="$native/cfg3" XYLEM_PACKAGES=samples/doctypes         XYLEM_SCRIPT="key T ctrl shift;;$2;;save $native/$1.xml;;quit"         timeout 90 "$bin" samples/manual-sample.xml > /dev/null 2>&1
+}
+tracked tracked-delete-key "caret hydraulic lines;;key Delete"
+check tracked-delete-key "$out/tracked-delete-key.xml" 'data="h"?>'
+tracked tracked-paste "caretend Check the fluid level;;paste PASTED"
+check tracked-paste "$out/tracked-paste.xml" 'PASTED<?xm-insertion_mark_end?>'
+tracked tracked-enter-in-insertion "caretend Check the fluid level;;type XY;;key ArrowLeft;;key Enter;;save $native/tracked-enter-mid.xml;;cmd ResolveAll reject;;wait 3"
+check tracked-enter-split "$out/tracked-enter-mid.xml" 'X</para><para>Y<?xm-insertion_mark_end?>'
+same tracked-enter-in-insertion "$out/tracked-enter-in-insertion.xml"
+tracked tracked-delete-own "caretend Check the fluid level;;type XY;;save $native/tracked-own-mid.xml;;key Backspace;;key Backspace"
+check tracked-own-typed "$out/tracked-own-mid.xml" 'XY<?xm-insertion_mark_end?>'
+same tracked-delete-own "$out/tracked-delete-own.xml"
+tracked tracked-inline "caret describes the;;key ArrowRight ctrl shift;;key ArrowRight ctrl shift;;key ArrowRight ctrl shift;;key ArrowRight ctrl shift;;key ArrowRight ctrl shift;;key Delete;;save $native/tracked-inline-marks.xml;;cmd ResolveAll reject;;wait 3"
+check tracked-inline-deleted "$out/tracked-inline-marks.xml" 'xm-deletion_mark'
+same tracked-inline-restored "$out/tracked-inline.xml"
 # Saving keeps the previous version, and the lock file goes when the
 # document is closed.
 rm -rf "$out/safe" && mkdir -p "$out/safe/docs" && cp samples/manual-sample.xml "$out/safe/docs/s.xml"

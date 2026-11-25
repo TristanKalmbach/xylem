@@ -100,11 +100,12 @@ XMetaL itself.
 | Typing extends one insertion; Backspace records a deletion | verified | |
 | Selection replace records deletion then insertion | verified | |
 | Find and replace (including Replace all) tracked | verified | |
-| Delete key, paste and spelling fixes tracked | tested | |
-| Enter inside your own insertion | tested | The paragraph break becomes part of the insertion; Reject all joins the paragraphs again. |
+| Delete key and paste tracked | verified | Scripted in `scripts/e2e-smoke.sh`. |
+| Spelling fixes tracked | tested | Unit tests; replacing a word from the spelling menu goes through the same tracked replace as typing over a selection. |
+| Enter inside your own insertion | verified | The paragraph break becomes part of the insertion; Reject all joins the paragraphs again and gives back the file byte for byte. |
 | Select all and Backspace with tracking on | verified | Rows, list items and colspecs stay; Reject all restores the file byte for byte. |
-| Deleting your own inserted text just removes it | tested | |
-| Deleted inline markup restored on reject | tested | |
+| Deleting your own inserted text just removes it | verified | The file is byte for byte as before. |
+| Deleted inline markup restored on reject | verified | A deletion across a whole `<b>` element is tracked; Reject all gives back the file byte for byte. |
 | Accept / reject the change at the caret | verified | |
 | Accept all / reject all, each one undo step | verified | |
 | New comment at the caret or on a selection | verified | |
