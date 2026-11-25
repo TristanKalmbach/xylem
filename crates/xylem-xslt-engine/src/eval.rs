@@ -350,6 +350,13 @@ impl Engine<'_> {
                 Atomic::Int(i) => *i != 0,
                 Atomic::Dec(x) => x.0 != 0,
                 Atomic::Dbl(x) => *x != 0.0 && !x.is_nan(),
+                Atomic::Sub(_, v) => self.ebv(&vec![Item::Atomic((**v).clone())])?,
+                o => {
+                    return Err(format!(
+                        "FORG0006: no effective boolean value for {}",
+                        o.type_name()
+                    ));
+                }
             }),
             _ => Err(
                 "the effective boolean value of a sequence of several atomic values is not defined"
@@ -448,6 +455,14 @@ impl Engine<'_> {
                 match (x.as_slice(), y.as_slice()) {
                     ([p], [q]) => {
                         let (p, q) = (to_int(p)?, to_int(q)?);
+                        // Ranges are materialised; refuse ones that would
+                        // exhaust memory rather than take the machine down.
+                        const MAX_RANGE: i128 = 10_000_000;
+                        if q as i128 - p as i128 >= MAX_RANGE {
+                            return Err(format!(
+                                "the range {p} to {q} has more than {MAX_RANGE} items"
+                            ));
+                        }
                         Ok((p..=q).map(|i| Item::Atomic(Atomic::Int(i))).collect())
                     }
                     _ => Ok(vec![]),
@@ -554,16 +569,7 @@ impl Engine<'_> {
                 let tr = self.tree(n.tree);
                 test(tr.node(n.idx), nt, Kind::Element)
             }
-            (ItemType::Atomic(name), Item::Atomic(a)) => match name.as_str() {
-                "anyAtomicType" => true,
-                "string" => matches!(a, Atomic::Str(_)),
-                "untypedAtomic" => matches!(a, Atomic::Untyped(_)),
-                "boolean" => matches!(a, Atomic::Bool(_)),
-                "integer" => matches!(a, Atomic::Int(_)),
-                "decimal" => matches!(a, Atomic::Int(_) | Atomic::Dec(_)),
-                "double" => matches!(a, Atomic::Dbl(_)),
-                _ => false,
-            },
+            (ItemType::Atomic(name), Item::Atomic(a)) => crate::types::instance(a, name),
             _ => false,
         }
     }
@@ -646,6 +652,10 @@ fn numeric(a: &Atomic) -> R<Atomic> {
     match a {
         Atomic::Untyped(s) => Ok(Atomic::Dbl(parse_double(s))),
         Atomic::Int(_) | Atomic::Dec(_) | Atomic::Dbl(_) => Ok(a.clone()),
+        Atomic::Time(_) | Atomic::Dur(_) => Ok(a.clone()),
+        // xs:float arithmetic is done in double precision, then narrowed.
+        Atomic::Sub("float", _) => Ok(a.clone()),
+        Atomic::Sub(_, v) if v.is_numeric() => Ok(a.prim()),
         other => Err(format!(
             "arithmetic on {} '{}'",
             other.type_name(),
@@ -657,6 +667,7 @@ fn numeric(a: &Atomic) -> R<Atomic> {
 fn to_int(a: &Atomic) -> R<i64> {
     match a {
         Atomic::Int(i) => Ok(*i),
+        Atomic::Sub(_, v) => to_int(v),
         Atomic::Untyped(s) => s
             .trim()
             .parse()
@@ -667,6 +678,26 @@ fn to_int(a: &Atomic) -> R<i64> {
 
 pub fn arith(op: BinOp, x: &Atomic, y: &Atomic) -> R<Atomic> {
     use Atomic::*;
+    if crate::datetime::involved(x, y) {
+        use crate::datetime::ArithOp;
+        let op = match op {
+            BinOp::Add => ArithOp::Add,
+            BinOp::Sub => ArithOp::Sub,
+            BinOp::Mul => ArithOp::Mul,
+            BinOp::Div => ArithOp::Div,
+            _ => return Err(format!("XPTY0004: {op:?} is not defined on {}", x.type_name())),
+        };
+        return crate::datetime::arith(op, &x.prim(), &y.prim());
+    }
+    if matches!(x, Sub("float", _)) || matches!(y, Sub("float", _)) {
+        let r = arith(op, &x.prim(), &y.prim())?;
+        // float op (float|decimal|integer) is a float; with a double, a double.
+        let narrow = !matches!(x, Dbl(_)) && !matches!(y, Dbl(_));
+        return Ok(match r {
+            Dbl(d) if narrow => Sub("float", std::rc::Rc::new(Dbl(d as f32 as f64))),
+            o => o,
+        });
+    }
     if let (Int(a), Int(b)) = (x, y) {
         let r = match op {
             BinOp::Add => a.checked_add(*b),
@@ -707,7 +738,16 @@ pub fn arith(op: BinOp, x: &Atomic, y: &Atomic) -> R<Atomic> {
             _ => unreachable!(),
         });
     }
-    let (a, b) = (to_dec(x).unwrap(), to_dec(y).unwrap());
+    if matches!(x, Sub(..)) || matches!(y, Sub(..)) {
+        return arith(op, &x.prim(), &y.prim());
+    }
+    let (Some(a), Some(b)) = (to_dec(x), to_dec(y)) else {
+        return Err(format!(
+            "XPTY0004: arithmetic on {} and {}",
+            x.type_name(),
+            y.type_name()
+        ));
+    };
     let fallback = || arith(op, &Dbl(x.to_f64()), &Dbl(y.to_f64()));
     match op {
         BinOp::Add => a.0.checked_add(b.0).map(|v| Dec(Decimal(v))),
@@ -773,6 +813,29 @@ fn general_cmp(op: BinOp, p: &Atomic, q: &Atomic) -> R<bool> {
 
 /// Compares two atomic values of comparable types; None for NaN.
 pub fn compare(p: &Atomic, q: &Atomic) -> R<Option<Ordering>> {
+    let binary = |a: &Atomic| match a {
+        Atomic::Sub(t @ ("hexBinary" | "base64Binary"), _) => Some(*t),
+        _ => None,
+    };
+    if let (Some(a), Some(b)) = (binary(p), binary(q)) {
+        if a == b {
+            let eq = p.to_string() == q.to_string();
+            return Ok(Some(if eq { Ordering::Equal } else { Ordering::Less }));
+        }
+    }
+    if binary(p).is_some() || binary(q).is_some() {
+        return Err(format!("XPTY0004: cannot compare {} with {}", p.type_name(), q.type_name()));
+    }
+    if matches!(p, Atomic::Sub(..)) || matches!(q, Atomic::Sub(..)) {
+        return compare(&p.prim(), &q.prim());
+    }
+    if let Some(o) = crate::datetime::compare(p, q) {
+        return Ok(o);
+    }
+    if let (Atomic::QName(a), Atomic::QName(b)) = (p, q) {
+        let same = a.0 == b.0 && a.2 == b.2;
+        return Ok(Some(if same { Ordering::Equal } else { Ordering::Less }));
+    }
     if p.is_numeric() && q.is_numeric() {
         return Ok(cmp_numeric(p, q));
     }
@@ -807,6 +870,33 @@ fn holds(op: BinOp, o: Option<Ordering>) -> bool {
 
 /// Casts an atomic value to the named built-in type (local name).
 pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
+    if t == "QName" {
+        return match a {
+            Atomic::QName(_) => Ok(a.clone()),
+            _ => Err(format!("XPTY0004: cannot cast {} to xs:QName", a.type_name())),
+        };
+    }
+    if let Atomic::Sub("hexBinary" | "base64Binary", _) = a {
+        if !matches!(t, "string" | "untypedAtomic" | "hexBinary" | "base64Binary") {
+            return Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name()));
+        }
+        if !matches!(t, "string" | "untypedAtomic") {
+            return crate::types::cast(a, t).unwrap_or_else(|| {
+                Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name()))
+            });
+        }
+    }
+    if let Atomic::Sub(..) = a {
+        if !matches!(t, "string" | "untypedAtomic") {
+            return cast(&a.prim(), t);
+        }
+    }
+    if matches!(a, Atomic::Time(_) | Atomic::Dur(_) | Atomic::QName(_))
+        && !matches!(t, "string" | "untypedAtomic")
+    {
+        return crate::types::cast(a, t)
+            .unwrap_or_else(|| Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name())));
+    }
     let s = a.to_string();
     let bad = || format!("cannot cast '{s}' to xs:{t}");
     Ok(match t {
@@ -821,7 +911,7 @@ pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
                 _ => return Err(bad()),
             },
         },
-        "integer" | "int" | "long" | "short" | "nonNegativeInteger" | "positiveInteger" => {
+        "integer" => {
             match a {
                 Atomic::Int(i) => Atomic::Int(*i),
                 Atomic::Dec(d) => Atomic::Int((d.0 / crate::value::DEC_SCALE) as i64),
@@ -834,7 +924,7 @@ pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
             Atomic::Bool(b) => Atomic::Int(*b as i64),
             _ => Atomic::Dec(to_dec(a).ok_or_else(bad)?),
         },
-        "double" | "float" => match a {
+        "double" => match a {
             Atomic::Str(_) | Atomic::Untyped(_) => {
                 let d = parse_double(&s);
                 if d.is_nan() && s.trim() != "NaN" {
@@ -844,6 +934,9 @@ pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
             }
             _ => Atomic::Dbl(a.to_f64()),
         },
-        _ => return Err(format!("xs:{t} is not supported yet")),
+        _ => {
+            return crate::types::cast(a, t)
+                .unwrap_or_else(|| Err(format!("XPST0051: xs:{t} is not a known atomic type")));
+        }
     })
 }

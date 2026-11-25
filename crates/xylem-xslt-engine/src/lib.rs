@@ -15,6 +15,8 @@
 
 pub mod api;
 mod compile;
+mod datetime;
+mod types;
 mod eval;
 mod exec;
 mod funcs;
@@ -48,6 +50,10 @@ pub struct Output {
     /// The principal result written as the stylesheet's `xsl:output` asks,
     /// the way the host's `--serialize` step writes it.
     pub serialized: String,
+    /// Secondary results from `xsl:result-document`: the `href` as the
+    /// stylesheet gave it (relative to the principal output) and the
+    /// result written the way `text` is.
+    pub results: Vec<(String, String)>,
     /// `xsl:message` output, in order.
     pub messages: Vec<String>,
     /// Every template and function that ran, when timing was asked for.
@@ -107,6 +113,7 @@ pub fn transform_bytes(
     Ok(Output {
         text: value::with_compat(compat, || serialize::host_style(&result)),
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
+        results: secondary(&engine, compat),
         messages: engine.messages.borrow().clone(),
         timing,
         total_ms: if time { total_ms } else { 0.0 },
@@ -168,13 +175,61 @@ pub fn transform_from(
     Ok(Output {
         text: value::with_compat(compat, || serialize::host_style(&result)),
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
+        results: secondary(&engine, compat),
         messages: engine.messages.borrow().clone(),
         timing: Vec::new(),
         total_ms: 0.0,
     })
 }
 
+/// The engine's secondary results, written the host's way.
+fn secondary(engine: &exec::Engine, compat: bool) -> Vec<(String, String)> {
+    engine
+        .results
+        .borrow()
+        .iter()
+        .map(|(h, t)| {
+            (
+                h.clone(),
+                value::with_compat(compat, || serialize::host_style(t)),
+            )
+        })
+        .collect()
+}
+
 impl Output {
+    /// Writes the `xsl:result-document` results next to `principal`, each
+    /// at its href relative to the principal output's folder. Hrefs must
+    /// stay below that folder, and need file access (`files`).
+    pub fn write_secondary(&self, principal: &std::path::Path, files: bool) -> Result<(), String> {
+        use std::path::{Component, Path};
+        if self.results.is_empty() {
+            return Ok(());
+        }
+        if !files {
+            return Err("secondary results need file access".into());
+        }
+        let dir = principal.parent().unwrap_or(Path::new("."));
+        for (href, text) in &self.results {
+            let rel = Path::new(href.strip_prefix("file:").unwrap_or(href));
+            if !rel
+                .components()
+                .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+            {
+                return Err(format!(
+                    "result-document href '{href}' leaves the output folder"
+                ));
+            }
+            let p = dir.join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("{}: {e}", parent.display()))?;
+            }
+            std::fs::write(&p, text).map_err(|e| format!("{}: {e}", p.display()))?;
+        }
+        Ok(())
+    }
+
     /// The result as the host writes it to a file: UTF-8 with a byte order
     /// mark.
     pub fn host_bytes(&self) -> Vec<u8> {

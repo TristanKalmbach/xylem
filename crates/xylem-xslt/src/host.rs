@@ -358,9 +358,12 @@ fn run_builtin(
                 } else {
                     o.host_bytes()
                 };
-                match std::fs::write(output, bytes) {
+                match std::fs::write(output, bytes)
+                    .map_err(|e| format!("{}: {e}", output.display()))
+                    .and_then(|()| o.write_secondary(output, true))
+                {
                     Ok(()) => (true, None),
-                    Err(e) => (false, Some(format!("{}: {e}", output.display()))),
+                    Err(e) => (false, Some(e)),
                 }
             }
             Err(e) => (false, Some(e)),
