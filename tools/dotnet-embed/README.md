@@ -194,9 +194,21 @@ stylesheets.
 
 ¹ The reference here is `XslCompiledTransform`, not Saxon.
 
-Saxon's times vary between runs more than the engine's. On the publishing
-stylesheets the engine compiles about 50× and runs about 25× faster; the
-FO-to-HTML step runs about 1.5× slower than .NET's own XSLT 1.0 processor.
+Saxon's times vary between runs more than the engine's, and one input is
+not typical. Over all 43 publications with saved production output (four
+stylesheets, median of three runs each), the transforms take 533 ms in total
+on the engine against 776 ms on Saxon: about 1.5× faster. Compiling is about
+50× faster (20–25 ms against about a second), which matters to a service
+that compiles a stylesheet per publication. The FO-to-HTML step runs about
+1.5× slower than .NET's own XSLT 1.0 processor.
+
+**What this means for publishing time:** Saxon takes at most about 0.3 s of
+a publication here. Replacing it does not make publishing noticeably faster;
+where a publication is slow, the time is spent elsewhere.
+
+**Threads, real publication.** One compiled publication stylesheet on the
+largest input, 8 threads × 2 rounds on a shared handle: 16 runs, all
+identical, 38 ms in all against 17 ms for a single run.
 
 ## Known differences
 
