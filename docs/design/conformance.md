@@ -132,6 +132,40 @@ the reference host's rule.
 | QT3, XPath 2.0 | 15,054 | 14,632 | 97.2% |
 | XSLT 1.0 and 2.0 | 4,763 | 4,021 | 84.4% |
 
+Then `format-date` / `format-dateTime` / `format-time`, `xsl:namespace`,
+`lang` with a node argument, single-item argument checks (`XPTY0004`),
+compile-time focus checks in function bodies (`XPTY0020`, `XPDY0002`) and
+culture-ordered `xsl:sort` (2026-11-25):
+
+| Suite | Run | Passed | Rate |
+|---|---:|---:|---:|
+| QT3, XPath 2.0 | 15,054 | 14,654 | 97.3% |
+| XSLT 1.0 and 2.0 | 4,763 | 4,072 | 85.5% |
+
+## Against the reference publishing service
+
+`xylem-xslt-check differential` runs every stylesheet of a publishing
+system on real publications through the built-in engine and the reference
+host (`tools/saxon-dotnet`) and compares the results; see
+[stylesheet-check.md](../stylesheet-check.md). The behaviours of the
+reference processors found this way are spec notes 1 to 25 in
+[xslt-engine.md](xslt-engine.md).
+
+Known differences, accepted:
+
+- **XSLT 1.0 numbers with 17 significant digits.** When a double needs 17
+  digits, .NET's XSLT 1.0 processor sometimes writes a different 17-digit
+  form than the engine (`6.4990000000000005` where the engine writes
+  `6.4990000000000006`). Both strings read back as the same double; the
+  engine's is the closest decimal of that length. Reproducing .NET's choice
+  would mean reproducing its digit generation, which follows no simple
+  rule (spec note 25).
+- **Generated IDs.** The XSLT 1.0 processor's `generate-id()` values have
+  their own form, and Saxon's document numbers depend on its optimizer
+  (spec notes 1 and 22). The engine's IDs are unique and consistent within
+  a result; `differential --rename-ids` compares IDs up to a one-to-one
+  renaming.
+
 ## After XML Schema regex translation (2026-11-24)
 
 `src/xsd_regex.rs` parses XPath / XML Schema regex syntax and translates

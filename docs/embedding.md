@@ -47,9 +47,10 @@ cargo build --release -p xylem-xslt-cli      # target/release/xylem-xslt(.exe)
   compiles from the stylesheet file does. The input document gets the
   stylesheet's folder as its base URI.
 - **`generate-id()`** gives the same values as Saxon 9.7 (`d<doc>e<node>`).
-- **Not supported yet:** schema awareness, `normalize-unicode`,
-  output indentation (`indent="yes"` and the XSLT 1.0 HTML default), and
-  W3C error codes on most errors. Secondary results (`xsl:result-document`)
+- **Not supported yet:** schema awareness, `normalize-unicode`, imports
+  inside included modules, Saxon's own `xsl:output` serialization for
+  XSLT 2.0 stylesheets (serialized output follows .NET's XSLT 1.0 writer,
+  indentation included), and W3C error codes on most errors. Secondary results (`xsl:result-document`)
   are written next to the principal output by the CLI and host, and refused
   by the C API. A stylesheet that uses an unsupported instruction fails to
   compile with a message naming it; an unsupported function fails when it
