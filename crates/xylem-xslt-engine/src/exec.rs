@@ -1,7 +1,9 @@
 //! Running a compiled stylesheet: focus and variables, template rules,
 //! instructions and the result-tree builder.
 
-use crate::compile::{Avt, AvtPart, GroupBy, Instr, ModeRef, Number, Param, Sort, Stylesheet, Template};
+use crate::compile::{
+    Avt, AvtPart, GroupBy, Instr, ModeRef, Number, Param, Sort, Stylesheet, Template,
+};
 use crate::eval::R;
 use crate::tree::{self, Kind, NodeRef, QName, TNode, Tree};
 use crate::value::{Atomic, Item, Seq};
@@ -1182,7 +1184,10 @@ impl<'s> Engine<'s> {
             if a.is_numeric() && b.is_numeric() && a.to_f64().is_nan() && b.to_f64().is_nan() {
                 return true;
             }
-            matches!(crate::eval::compare(&a, &b), Ok(Some(std::cmp::Ordering::Equal)))
+            matches!(
+                crate::eval::compare(&a, &b),
+                Ok(Some(std::cmp::Ordering::Equal))
+            )
         };
         for (k, it) in items.into_iter().enumerate() {
             let mut nd = d.focus(it.clone(), k + 1, size);

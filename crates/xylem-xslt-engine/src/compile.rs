@@ -954,9 +954,9 @@ impl Compiler {
                     .into_iter()
                     .filter_map(|(a, g)| e.attr(a).map(|v| (v.to_string(), g)));
                 let (Some((v, how)), None) = (found.next(), found.next()) else {
-                    return Err(e.err(
-                        "XTSE1080: xsl:for-each-group needs exactly one grouping attribute",
-                    ));
+                    return Err(
+                        e.err("XTSE1080: xsl:for-each-group needs exactly one grouping attribute")
+                    );
                 };
                 let key = match how {
                     GroupBy::By | GroupBy::Adjacent => e.expr(&v)?,

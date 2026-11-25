@@ -685,7 +685,12 @@ pub fn arith(op: BinOp, x: &Atomic, y: &Atomic) -> R<Atomic> {
             BinOp::Sub => ArithOp::Sub,
             BinOp::Mul => ArithOp::Mul,
             BinOp::Div => ArithOp::Div,
-            _ => return Err(format!("XPTY0004: {op:?} is not defined on {}", x.type_name())),
+            _ => {
+                return Err(format!(
+                    "XPTY0004: {op:?} is not defined on {}",
+                    x.type_name()
+                ));
+            }
         };
         return crate::datetime::arith(op, &x.prim(), &y.prim());
     }
@@ -817,14 +822,18 @@ pub fn compare(p: &Atomic, q: &Atomic) -> R<Option<Ordering>> {
         Atomic::Sub(t @ ("hexBinary" | "base64Binary"), _) => Some(*t),
         _ => None,
     };
-    if let (Some(a), Some(b)) = (binary(p), binary(q)) {
-        if a == b {
-            let eq = p.to_string() == q.to_string();
-            return Ok(Some(if eq { Ordering::Equal } else { Ordering::Less }));
-        }
+    if let (Some(a), Some(b)) = (binary(p), binary(q))
+        && a == b
+    {
+        let eq = p.to_string() == q.to_string();
+        return Ok(Some(if eq { Ordering::Equal } else { Ordering::Less }));
     }
     if binary(p).is_some() || binary(q).is_some() {
-        return Err(format!("XPTY0004: cannot compare {} with {}", p.type_name(), q.type_name()));
+        return Err(format!(
+            "XPTY0004: cannot compare {} with {}",
+            p.type_name(),
+            q.type_name()
+        ));
     }
     if matches!(p, Atomic::Sub(..)) || matches!(q, Atomic::Sub(..)) {
         return compare(&p.prim(), &q.prim());
@@ -834,7 +843,11 @@ pub fn compare(p: &Atomic, q: &Atomic) -> R<Option<Ordering>> {
     }
     if let (Atomic::QName(a), Atomic::QName(b)) = (p, q) {
         let same = a.0 == b.0 && a.2 == b.2;
-        return Ok(Some(if same { Ordering::Equal } else { Ordering::Less }));
+        return Ok(Some(if same {
+            Ordering::Equal
+        } else {
+            Ordering::Less
+        }));
     }
     if p.is_numeric() && q.is_numeric() {
         return Ok(cmp_numeric(p, q));
@@ -873,7 +886,10 @@ pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
     if t == "QName" {
         return match a {
             Atomic::QName(_) => Ok(a.clone()),
-            _ => Err(format!("XPTY0004: cannot cast {} to xs:QName", a.type_name())),
+            _ => Err(format!(
+                "XPTY0004: cannot cast {} to xs:QName",
+                a.type_name()
+            )),
         };
     }
     if let Atomic::Sub("hexBinary" | "base64Binary", _) = a {
@@ -886,10 +902,10 @@ pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
             });
         }
     }
-    if let Atomic::Sub(..) = a {
-        if !matches!(t, "string" | "untypedAtomic") {
-            return cast(&a.prim(), t);
-        }
+    if let Atomic::Sub(..) = a
+        && !matches!(t, "string" | "untypedAtomic")
+    {
+        return cast(&a.prim(), t);
     }
     if matches!(a, Atomic::Time(_) | Atomic::Dur(_) | Atomic::QName(_))
         && !matches!(t, "string" | "untypedAtomic")
@@ -911,15 +927,13 @@ pub fn cast(a: &Atomic, t: &str) -> R<Atomic> {
                 _ => return Err(bad()),
             },
         },
-        "integer" => {
-            match a {
-                Atomic::Int(i) => Atomic::Int(*i),
-                Atomic::Dec(d) => Atomic::Int((d.0 / crate::value::DEC_SCALE) as i64),
-                Atomic::Dbl(d) if d.is_finite() => Atomic::Int(d.trunc() as i64),
-                Atomic::Bool(b) => Atomic::Int(*b as i64),
-                _ => Atomic::Int(s.trim().parse().map_err(|_| bad())?),
-            }
-        }
+        "integer" => match a {
+            Atomic::Int(i) => Atomic::Int(*i),
+            Atomic::Dec(d) => Atomic::Int((d.0 / crate::value::DEC_SCALE) as i64),
+            Atomic::Dbl(d) if d.is_finite() => Atomic::Int(d.trunc() as i64),
+            Atomic::Bool(b) => Atomic::Int(*b as i64),
+            _ => Atomic::Int(s.trim().parse().map_err(|_| bad())?),
+        },
         "decimal" => match a {
             Atomic::Bool(b) => Atomic::Int(*b as i64),
             _ => Atomic::Dec(to_dec(a).ok_or_else(bad)?),

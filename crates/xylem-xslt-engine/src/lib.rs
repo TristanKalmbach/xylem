@@ -16,13 +16,13 @@
 pub mod api;
 mod compile;
 mod datetime;
-mod types;
 mod eval;
 mod exec;
 mod funcs;
 mod number;
 mod serialize;
 mod tree;
+mod types;
 mod value;
 pub mod xpath;
 pub(crate) mod xsd_regex;

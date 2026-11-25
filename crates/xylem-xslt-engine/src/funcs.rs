@@ -16,7 +16,11 @@ pub fn round_half_up(x: f64) -> f64 {
     }
     // Halves round up; a negative value that rounds to zero stays -0.
     let r = (x + 0.5).floor();
-    if r == 0.0 && x.is_sign_negative() { -0.0 } else { r }
+    if r == 0.0 && x.is_sign_negative() {
+        -0.0
+    } else {
+        r
+    }
 }
 
 impl Engine<'_> {
@@ -95,9 +99,7 @@ impl Engine<'_> {
                 }
                 str_(out)
             }
-            ("current-group", 0) => {
-                Ok(d.group.as_ref().map(|g| g.0.clone()).unwrap_or_default())
-            }
+            ("current-group", 0) => Ok(d.group.as_ref().map(|g| g.0.clone()).unwrap_or_default()),
             ("current-grouping-key", 0) => Ok(d
                 .group
                 .as_ref()
@@ -402,7 +404,11 @@ impl Engine<'_> {
                     return Ok(vec![]);
                 };
                 if !a.is_numeric() && !matches!(a, Atomic::Untyped(_)) {
-                    return Err(format!("XPTY0004: {}() needs a numeric value, not {}", name.local, a.type_name()));
+                    return Err(format!(
+                        "XPTY0004: {}() needs a numeric value, not {}",
+                        name.local,
+                        a.type_name()
+                    ));
                 }
                 let a = numeric_of(a);
                 let op = &*name.local;
@@ -425,7 +431,9 @@ impl Engine<'_> {
                         "ceiling" => -(-x.0).div_euclid(S) * S,
                         _ => x.0.abs(),
                     })),
-                    Atomic::Sub("float", v) => Atomic::Sub("float", Rc::new(Atomic::Dbl(f(v.to_f64()) as f32 as f64))),
+                    Atomic::Sub("float", v) => {
+                        Atomic::Sub("float", Rc::new(Atomic::Dbl(f(v.to_f64()) as f32 as f64)))
+                    }
                     o => Atomic::Dbl(f(o.to_f64())),
                 })])
             }
@@ -455,7 +463,12 @@ impl Engine<'_> {
                 let v = crate::datetime::combine(d, t)?;
                 Ok(vec![Item::Atomic(Atomic::Time(Rc::new(v)))])
             }
-            ("adjust-dateTime-to-timezone" | "adjust-date-to-timezone" | "adjust-time-to-timezone", 1 | 2) => {
+            (
+                "adjust-dateTime-to-timezone"
+                | "adjust-date-to-timezone"
+                | "adjust-time-to-timezone",
+                1 | 2,
+            ) => {
                 let v = self.atomize(&arg(0)?);
                 let Some(Atomic::Time(t)) = v.first() else {
                     return if v.is_empty() {
@@ -468,7 +481,9 @@ impl Engine<'_> {
                     match self.atomize(&arg(1)?).first() {
                         None => None,
                         Some(Atomic::Dur(d)) => Some(crate::datetime::duration_tz(d)?),
-                        Some(_) => return Err("XPTY0004: the timezone must be a dayTimeDuration".into()),
+                        Some(_) => {
+                            return Err("XPTY0004: the timezone must be a dayTimeDuration".into());
+                        }
                     }
                 } else {
                     Some(crate::datetime::IMPLICIT_TZ)
@@ -482,9 +497,15 @@ impl Engine<'_> {
                 };
                 let (which, want) = component_fn(f).unwrap_or_default();
                 if !crate::types::instance(a, want) {
-                    return Err(format!("XPTY0004: {f}() needs an xs:{want}, got {}", a.type_name()));
+                    return Err(format!(
+                        "XPTY0004: {f}() needs an xs:{want}, got {}",
+                        a.type_name()
+                    ));
                 }
-                Ok(crate::datetime::component(a, which).map(Item::Atomic).into_iter().collect())
+                Ok(crate::datetime::component(a, which)
+                    .map(Item::Atomic)
+                    .into_iter()
+                    .collect())
             }
             ("QName", 2) => {
                 let uri = s(0)?;
@@ -534,7 +555,10 @@ impl Engine<'_> {
                     0
                 };
                 if !a.is_numeric() && !matches!(a, Atomic::Untyped(_)) {
-                    return Err(format!("XPTY0004: round-half-to-even() needs a numeric value, not {}", a.type_name()));
+                    return Err(format!(
+                        "XPTY0004: round-half-to-even() needs a numeric value, not {}",
+                        a.type_name()
+                    ));
                 }
                 let r = match numeric_of(a) {
                     Atomic::Sub("float", v) => {
@@ -577,9 +601,9 @@ impl Engine<'_> {
             ("encode-for-uri" | "iri-to-uri" | "escape-html-uri", 1) => {
                 let keep: fn(char) -> bool = match &*name.local {
                     "encode-for-uri" => |c| c.is_ascii_alphanumeric() || "-_.~".contains(c),
-                    "iri-to-uri" => |c| {
-                        c.is_ascii() && !c.is_ascii_control() && !" <>\"{}|\\^`".contains(c)
-                    },
+                    "iri-to-uri" => {
+                        |c| c.is_ascii() && !c.is_ascii_control() && !" <>\"{}|\\^`".contains(c)
+                    }
                     _ => |c| c.is_ascii() && (' '..='~').contains(&c),
                 };
                 let mut out = String::new();

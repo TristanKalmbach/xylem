@@ -217,13 +217,37 @@ impl Atomic {
 /// `xs:` names of the derived types, for [`Atomic::type_name`].
 fn sub_type_name(t: &str) -> &'static str {
     const NAMES: &[&str] = &[
-        "xs:nonPositiveInteger", "xs:negativeInteger", "xs:long", "xs:int", "xs:short",
-        "xs:byte", "xs:nonNegativeInteger", "xs:unsignedLong", "xs:unsignedInt",
-        "xs:unsignedShort", "xs:unsignedByte", "xs:positiveInteger", "xs:normalizedString",
-        "xs:token", "xs:language", "xs:NMTOKEN", "xs:Name", "xs:NCName", "xs:ID", "xs:IDREF",
-        "xs:ENTITY", "xs:anyURI", "xs:float", "xs:hexBinary", "xs:base64Binary",
+        "xs:nonPositiveInteger",
+        "xs:negativeInteger",
+        "xs:long",
+        "xs:int",
+        "xs:short",
+        "xs:byte",
+        "xs:nonNegativeInteger",
+        "xs:unsignedLong",
+        "xs:unsignedInt",
+        "xs:unsignedShort",
+        "xs:unsignedByte",
+        "xs:positiveInteger",
+        "xs:normalizedString",
+        "xs:token",
+        "xs:language",
+        "xs:NMTOKEN",
+        "xs:Name",
+        "xs:NCName",
+        "xs:ID",
+        "xs:IDREF",
+        "xs:ENTITY",
+        "xs:anyURI",
+        "xs:float",
+        "xs:hexBinary",
+        "xs:base64Binary",
     ];
-    NAMES.iter().copied().find(|n| &n[3..] == t).unwrap_or("xs:anyAtomicType")
+    NAMES
+        .iter()
+        .copied()
+        .find(|n| &n[3..] == t)
+        .unwrap_or("xs:anyAtomicType")
 }
 
 /// Canonical `xs:float` → string: like doubles, with float precision.
@@ -238,7 +262,11 @@ pub fn format_float(d: f64) -> String {
     }
     let s = format!("{f:e}");
     let (m, e) = s.split_once('e').unwrap_or((&s, "0"));
-    let m = if m.contains('.') { m.to_string() } else { format!("{m}.0") };
+    let m = if m.contains('.') {
+        m.to_string()
+    } else {
+        format!("{m}.0")
+    };
     format!("{m}E{e}")
 }
 

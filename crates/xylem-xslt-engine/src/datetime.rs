@@ -179,7 +179,10 @@ impl Cursor<'_> {
         if n < min {
             return None;
         }
-        let v = std::str::from_utf8(&self.s[st..self.i]).ok()?.parse().ok()?;
+        let v = std::str::from_utf8(&self.s[st..self.i])
+            .ok()?
+            .parse()
+            .ok()?;
         Some((v, n))
     }
     fn fixed(&mut self, n: usize) -> Option<i64> {
@@ -262,7 +265,10 @@ impl DateTime {
     /// Parses the lexical form of `kind` (whitespace already collapsed).
     pub fn parse(kind: DtKind, s: &str) -> Option<DateTime> {
         let s = s.trim_matches(crate::tree::is_xml_space);
-        let mut c = Cursor { s: s.as_bytes(), i: 0 };
+        let mut c = Cursor {
+            s: s.as_bytes(),
+            i: 0,
+        };
         let mut v = DateTime {
             kind,
             year: 1972,
@@ -395,11 +401,20 @@ impl DateTime {
     /// The value with its timezone changed to `tz` (`fn:adjust-*-to-timezone`).
     pub fn adjust(&self, tz: Option<i32>) -> DateTime {
         match (self.tz, tz) {
-            (_, None) => DateTime { tz: None, ..self.clone() },
-            (None, Some(t)) => DateTime { tz: Some(t), ..self.clone() },
+            (_, None) => DateTime {
+                tz: None,
+                ..self.clone()
+            },
+            (None, Some(t)) => DateTime {
+                tz: Some(t),
+                ..self.clone()
+            },
             (Some(old), Some(t)) => {
                 let moved = self.add_seconds(dec_secs((t - old) as i128 * 60));
-                let mut r = DateTime { tz: Some(t), ..moved };
+                let mut r = DateTime {
+                    tz: Some(t),
+                    ..moved
+                };
                 if self.kind == DtKind::Time {
                     (r.year, r.month, r.day) = (1972, 12, 31);
                 }
@@ -485,7 +500,11 @@ pub fn format_tz(tz: i32) -> String {
 
 impl Duration {
     pub fn zero(kind: DurKind) -> Duration {
-        Duration { kind, months: 0, seconds: Decimal(0) }
+        Duration {
+            kind,
+            months: 0,
+            seconds: Decimal(0),
+        }
     }
 
     /// Parses `-?PnYnMnDTnHnMnS` for `kind`; the subtypes allow only their
@@ -544,9 +563,17 @@ impl Duration {
             }
             Some(())
         };
-        take(date, &[('Y', 12, true), ('M', 1, true), ('D', SECS_PER_DAY, false)], '\0')?;
+        take(
+            date,
+            &[('Y', 12, true), ('M', 1, true), ('D', SECS_PER_DAY, false)],
+            '\0',
+        )?;
         if let Some(t) = time {
-            take(t, &[('H', 3600, false), ('M', 60, false), ('S', 1, false)], 'S')?;
+            take(
+                t,
+                &[('H', 3600, false), ('M', 60, false), ('S', 1, false)],
+                'S',
+            )?;
         }
         if !any {
             return None;
@@ -617,9 +644,20 @@ impl Duration {
 
     pub fn convert(&self, to: DurKind) -> Duration {
         match to {
-            DurKind::Duration => Duration { kind: to, ..self.clone() },
-            DurKind::YearMonth => Duration { kind: to, months: self.months, seconds: Decimal(0) },
-            DurKind::DayTime => Duration { kind: to, months: 0, seconds: self.seconds },
+            DurKind::Duration => Duration {
+                kind: to,
+                ..self.clone()
+            },
+            DurKind::YearMonth => Duration {
+                kind: to,
+                months: self.months,
+                seconds: Decimal(0),
+            },
+            DurKind::DayTime => Duration {
+                kind: to,
+                months: 0,
+                seconds: self.seconds,
+            },
         }
     }
 }
@@ -662,9 +700,10 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
 /// "not equal, unordered" (durations of the general type).
 pub fn compare(p: &Atomic, q: &Atomic) -> Option<Option<Ordering>> {
     match (p, q) {
-        (Atomic::Time(a), Atomic::Time(b)) if a.kind == b.kind => {
-            Some(a.timeline(IMPLICIT_TZ).partial_cmp(&b.timeline(IMPLICIT_TZ)))
-        }
+        (Atomic::Time(a), Atomic::Time(b)) if a.kind == b.kind => Some(
+            a.timeline(IMPLICIT_TZ)
+                .partial_cmp(&b.timeline(IMPLICIT_TZ)),
+        ),
         (Atomic::Dur(a), Atomic::Dur(b)) => {
             if a.months == b.months && a.seconds == b.seconds {
                 return Some(Some(Ordering::Equal));
@@ -693,7 +732,11 @@ pub enum ArithOp {
 }
 
 fn dur(kind: DurKind, months: i64, seconds: Decimal) -> Atomic {
-    Atomic::Dur(Rc::new(Duration { kind, months, seconds }))
+    Atomic::Dur(Rc::new(Duration {
+        kind,
+        months,
+        seconds,
+    }))
 }
 
 /// Arithmetic with date/time and duration operands.
@@ -720,9 +763,11 @@ pub fn arith(op: ArithOp, x: &Atomic, y: &Atomic) -> Result<Atomic, String> {
             let s = if matches!(op, ArithOp::Add) { 1 } else { -1 };
             match a.kind {
                 DurKind::YearMonth => Ok(dur(a.kind, a.months + s * b.months, Decimal(0))),
-                DurKind::DayTime => {
-                    Ok(dur(a.kind, 0, Decimal(a.seconds.0 + s as i128 * b.seconds.0)))
-                }
+                DurKind::DayTime => Ok(dur(
+                    a.kind,
+                    0,
+                    Decimal(a.seconds.0 + s as i128 * b.seconds.0),
+                )),
                 DurKind::Duration => Err(bad()),
             }
         }
@@ -749,11 +794,13 @@ pub fn arith(op: ArithOp, x: &Atomic, y: &Atomic) -> Result<Atomic, String> {
 }
 
 fn add_to(t: &DateTime, d: &Duration, sign: i64) -> Result<Atomic, String> {
-    let ok = match (t.kind, d.kind) {
-        (DtKind::DateTime | DtKind::Date, DurKind::YearMonth | DurKind::DayTime) => true,
-        (DtKind::Time, DurKind::DayTime) => true,
-        _ => false,
-    };
+    let ok = matches!(
+        (t.kind, d.kind),
+        (
+            DtKind::DateTime | DtKind::Date,
+            DurKind::YearMonth | DurKind::DayTime
+        ) | (DtKind::Time, DurKind::DayTime)
+    );
     if !ok {
         return Err(format!(
             "XPTY0004: cannot add xs:{} to xs:{}",
@@ -924,7 +971,10 @@ mod tests {
         ] {
             assert_eq!(dt(k, s).to_canonical(), s);
         }
-        assert_eq!(dt(DtKind::DateTime, "1999-12-31T24:00:00").to_canonical(), "2000-01-01T00:00:00");
+        assert_eq!(
+            dt(DtKind::DateTime, "1999-12-31T24:00:00").to_canonical(),
+            "2000-01-01T00:00:00"
+        );
         assert!(DateTime::parse(DtKind::Date, "2001-02-29").is_none());
         assert!(DateTime::parse(DtKind::Date, "0000-01-01").is_none());
     }
@@ -933,7 +983,12 @@ mod tests {
     fn durations() {
         let d = Duration::parse(DurKind::Duration, "P1Y2M3DT10H30M0.5S").unwrap();
         assert_eq!(d.to_canonical(), "P1Y2M3DT10H30M0.5S");
-        assert_eq!(Duration::parse(DurKind::DayTime, "PT36H").unwrap().to_canonical(), "P1DT12H");
+        assert_eq!(
+            Duration::parse(DurKind::DayTime, "PT36H")
+                .unwrap()
+                .to_canonical(),
+            "P1DT12H"
+        );
         assert_eq!(Duration::zero(DurKind::YearMonth).to_canonical(), "P0M");
         assert_eq!(Duration::zero(DurKind::DayTime).to_canonical(), "PT0S");
         assert!(Duration::parse(DurKind::Duration, "P").is_none());
@@ -949,6 +1004,9 @@ mod tests {
         assert_eq!(r.to_string(), "2000-02-29");
         let a = Atomic::Time(Rc::new(dt(DtKind::DateTime, "2000-10-30T06:12:00")));
         let b = Atomic::Time(Rc::new(dt(DtKind::DateTime, "1999-11-28T09:00:00Z")));
-        assert_eq!(arith(ArithOp::Sub, &a, &b).unwrap().to_string(), "P336DT21H12M");
+        assert_eq!(
+            arith(ArithOp::Sub, &a, &b).unwrap().to_string(),
+            "P336DT21H12M"
+        );
     }
 }

@@ -566,10 +566,10 @@ impl Parser<'_> {
         if self.is_kw("castable") && matches!(self.peek_at(1), Tok::Name(n) if n == "as") {
             self.i += 2;
             let (t, opt) = self.single_type()?;
-            if t == "QName" {
-                if let Expr::Literal(Atomic::Str(s)) = &l {
-                    return Ok(Expr::Literal(Atomic::Bool(self.qname_value(s).is_ok())));
-                }
+            if t == "QName"
+                && let Expr::Literal(Atomic::Str(s)) = &l
+            {
+                return Ok(Expr::Literal(Atomic::Bool(self.qname_value(s).is_ok())));
             }
             return Ok(Expr::Castable(Box::new(l), t, opt));
         }
@@ -580,10 +580,10 @@ impl Parser<'_> {
         if self.is_kw("cast") && matches!(self.peek_at(1), Tok::Name(n) if n == "as") {
             self.i += 2;
             let (t, opt) = self.single_type()?;
-            if t == "QName" {
-                if let Expr::Literal(Atomic::Str(s)) = &l {
-                    return Ok(Expr::Literal(self.qname_value(s)?));
-                }
+            if t == "QName"
+                && let Expr::Literal(Atomic::Str(s)) = &l
+            {
+                return Ok(Expr::Literal(self.qname_value(s)?));
             }
             return Ok(Expr::Cast(Box::new(l), t, opt));
         }
@@ -595,7 +595,10 @@ impl Parser<'_> {
         };
         let q = self.qname(&n, false)?;
         if &*q.uri == XS_NS && matches!(&*q.local, "NOTATION" | "anyAtomicType") {
-            return Err(format!("XPST0080: cannot cast to the abstract type xs:{}", q.local));
+            return Err(format!(
+                "XPST0080: cannot cast to the abstract type xs:{}",
+                q.local
+            ));
         }
         Ok((q.local.to_string(), self.sym("?")))
     }
@@ -618,7 +621,11 @@ impl Parser<'_> {
             None if p.is_empty() => String::new(),
             None => return Err(format!("FONS0004: undeclared prefix '{p}'")),
         };
-        Ok(Atomic::QName(std::rc::Rc::new((uri.into(), p.into(), l.into()))))
+        Ok(Atomic::QName(std::rc::Rc::new((
+            uri.into(),
+            p.into(),
+            l.into(),
+        ))))
     }
     pub fn seq_type(&mut self) -> Result<SeqType, String> {
         let item = match self.next() {
@@ -918,7 +925,8 @@ impl Parser<'_> {
                     if matches!(&*q.local, "NOTATION" | "anyAtomicType") {
                         return Err(format!("XPST0017: no constructor function xs:{}", q.local));
                     }
-                    if let ("QName", [Expr::Literal(Atomic::Str(s))]) = (&*q.local, args.as_slice()) {
+                    if let ("QName", [Expr::Literal(Atomic::Str(s))]) = (&*q.local, args.as_slice())
+                    {
                         return Ok(Expr::Literal(self.qname_value(s)?));
                     }
                 }

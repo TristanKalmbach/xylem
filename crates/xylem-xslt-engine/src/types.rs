@@ -80,10 +80,31 @@ const INT_RANGES: &[(&str, i128, i128)] = &[
 /// The interned name of a derived type (so values can hold `&'static str`).
 fn intern(t: &str) -> Option<&'static str> {
     const NAMES: &[&str] = &[
-        "nonPositiveInteger", "negativeInteger", "long", "int", "short", "byte",
-        "nonNegativeInteger", "unsignedLong", "unsignedInt", "unsignedShort", "unsignedByte",
-        "positiveInteger", "normalizedString", "token", "language", "NMTOKEN", "Name",
-        "NCName", "ID", "IDREF", "ENTITY", "anyURI", "float", "hexBinary", "base64Binary",
+        "nonPositiveInteger",
+        "negativeInteger",
+        "long",
+        "int",
+        "short",
+        "byte",
+        "nonNegativeInteger",
+        "unsignedLong",
+        "unsignedInt",
+        "unsignedShort",
+        "unsignedByte",
+        "positiveInteger",
+        "normalizedString",
+        "token",
+        "language",
+        "NMTOKEN",
+        "Name",
+        "NCName",
+        "ID",
+        "IDREF",
+        "ENTITY",
+        "anyURI",
+        "float",
+        "hexBinary",
+        "base64Binary",
     ];
     NAMES.iter().copied().find(|n| *n == t)
 }
@@ -107,18 +128,32 @@ pub fn is_ncname(s: &str) -> bool {
 fn is_uri(s: &str) -> bool {
     let b = s.as_bytes();
     let escapes = b.iter().enumerate().all(|(i, c)| {
-        *c != b'%' || (b.len() > i + 2 && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit())
+        *c != b'%'
+            || (b.len() > i + 2 && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit())
     });
     escapes && !s.starts_with(':')
 }
 
 /// Checks and normalises the lexical form of a derived string type.
 fn string_value(t: &str, s: &str) -> Option<String> {
-    let replaced: String = s.chars().map(|c| if matches!(c, '\t' | '\n' | '\r') { ' ' } else { c }).collect();
+    let replaced: String = s
+        .chars()
+        .map(|c| {
+            if matches!(c, '\t' | '\n' | '\r') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
     if t == "normalizedString" {
         return Some(replaced);
     }
-    let collapsed = replaced.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+    let collapsed = replaced
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
     let ok = match t {
         "token" => true,
         "language" => {
@@ -126,7 +161,9 @@ fn string_value(t: &str, s: &str) -> Option<String> {
             let first = parts.next().unwrap_or("");
             (1..=8).contains(&first.len())
                 && first.chars().all(|c| c.is_ascii_alphabetic())
-                && parts.all(|p| (1..=8).contains(&p.len()) && p.chars().all(|c| c.is_ascii_alphanumeric()))
+                && parts.all(|p| {
+                    (1..=8).contains(&p.len()) && p.chars().all(|c| c.is_ascii_alphanumeric())
+                })
         }
         "NMTOKEN" => !collapsed.is_empty() && collapsed.chars().all(is_name_char),
         "Name" => {
@@ -161,7 +198,12 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
                 Atomic::Dec(d) => d.0 / crate::value::DEC_SCALE,
                 Atomic::Dbl(d) if d.is_finite() => d.trunc() as i128,
                 Atomic::Bool(b) => *b as i128,
-                _ if lexical => s.trim().strip_prefix('+').unwrap_or(s.trim()).parse().map_err(|_| bad())?,
+                _ if lexical => s
+                    .trim()
+                    .strip_prefix('+')
+                    .unwrap_or(s.trim())
+                    .parse()
+                    .map_err(|_| bad())?,
                 _ => return Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name())),
             };
             if v < lo || v > hi {
@@ -188,7 +230,12 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
                     }
                     Atomic::Bool(b) => *b as i64 as f64,
                     o if o.is_numeric() => o.to_f64(),
-                    _ => return Err(format!("XPTY0004: cannot cast {} to xs:float", a.type_name())),
+                    _ => {
+                        return Err(format!(
+                            "XPTY0004: cannot cast {} to xs:float",
+                            a.type_name()
+                        ));
+                    }
                 };
                 Ok(Atomic::Sub(name, Rc::new(Atomic::Dbl(d as f32 as f64))))
             }
@@ -196,15 +243,24 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
                 let bytes = match a {
                     Atomic::Sub("hexBinary", v) => hex_decode(&v.to_string()),
                     Atomic::Sub("base64Binary", v) => base64_decode(&v.to_string()),
-                    _ if lexical && t == "hexBinary" => hex_decode(s.trim_matches(crate::tree::is_xml_space)),
+                    _ if lexical && t == "hexBinary" => {
+                        hex_decode(s.trim_matches(crate::tree::is_xml_space))
+                    }
                     _ if lexical => base64_decode(&s),
                     _ => return Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name())),
                 }
                 .ok_or_else(bad)?;
-                let text = if t == "hexBinary" { hex_encode(&bytes) } else { base64_encode(&bytes) };
+                let text = if t == "hexBinary" {
+                    hex_encode(&bytes)
+                } else {
+                    base64_encode(&bytes)
+                };
                 Ok(Atomic::Sub(name, Rc::new(Atomic::str(text))))
             }
-            "anyURI" => Err(format!("XPTY0004: cannot cast {} to xs:anyURI", a.type_name())),
+            "anyURI" => Err(format!(
+                "XPTY0004: cannot cast {} to xs:anyURI",
+                a.type_name()
+            )),
             _ if matches!(a, Atomic::Sub("hexBinary" | "base64Binary", _)) => {
                 Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name()))
             }
@@ -216,11 +272,10 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
     })())
 }
 
-
 /// Decodes the lexical form of `xs:hexBinary`.
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     let b = s.as_bytes();
-    if b.len() % 2 != 0 {
+    if !b.len().is_multiple_of(2) {
         return None;
     }
     b.chunks(2)
@@ -239,7 +294,7 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 /// characters, padding checked as XML Schema requires.
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let chars: Vec<u8> = s.bytes().filter(|c| !c.is_ascii_whitespace()).collect();
-    if chars.len() % 4 != 0 {
+    if !chars.len().is_multiple_of(4) {
         return None;
     }
     let pad = chars.iter().rev().take_while(|c| **c == b'=').count();
@@ -273,7 +328,9 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
 fn base64_encode(b: &[u8]) -> String {
     let mut out = String::new();
     for c in b.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
         for i in 0..4 {
             if i <= c.len() {
                 out.push(B64[(n >> (18 - 6 * i)) as usize & 63] as char);
