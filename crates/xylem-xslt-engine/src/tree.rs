@@ -537,6 +537,26 @@ fn copy(
             .map(|(_, u)| u.clone())
             .filter(|u| !u.is_empty() || prefix.is_empty())
     };
+    // Names repeat across a document: build each (lexical name, namespace)
+    // pair's QName once and share its strings.
+    let mut names: HashMap<String, Vec<QName>> = HashMap::new();
+    let mut intern = |lexical: &str, uri: &Arc<str>, prefix: &str, local: &str| -> QName {
+        if let Some(v) = names.get(lexical)
+            && let Some(q) = v.iter().find(|q| q.uri == *uri)
+        {
+            return q.clone();
+        }
+        let q = QName {
+            uri: uri.clone(),
+            local: local.into(),
+            prefix: prefix.into(),
+        };
+        names
+            .entry(lexical.to_string())
+            .or_default()
+            .push(q.clone());
+        q
+    };
     let mut stack = vec![CopyStep::Node {
         id,
         parent,
@@ -577,13 +597,13 @@ fn copy(
                 if !prefix.is_empty() && uri.is_empty() {
                     return Err(format!("undeclared namespace prefix '{prefix}'"));
                 }
-                let name = QName::new(&uri, local, prefix);
+                let name = intern(&el.name, &uri, prefix, local);
                 for a in &el.attrs {
                     if a.name == "xmlns" || a.name.starts_with("xmlns:") {
                         continue;
                     }
                     let (p, l) = split(&a.name);
-                    let u = if p.is_empty() {
+                    let u: Arc<str> = if p.is_empty() {
                         "".into()
                     } else {
                         resolve(&scope, p)
@@ -593,7 +613,7 @@ fn copy(
                         preserve = a.value == "preserve";
                     }
                     let mut an = TNode::new(Kind::Attribute, Some(me));
-                    an.name = Some(QName::new(&u, l, p));
+                    an.name = Some(intern(&a.name, &u, p, l));
                     an.value = strip.ents.expand_attribute(&a.value, 0)?;
                     let ai = t.push(an);
                     t.nodes[me as usize].attrs.push(ai);
