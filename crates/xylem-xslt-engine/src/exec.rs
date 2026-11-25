@@ -781,6 +781,47 @@ impl<'s> Engine<'s> {
         self.tree(n.tree).base.clone()
     }
 
+    /// `document-uri()`: the URI of a document read from a file (the
+    /// source, or one `document()` loaded); none for temporary trees.
+    pub fn document_uri(&self, n: NodeRef) -> Option<String> {
+        let t = self.tree(n.tree);
+        (n.idx == 0 && t.node(0).kind == Kind::Document && !t.base.is_empty())
+            .then(|| crate::uri::from_path(std::path::Path::new(&t.base)))
+    }
+
+    /// `base-uri()`: the tree's URI (for a temporary tree, the
+    /// stylesheet's), with every `xml:base` from the root down to `n`
+    /// resolved against it. Text, comments and processing instructions take
+    /// their parent's.
+    pub fn base_uri(&self, n: NodeRef) -> R<String> {
+        let t = self.tree(n.tree);
+        let mut base = if t.base.is_empty() {
+            crate::uri::from_path(&self.ss.path)
+        } else {
+            crate::uri::from_path(std::path::Path::new(&t.base))
+        };
+        let mut chain = Vec::new();
+        let mut cur = Some(n.idx);
+        while let Some(i) = cur {
+            let node = t.node(i);
+            if node.kind == Kind::Element {
+                let xml_base = node.attrs.iter().map(|&a| t.node(a)).find(|a| {
+                    a.name
+                        .as_ref()
+                        .is_some_and(|q| &*q.uri == tree::XML_NS && &*q.local == "base")
+                });
+                if let Some(a) = xml_base {
+                    chain.push(a.value.clone());
+                }
+            }
+            cur = node.parent;
+        }
+        for b in chain.iter().rev() {
+            base = crate::uri::resolve(b.trim(), &base)?;
+        }
+        Ok(base)
+    }
+
     // ---- instructions ---------------------------------------------------
 
     pub fn body(&self, body: &[Instr], d: &Dyn, out: &mut Out) -> R<()> {

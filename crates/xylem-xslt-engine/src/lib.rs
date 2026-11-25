@@ -23,6 +23,7 @@ mod number;
 mod serialize;
 mod tree;
 mod types;
+mod uri;
 mod value;
 pub mod xpath;
 pub(crate) mod xsd_regex;

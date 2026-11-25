@@ -4,6 +4,7 @@
 
 use crate::tree::QName;
 use crate::value::{Atomic, Decimal};
+use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Axis {
@@ -303,6 +304,11 @@ fn lex(s: &str) -> Result<Vec<Tok>, String> {
 
 /// Resolves a namespace prefix ("" for the default element namespace).
 pub type Resolver<'a> = &'a dyn Fn(&str) -> Option<String>;
+
+/// The key a [`Resolver`] answers with the static base URI of the
+/// expression (its stylesheet module), when it knows one. No namespace
+/// prefix can contain a NUL, so it never collides with one.
+pub const STATIC_BASE_KEY: &str = "\0static-base-uri";
 
 struct Parser<'a> {
     t: Vec<Tok>,
@@ -928,6 +934,20 @@ impl Parser<'_> {
                     if let ("QName", [Expr::Literal(Atomic::Str(s))]) = (&*q.local, args.as_slice())
                     {
                         return Ok(Expr::Literal(self.qname_value(s)?));
+                    }
+                }
+                // The static base URI is known when parsing: bind it here
+                // (`static-base-uri()`, and the default base of
+                // `resolve-uri($relative)`).
+                if &*q.uri == FN_NS
+                    && let Some(base) = (self.ns)(STATIC_BASE_KEY)
+                {
+                    let base =
+                        Expr::Literal(Atomic::Sub("anyURI", Rc::new(Atomic::str(base.as_str()))));
+                    match (&*q.local, args.len()) {
+                        ("static-base-uri", 0) => return Ok(base),
+                        ("resolve-uri", 1) => args.push(base),
+                        _ => {}
                     }
                 }
                 Ok(Expr::Call(q, args))

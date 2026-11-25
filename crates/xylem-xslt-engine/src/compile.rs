@@ -249,7 +249,10 @@ pub struct Stylesheet {
     pub strip: Vec<(Option<String>, Option<String>, bool)>,
     /// The `xsl:output` declarations merged (later ones win).
     pub output: OutputSpec,
+    /// The folder of the top module; the source document's base URI.
     pub base: PathBuf,
+    /// The top module's file.
+    pub path: PathBuf,
     /// Modules read besides the top one (imports and includes). The
     /// reference processor gives each a document number before the
     /// source document's (spec note 1).
@@ -290,6 +293,7 @@ impl Stylesheet {
             loading: Vec::new(),
         };
         c.ss.base = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        c.ss.path = path.to_path_buf();
         c.module(path, None)?;
         let ss = c.ss;
         Ok(ss)
@@ -397,9 +401,13 @@ impl<'a> El<'a> {
     fn resolver(&self) -> impl Fn(&str) -> Option<String> + 'a {
         let (t, i) = (self.t, self.i);
         let xdn = self.inherited("xpath-default-namespace");
+        let file = self.file;
         move |p: &str| {
             if p.is_empty() {
                 return xdn.clone().filter(|s| !s.is_empty());
+            }
+            if p == xpath::STATIC_BASE_KEY {
+                return Some(crate::uri::from_path(std::path::Path::new(file)));
             }
             t.resolve(i, p).map(|u| u.to_string())
         }

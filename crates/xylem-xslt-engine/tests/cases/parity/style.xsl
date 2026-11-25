@@ -64,6 +64,18 @@
         <y/>
         <z>   <!-- only whitespace -->   </z>
       </comments>
+      <!-- URIs: the source's base is the stylesheet's folder; resolved
+           file URIs drop the empty authority. -->
+      <uris>
+        <sbu><xsl:value-of select="ends-with(static-base-uri(), '/cases/parity/style.xsl') and starts-with(static-base-uri(), 'file:///')"/></sbu>
+        <bu><xsl:value-of select="ends-with(base-uri(), '/cases/parity')"/></bu>
+        <du><xsl:value-of select="document-uri(/) = base-uri(/)"/></du>
+        <tmp><xsl:variable name="v"><e/></xsl:variable><xsl:value-of select="base-uri($v/e) = static-base-uri(), count(document-uri($v))"/></tmp>
+        <r1><xsl:value-of select="substring-after(resolve-uri('../a b.png', static-base-uri()), '/cases/')"/></r1>
+        <r2><xsl:value-of select="starts-with(resolve-uri('x.png'), 'file:/') and not(starts-with(resolve-uri('x.png'), 'file://'))"/></r2>
+        <r3><xsl:value-of select="resolve-uri('../../c?q=1#f', 'http://e.com/a/b/c'), resolve-uri('', 'http://e.com/a'), resolve-uri('/x', 'http://e.com/a/b')"/></r3>
+        <r4><xsl:value-of select="count(resolve-uri(())), base-uri() instance of xs:anyURI"/></r4>
+      </uris>
       <entities>
         <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
         <avt v="{concat('&U;', '&sep;')}"/>

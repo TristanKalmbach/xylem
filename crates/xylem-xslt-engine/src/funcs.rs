@@ -744,6 +744,52 @@ impl Engine<'_> {
                 }
                 Ok(out)
             }
+            ("base-uri", 0 | 1) => {
+                let Some(x) = node_arg(0)? else {
+                    return Ok(vec![]);
+                };
+                let u = self.base_uri(x)?;
+                Ok(vec![Item::Atomic(Atomic::Sub(
+                    "anyURI",
+                    Rc::new(Atomic::str(u)),
+                ))])
+            }
+            ("document-uri", 1) => {
+                let Some(x) = node_arg(0)? else {
+                    return Ok(vec![]);
+                };
+                Ok(self
+                    .document_uri(x)
+                    .map(|u| Item::Atomic(Atomic::Sub("anyURI", Rc::new(Atomic::str(u)))))
+                    .into_iter()
+                    .collect())
+            }
+            ("static-base-uri", 0) => {
+                // Bound when parsing inside a stylesheet; standalone XPath
+                // falls back to the top module.
+                let u = crate::uri::from_path(&self.ss.path);
+                Ok(vec![Item::Atomic(Atomic::Sub(
+                    "anyURI",
+                    Rc::new(Atomic::str(u)),
+                ))])
+            }
+            ("resolve-uri", 1 | 2) => {
+                let rel = arg(0)?;
+                let Some(rel) = rel.first() else {
+                    return Ok(vec![]);
+                };
+                let rel = self.string_of(rel);
+                let base = if n == 2 {
+                    s(1)?
+                } else {
+                    crate::uri::from_path(&self.ss.path)
+                };
+                let u = crate::uri::resolve(rel.trim(), base.trim())?;
+                Ok(vec![Item::Atomic(Atomic::Sub(
+                    "anyURI",
+                    Rc::new(Atomic::str(u)),
+                ))])
+            }
             ("deep-equal", 2 | 3) => {
                 let (x, y) = (arg(0)?, arg(1)?);
                 bool_(self.deep_equal(&x, &y))

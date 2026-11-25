@@ -2,4 +2,4 @@
         
         x
         
-        <y /><z /></comments><entities><attr>xaybzc</attr><avt v="ABC--" /><content>abc--<g>hello ABC</g></content></entities></parity>
+        <y /><z /></comments><uris><sbu>true</sbu><bu>true</bu><du>true</du><tmp>true 0</tmp><r1>a b.png</r1><r2>true</r2><r3>http://e.com/c?q=1#f http://e.com/a http://e.com/x</r3><r4>0 true</r4></uris><entities><attr>xaybzc</attr><avt v="ABC--" /><content>abc--<g>hello ABC</g></content></entities></parity>
