@@ -76,6 +76,9 @@
         <r3><xsl:value-of select="resolve-uri('../../c?q=1#f', 'http://e.com/a/b/c'), resolve-uri('', 'http://e.com/a'), resolve-uri('/x', 'http://e.com/a/b')"/></r3>
         <r4><xsl:value-of select="count(resolve-uri(())), base-uri() instance of xs:anyURI"/></r4>
       </uris>
+      <!-- A CR is written as it is; CR LF in an attribute is one space. -->
+      <lines a="s1
+s2"><xsl:text>t1&#13;t2&#10;t3</xsl:text></lines>
       <entities>
         <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
         <avt v="{concat('&U;', '&sep;')}"/>

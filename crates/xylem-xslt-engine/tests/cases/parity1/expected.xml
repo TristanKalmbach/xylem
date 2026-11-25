@@ -1,1 +1,5 @@
-﻿<fo:root font-size="10pt" xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:x="urn:x-ext"><fo:block color="red" x:flag="1" id="b1"><inner a="1" xmlns="urn:x-inner" /></fo:block></fo:root>
+﻿<fo:root font-size="10pt" xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:x="urn:x-ext"><fo:block color="red" x:flag="1" id="b1"><inner a="1" xmlns="urn:x-inner" /></fo:block><empty><a></a><b /><c /><f></f><g x="1"></g><k y="2" /></empty><lines a="s1 s2" c="&#xA;|&#xD;">lit1
+lit2t1
+t2
+t3
+t4</lines></fo:root>

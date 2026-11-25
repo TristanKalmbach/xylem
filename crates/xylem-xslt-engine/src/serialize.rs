@@ -52,7 +52,7 @@ pub fn node_xml(t: &Tree, i: u32) -> String {
 fn node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String) {
     let n = t.node(i);
     match n.kind {
-        Kind::Text => escape(&n.value, false, out),
+        Kind::Text => host_text(&n.value, out),
         Kind::Comment => {
             out.push_str("<!--");
             out.push_str(&n.value);
@@ -147,6 +147,29 @@ fn node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String)
             scope.truncate(depth);
         }
         Kind::Document | Kind::Attribute => {}
+    }
+}
+
+/// Text as the host saves it. Through the XSLT 1.0 processor's XmlWriter
+/// every line end (LF, CR or CR LF) becomes CR LF; the XSLT 2.0 path
+/// writes a CR as it is.
+fn host_text(s: &str, out: &mut String) {
+    let xslt1 = crate::value::compat();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' | '\n' if xslt1 => {
+                if c == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push_str("\r\n");
+            }
+            '\r' => out.push('\r'),
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c => out.push(c),
+        }
     }
 }
 

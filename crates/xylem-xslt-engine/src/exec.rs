@@ -840,6 +840,9 @@ impl<'s> Engine<'s> {
     fn instr(&self, i: &Instr, d: &Dyn, out: &mut Out) -> R<()> {
         match i {
             Instr::Variable(_) => unreachable!(),
+            // An empty `xsl:text` writes nothing in XSLT 1.0 (no empty text
+            // node, so `<a><xsl:text/></a>` stays `<a />`).
+            Instr::Text(s) if s.is_empty() && crate::value::compat() => {}
             Instr::Text(s) => out.text(s),
             Instr::Lre {
                 name,
@@ -1815,6 +1818,28 @@ impl Out {
             return;
         }
         let p = *self.stack.last().unwrap();
+        self.append_text_or_mark(p, s);
+    }
+
+    /// Appends text under `p`. Zero-length text is dropped, except in XSLT
+    /// 1.0, where the reference processor writes it to its XmlWriter and
+    /// so ends the element with a full end tag (`<a></a>`, not `<a />`):
+    /// an empty text node records that.
+    fn append_text_or_mark(&mut self, p: u32, s: &str) {
+        if s.is_empty() {
+            if crate::value::compat() && self.tree.node(p).kind == Kind::Element {
+                let ends_in_text = self.tree.nodes[p as usize]
+                    .children
+                    .last()
+                    .is_some_and(|&c| self.tree.nodes[c as usize].kind == Kind::Text);
+                if !ends_in_text {
+                    let n = TNode::new(Kind::Text, Some(p));
+                    let i = self.tree.push(n);
+                    self.tree.nodes[p as usize].children.push(i);
+                }
+            }
+            return;
+        }
         tree::append_text(&mut self.tree, p, s);
     }
 
@@ -1843,7 +1868,7 @@ impl Out {
                     tree::append_text(&mut self.tree, p, " ");
                 }
                 let p = *self.stack.last().unwrap();
-                tree::append_text(&mut self.tree, p, &s);
+                self.append_text_or_mark(p, &s);
                 self.after_atomic = true;
             }
             Item::Node(n) => {
