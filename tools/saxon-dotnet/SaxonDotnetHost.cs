@@ -378,7 +378,32 @@ namespace Xylem.SaxonDotnet
             if (profile)
                 processor.Implementation.setCompileWithTracing(true);
             var compiler = processor.NewXsltCompiler();
-            _executable = compiler.Compile(new Uri(stylesheet));
+            // Saxon collects static errors here and throws only a summary;
+            // report each one, with where it is, instead.
+            var errors = new List<StaticError>();
+            compiler.ErrorList = errors;
+            try
+            {
+                _executable = compiler.Compile(new Uri(stylesheet));
+            }
+            catch (Exception e)
+            {
+                if (errors.Count == 0)
+                    throw;
+                var lines = new List<string>();
+                foreach (var err in errors)
+                {
+                    var where = err.ModuleUri;
+                    if (!string.IsNullOrEmpty(where))
+                    {
+                        var slash = where.LastIndexOf('/');
+                        where = Uri.UnescapeDataString(slash >= 0 ? where.Substring(slash + 1) : where);
+                    }
+                    var code = err.ErrorCode != null ? err.ErrorCode.LocalName + ": " : "";
+                    lines.Add((string.IsNullOrEmpty(where) ? "" : where + " line " + err.LineNumber + ": ") + code + err.Message);
+                }
+                throw new Exception(string.Join(" / ", lines), e);
+            }
         }
 
         public string Run(string inputPath, List<KeyValuePair<string, string>> parameters, string profilePath, bool serialize)
