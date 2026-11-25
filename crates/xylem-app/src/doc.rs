@@ -328,12 +328,12 @@ impl DocState {
                 self.grammar_status = if msg.contains("remote locations") {
                     // Not a validation error: the schema itself could not be read.
                     format!(
-                        "Schema not loaded: the document points to a schema on a server ({}), and Xylem reads schemas only from files. Map that location to a local copy in File > Preferences > Schema locations (or schema_locations in the team configuration).",
+                        "Schema not loaded: the document points to a schema on a server ({}), and Xylem reads schemas only from files. Map that location to a local copy in File > Preferences > Documents and schemas > Schema locations (or schema_locations in the team configuration).",
                         remote_location(&msg).unwrap_or("a URL")
                     )
                 } else if msg.contains("catalog") {
                     format!(
-                        "Schema not available: {msg}. Set the schema catalog or S1000D schema folder in File > Preferences."
+                        "Schema not available: {msg}. Set the schema catalog or S1000D schema folder in File > Preferences > Documents and schemas."
                     )
                 } else {
                     format!("Schema failed to load: {msg}")

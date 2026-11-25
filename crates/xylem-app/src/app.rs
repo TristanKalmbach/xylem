@@ -233,11 +233,21 @@ enum LeftTab {
     Project,
 }
 
+/// The pages of File › Preferences.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum PrefsTab {
+    #[default]
+    General,
+    Stylesheets,
+    Documents,
+}
+
 #[derive(Default)]
 struct Dialogs {
     about: bool,
     update: bool,
     prefs: bool,
+    prefs_tab: PrefsTab,
     table: Option<TableDialog>,
     node_edit: Option<NodeEditDialog>,
     new_doc: Option<NewDocDialog>,
@@ -1211,6 +1221,11 @@ impl XylemApp {
                 self.registry =
                     DoctypeRegistry::scan(&all_package_dirs(&self.team, &self.settings));
                 self.catalog = Self::load_catalog(&self.settings, &self.team);
+                // Open documents pick up the new catalog and schema locations
+                // (a mapping added in Preferences applies straight away).
+                for ds in &mut self.docs {
+                    ds.load_grammar(&self.catalog, &self.team.schema);
+                }
                 let n = self.registry.packages().len();
                 let errs = self.registry.errors().len();
                 self.toast(
@@ -4520,9 +4535,21 @@ impl XylemApp {
             let mut reload = false;
             let mut theme_choice: Option<Option<bool>> = None;
             let (x, res) = Dialog::new("Preferences").width(560.0).show(ctx, |ui| {
+                crate::ui::segmented(
+                    ui,
+                    &mut self.dialogs.prefs_tab,
+                    &[
+                        (PrefsTab::General, "General"),
+                        (PrefsTab::Stylesheets, "Stylesheets"),
+                        (PrefsTab::Documents, "Documents and schemas"),
+                    ],
+                );
+                ui.add_space(8.0);
+                let tab = self.dialogs.prefs_tab;
                 egui::ScrollArea::vertical()
                     .max_height((ui.ctx().content_rect().height() - 220.0).max(240.0))
                     .show(ui, |ui| {
+                        if tab == PrefsTab::General {
                         section(ui, "Appearance");
                         form(ui, "prefs-look", |f| {
                             f.row("Theme", |ui| {
@@ -4557,7 +4584,7 @@ impl XylemApp {
                             });
                             let mut spell_reload = false;
                             f.row("Dictionaries", |ui| {
-                                path_pref(ui, &mut self.settings.dictionary_dir, true, &mut spell_reload)
+                                path_pref(ui, "the dictionary folder", &mut self.settings.dictionary_dir, true, &mut spell_reload)
                             });
                             f.row("Language", |ui| {
                                 if crate::ui::text_field(
@@ -4616,19 +4643,20 @@ impl XylemApp {
                                 },
                             );
                         });
-                        crate::ui::divider(ui);
+                        }
+                        if tab == PrefsTab::Stylesheets {
                         section(ui, "Stylesheets");
                         let mut unused = false;
                         form(ui, "prefs-stylesheets", |f| {
                             f.row_with_hint(
                                 "Engine",
                                 "Leave empty for Xylem's own engine. Or a program that runs stylesheets the way a publishing service does (SaxonDotnetHost.exe, see tools/saxon-dotnet); used before the team's.",
-                                |ui| path_pref(ui, &mut self.settings.xslt_host, false, &mut unused),
+                                |ui| path_pref(ui, "the stylesheet engine", &mut self.settings.xslt_host, false, &mut unused),
                             );
                             f.row_with_hint(
                                 "Compare with",
                                 "Optional reference engine (say SaxonDotnetHost.exe). Check stylesheet output also runs it and reports any test whose output differs between the two.",
-                                |ui| path_pref(ui, &mut self.settings.xslt_reference, false, &mut unused),
+                                |ui| path_pref(ui, "the reference engine", &mut self.settings.xslt_reference, false, &mut unused),
                             );
                         });
                         if let Some(team_host) = &self.team.xslt_host
@@ -4671,10 +4699,10 @@ impl XylemApp {
                                         },
                                     );
                                     f.row("Stylesheet", |ui| {
-                                        path_pref(ui, &mut pv.stylesheet, false, &mut unused)
+                                        path_pref(ui, "the preview stylesheet", &mut pv.stylesheet, false, &mut unused)
                                     });
                                     f.row_with_hint("HTML step", "Optional: turns the output (XSL-FO) into HTML", |ui| {
-                                        path_pref(ui, &mut pv.html, false, &mut unused)
+                                        path_pref(ui, "the HTML step stylesheet", &mut pv.html, false, &mut unused)
                                     });
                                     f.row_with_hint("Parameters", "name=value, separated by commas", |ui| {
                                         crate::ui::text_field(
@@ -4694,7 +4722,8 @@ impl XylemApp {
                         if crate::ui::button(ui, "Add preview").clicked() {
                             self.settings.preview.push(Default::default());
                         }
-                        crate::ui::divider(ui);
+                        }
+                        if tab == PrefsTab::Documents {
                         section(ui, "Document types");
                         match &self.team.source {
                             Some(src) => {
@@ -4749,15 +4778,15 @@ impl XylemApp {
                             f.row_with_hint(
                                 "Catalog",
                                 "catalog.toml or an OASIS XML catalog",
-                                |ui| path_pref(ui, &mut self.settings.catalog, false, &mut reload),
+                                |ui| path_pref(ui, "the schema catalog", &mut self.settings.catalog, false, &mut reload),
                             );
                             f.row_with_hint(
                                 "S1000D schemas",
                                 "A folder with one sub-folder per issue (S1000D_4-1, …)",
-                                |ui| path_pref(ui, &mut self.settings.s1000d_schema_root, true, &mut reload),
+                                |ui| path_pref(ui, "the S1000D schema folder", &mut self.settings.s1000d_schema_root, true, &mut reload),
                             );
                             f.row("Project BREX", |ui| {
-                                path_pref(ui, &mut self.settings.brex, false, &mut reload)
+                                path_pref(ui, "the project BREX", &mut self.settings.brex, false, &mut reload)
                             });
                         });
                         ui.add_space(6.0);
@@ -4782,7 +4811,7 @@ impl XylemApp {
                                 }
                                 let mut path = Some(local.clone()).filter(|p| !p.as_os_str().is_empty());
                                 let mut changed = false;
-                                path_pref(ui, &mut path, url.trim_end().ends_with('/'), &mut changed);
+                                path_pref(ui, "the local schema location", &mut path, url.trim_end().ends_with('/'), &mut changed);
                                 if changed {
                                     *local = path.unwrap_or_default();
                                     reload = true;
@@ -4798,6 +4827,7 @@ impl XylemApp {
                         }
                         if crate::ui::button(ui, "Add location").clicked() {
                             self.settings.schema_locations.push(Default::default());
+                        }
                         }
                     });
                 dialog_footer(ui, Some(("Done", true)), None, |_| {})
@@ -5632,7 +5662,15 @@ fn table_menu(ui: &mut egui::Ui, cmds: &mut Vec<Cmd>) {
 
 /// A file or folder setting: the current path, a Choose button and a
 /// clear button.
-fn path_pref(ui: &mut egui::Ui, value: &mut Option<PathBuf>, folder: bool, changed: &mut bool) {
+/// A path setting: the path (or "Not set"), a Choose… button named after
+/// `what` for its tooltip and for scripts, and a clear button.
+fn path_pref(
+    ui: &mut egui::Ui,
+    what: &str,
+    value: &mut Option<PathBuf>,
+    folder: bool,
+    changed: &mut bool,
+) {
     use crate::ui::{icon, palette};
     let p = palette(ui.ctx());
     ui.horizontal(|ui| {
@@ -5647,7 +5685,10 @@ fn path_pref(ui: &mut egui::Ui, value: &mut Option<PathBuf>, folder: bool, chang
         };
         ui.add(egui::Label::new(RichText::new(&text).color(color)).truncate())
             .on_hover_text(&text);
-        if crate::ui::button(ui, "Choose…").clicked() {
+        let name = format!("Choose {what}");
+        let choose = crate::ui::button(ui, "Choose…").on_hover_text(&name);
+        crate::script::track(&name, &choose);
+        if choose.clicked() {
             let picked = crate::script::file_dialog(|| {
                 if folder {
                     rfd::FileDialog::new().pick_folder()

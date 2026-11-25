@@ -59,7 +59,7 @@ Documents often point to their schema by URL
 only from files, so map the URL, or the start of it ending in `/`, to a
 local file or folder in `[schema_locations]`. The rest of the URL is
 looked up in that folder. Users can add their own mappings in File ›
-Preferences › Schemas; theirs win over the team's for the same location.
+Preferences › Documents and schemas; theirs win over the team's for the same location.
 Without a mapping, the Issues bar says the schema is on a server and could
 not be read, rather than reporting validation errors.
 

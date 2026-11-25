@@ -18,7 +18,7 @@ between Xylem and XMetaL users, but that has not been checked yet; see
 | Accept or reject every change | Review › Accept all / Reject all, Ctrl+Shift+A / Ctrl+Shift+R, or the buttons in the panel |
 | Edit or delete a comment | The Edit and Delete buttons in the Review panel, or double-click the comment marker |
 
-The author's name comes from File › Preferences › Review author. When that
+The author's name comes from File › Preferences › General › Author. When that
 is empty, Xylem uses your login name. Tracking is turned on per document and
 is not remembered when the document is closed. Comments can be added whether
 tracking is on or off.

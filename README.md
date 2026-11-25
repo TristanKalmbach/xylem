@@ -84,7 +84,7 @@ You need a Rust stable toolchain (1.88 or later).
 cargo run --release -p xylem-app -- samples/manual-sample.xml
 ```
 
-To make the sample doctype package available, add its folder to the package path (or use File › Preferences › Add folder):
+To make the sample doctype package available, add its folder to the package path (or use File › Preferences › Documents and schemas › Add folder…):
 
 ```
 XYLEM_PACKAGES=samples/doctypes cargo run --release -p xylem-app -- samples/manual-sample.xml
@@ -130,7 +130,7 @@ Xylem never downloads schemas. Get them from www.s1000d.org (each issue's
 `<config folder>/schemas/s1000d/S1000D_4-1/...`, which Xylem picks up on its
 own, or:
 
-- Schema folder: set *File › Preferences › S1000D schema folder* to a folder that contains one sub-folder per issue, for example `S1000D_4-1/…`. `http://www.s1000d.org/S1000D_4-1/...` URLs are then resolved there.
+- Schema folder: set *File › Preferences › Documents and schemas › S1000D schemas* to a folder that contains one sub-folder per issue, for example `S1000D_4-1/…`. `http://www.s1000d.org/S1000D_4-1/...` URLs are then resolved there.
 - Catalog: point *Schema catalog* at a `catalog.toml` or an OASIS XML catalog.
 
 ## Keyboard
