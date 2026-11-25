@@ -160,6 +160,8 @@ namespace Xylem.SaxonDotnet
                     error = Describe(e);
                     failed++;
                     Console.Error.WriteLine(job.Input + ": " + error);
+                    // The whole exception, for telling a processor failure from a stylesheet error.
+                    Console.Error.WriteLine(e.ToString());
                 }
                 clock.Stop();
                 var line = new StringBuilder();
