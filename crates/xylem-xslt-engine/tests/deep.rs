@@ -129,7 +129,7 @@ fn deep_result_written_as_html() {
         let input = nested("<div>", "</div>", "t", DEPTH);
         let xsl = stylesheet(
             "1.0",
-            "<xsl:output method=\"html\"/>\
+            "<xsl:output method=\"html\" indent=\"no\"/>\
              <xsl:template match=\"/\"><html><body><xsl:copy-of select=\".\"/></body></html></xsl:template>",
         );
         transform("html", &xsl, &input)

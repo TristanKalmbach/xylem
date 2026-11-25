@@ -101,19 +101,44 @@ enum Step {
 }
 
 fn node(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut String) {
+    xml_node(t, i, scope, out, &mut None);
+}
+
+/// [`node`], indenting as .NET's XmlWriter does when `indent` is given
+/// (every element counts as a block; line ends are written as `\n`).
+fn xml_node(
+    t: &Tree,
+    i: u32,
+    scope: &mut Vec<(Arc<str>, Arc<str>)>,
+    out: &mut String,
+    indent: &mut Option<Indent>,
+) {
     let mut stack = vec![Step::Open(i, false)];
     while let Some(step) = stack.pop() {
         let i = match step {
             Step::Close(i, depth) => {
+                if let Some(ind) = indent {
+                    ind.before_end(true, "\n", out);
+                }
                 out.push_str("</");
                 out.push_str(&t.node(i).name.as_ref().unwrap().lexical());
                 out.push('>');
                 scope.truncate(depth);
+                if let Some(ind) = indent {
+                    ind.after_end(true);
+                }
                 continue;
             }
             Step::Open(i, _) => i,
         };
         let n = t.node(i);
+        if let Some(ind) = indent {
+            match n.kind {
+                Kind::Element => ind.before_start(true, "\n", out),
+                Kind::Text if n.value.is_empty() => {}
+                _ => ind.inline(),
+            }
+        }
         match n.kind {
             Kind::Text => host_text(&n.value, out),
             Kind::Comment => {
@@ -136,7 +161,15 @@ fn node(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut Strin
                 if n.children.is_empty() {
                     out.push_str(" />");
                     scope.truncate(depth);
+                    if let Some(ind) = indent {
+                        ind.after_start(true);
+                        ind.before_end(true, "", out);
+                        ind.after_end(true);
+                    }
                 } else {
+                    if let Some(ind) = indent {
+                        ind.after_start(true);
+                    }
                     out.push('>');
                     stack.push(Step::Close(i, depth));
                     stack.extend(n.children.iter().rev().map(|&c| Step::Open(c, false)));
@@ -146,6 +179,143 @@ fn node(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut Strin
         }
     }
 }
+
+/// Where the writer is, for indentation: just after a block element's start
+/// tag, just after a block element's end tag, or anywhere else.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Boundary {
+    None,
+    AfterStart,
+    AfterEnd,
+}
+
+/// Indentation as .NET's XmlWriter (and its HTML writer) does it, observed
+/// on the reference host (spec note 13): a line end and two spaces per open
+/// element come before a block element's start tag that follows a block
+/// start or end tag, and before a block element's end tag that follows a
+/// block end tag. Anything else (text, an inline element, a comment) ends
+/// the run, so mixed content stays on its line.
+struct Indent {
+    level: usize,
+    at: Boundary,
+}
+
+impl Indent {
+    fn new() -> Indent {
+        Indent {
+            level: 0,
+            at: Boundary::None,
+        }
+    }
+    fn newline(&self, nl: &str, out: &mut String) {
+        out.push_str(nl);
+        for _ in 0..self.level {
+            out.push_str("  ");
+        }
+    }
+    fn before_start(&mut self, block: bool, nl: &str, out: &mut String) {
+        if block && self.at != Boundary::None {
+            self.newline(nl, out);
+        }
+    }
+    fn after_start(&mut self, block: bool) {
+        self.level += 1;
+        self.at = if block {
+            Boundary::AfterStart
+        } else {
+            Boundary::None
+        };
+    }
+    fn before_end(&mut self, block: bool, nl: &str, out: &mut String) {
+        self.level = self.level.saturating_sub(1);
+        if block && self.at == Boundary::AfterEnd && !nl.is_empty() {
+            self.newline(nl, out);
+        }
+    }
+    fn after_end(&mut self, block: bool) {
+        self.at = if block {
+            Boundary::AfterEnd
+        } else {
+            Boundary::None
+        };
+    }
+    fn empty_text(&mut self) {
+        if self.at == Boundary::AfterStart {
+            self.at = Boundary::AfterEnd;
+        }
+    }
+    /// Text, a comment or an inline element's content.
+    fn inline(&mut self) {
+        self.at = Boundary::None;
+    }
+}
+
+/// Elements .NET's HTML writer treats as blocks for indentation (observed
+/// on the reference host; others, such as `span`, `script`, `select` and
+/// `object`, stay on the line).
+const HTML_BLOCK: &[&str] = &[
+    "address",
+    "applet",
+    "area",
+    "base",
+    "basefont",
+    "blockquote",
+    "body",
+    "caption",
+    "center",
+    "col",
+    "colgroup",
+    "dd",
+    "del",
+    "dir",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "font",
+    "form",
+    "frame",
+    "frameset",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "hr",
+    "html",
+    "iframe",
+    "ins",
+    "isindex",
+    "legend",
+    "li",
+    "link",
+    "map",
+    "menu",
+    "meta",
+    "noframes",
+    "noscript",
+    "ol",
+    "optgroup",
+    "option",
+    "p",
+    "param",
+    "pre",
+    "s",
+    "strike",
+    "style",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "title",
+    "tr",
+    "ul",
+    "xmp",
+];
 
 /// Text as the host saves it. Through the XSLT 1.0 processor's XmlWriter
 /// every line end (LF, CR or CR LF) becomes CR LF; the XSLT 2.0 path
@@ -319,8 +489,15 @@ pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
                 }
             }
             let mut scope: Vec<(Arc<str>, Arc<str>)> = vec![("".into(), "".into())];
+            // The HTML method indents unless the stylesheet says
+            // indent="no" (the XSLT 1.0 default for HTML); the DOCTYPE then
+            // has a line of its own.
+            let mut indent = o.indent.unwrap_or(true).then(Indent::new);
+            if indent.is_some() && !out.is_empty() {
+                out.push_str("\r\n");
+            }
             for &c in &t.node(0).children {
-                html_node(t, c, &mut scope, &mut out);
+                html_node(t, c, &mut scope, &mut out, &mut indent);
             }
             return out;
         }
@@ -336,28 +513,78 @@ pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
                 }
             }
             let mut scope: Vec<(Arc<str>, Arc<str>)> = vec![("".into(), "".into())];
+            let mut indent = o.indent.unwrap_or(false).then(Indent::new);
+            if indent.is_some() && !out.is_empty() {
+                out.push('\n');
+            }
             for &c in &t.node(0).children {
-                node(t, c, &mut scope, &mut out);
+                xml_node(t, c, &mut scope, &mut out, &mut indent);
             }
         }
     }
-    out.replace('\n', "\r\n")
+    crlf(&out)
 }
 
-fn html_node(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut String) {
+/// Every line end as CR LF; those already written so stay as they are.
+fn crlf(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + s.len() / 16);
+    let mut prev = '\0';
+    for c in s.chars() {
+        if c == '\n' && prev != '\r' {
+            out.push('\r');
+        }
+        out.push(c);
+        prev = c;
+    }
+    out
+}
+
+fn html_node(
+    t: &Tree,
+    i: u32,
+    scope: &mut Vec<(Arc<str>, Arc<str>)>,
+    out: &mut String,
+    indent: &mut Option<Indent>,
+) {
+    let block = |i: u32| {
+        let local = t.node(i).name.as_ref().unwrap().local.to_ascii_lowercase();
+        HTML_BLOCK.contains(&local.as_str())
+    };
     let mut stack = vec![Step::Open(i, false)];
     while let Some(step) = stack.pop() {
         let (i, raw) = match step {
             Step::Close(i, depth) => {
-                out.push_str("</");
-                out.push_str(&t.node(i).name.as_ref().unwrap().lexical());
-                out.push('>');
+                if let Some(ind) = indent {
+                    ind.before_end(block(i), "\r\n", out);
+                }
+                // A void element never gets an end tag, even with content.
+                let name = t.node(i).name.as_ref().unwrap();
+                if !VOID.contains(&name.local.to_ascii_lowercase().as_str()) {
+                    out.push_str("</");
+                    out.push_str(&name.lexical());
+                    out.push('>');
+                }
                 scope.truncate(depth);
+                if let Some(ind) = indent {
+                    ind.after_end(block(i));
+                }
                 continue;
             }
             Step::Open(i, raw) => (i, raw),
         };
         let n = t.node(i);
+        if let Some(ind) = indent {
+            match n.kind {
+                Kind::Element if n.name.as_ref().unwrap().uri.is_empty() => {
+                    ind.before_start(block(i), "\r\n", out)
+                }
+                // Zero-length text (XSLT 1.0 `value-of` of "") right after a
+                // block start tag: the writer then ends the element on a new
+                // line (`<div>` CR LF `</div>`).
+                Kind::Text if n.value.is_empty() => ind.empty_text(),
+                _ => ind.inline(),
+            }
+        }
         match n.kind {
             Kind::Text => {
                 if raw {
@@ -385,6 +612,9 @@ fn html_node(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut 
                 if !name.uri.is_empty() {
                     // Elements in a namespace are written as XML.
                     node(t, i, scope, out);
+                    if let Some(ind) = indent {
+                        ind.inline();
+                    }
                     continue;
                 }
                 let depth = scope.len();
@@ -414,13 +644,29 @@ fn html_node(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut 
                 }
                 out.push('>');
                 let local = name.local.to_ascii_lowercase();
+                let is_block = HTML_BLOCK.contains(&local.as_str());
+                if let Some(ind) = indent {
+                    ind.after_start(is_block);
+                }
                 if local == "head" {
+                    if let Some(ind) = indent {
+                        ind.before_start(true, "\r\n", out);
+                    }
                     out.push_str(
                         "<META http-equiv=\"Content-Type\" content=\"text/html; charset=utf-16\">",
                     );
+                    if let Some(ind) = indent {
+                        ind.after_end(true);
+                    }
                 }
-                if VOID.contains(&local.as_str()) {
+                // A void element's content, if a stylesheet gives it one, is
+                // written after its start tag, as .NET's HTML writer does.
+                if VOID.contains(&local.as_str()) && n.children.is_empty() {
                     scope.truncate(depth);
+                    if let Some(ind) = indent {
+                        ind.before_end(is_block, "", out);
+                        ind.after_end(is_block);
+                    }
                     continue;
                 }
                 let raw = local == "script" || local == "style";

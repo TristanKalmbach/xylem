@@ -1,0 +1,43 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<html>
+  <head>
+    <META http-equiv="Content-Type" content="text/html; charset=utf-16">
+    <title>T</title>
+    <style>p {}</style>
+  </head>
+  <body>
+    <div>
+      <p>Text <b>bold</b> and <span>span</span>.</p>
+      <p><b>only inline</b></p>
+      <div>
+        <div>deep</div>
+      </div>
+      <table>
+        <tr>
+          <td>a</td>
+          <td>
+            <p>block in cell</p>
+          </td>
+        </tr>
+      </table>
+      <ul>
+        <li>one</li>
+        <li><a href="x">link</a></li>
+      </ul>
+      <dl>
+        <dt>t</dt>
+        <dd>d</dd>
+      </dl><select><option>o</option></select><ol>
+        <li>a</li>
+      </ol>
+      <form><input></form>
+      <hr>after a void element
+      <hr>
+      <font>f</font>
+      <s>s</s><em>e</em><h1>h</h1><br><img src="i.png"><pre>  pre
+  text</pre><script>var x;</script>tail text</div>
+    <p></p>
+    <div>
+    </div>
+  </body>
+</html>

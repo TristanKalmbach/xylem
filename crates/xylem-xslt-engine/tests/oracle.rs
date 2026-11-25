@@ -38,6 +38,7 @@ const CASES: &[&str] = &[
     "edge",
     "docs",
     "html1",
+    "html2",
     "parity",
     "parity1",
 ];

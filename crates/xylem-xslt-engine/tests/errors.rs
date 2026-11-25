@@ -140,12 +140,18 @@ fn undeclared_variables_are_compile_errors() {
     )
     .err()
     .unwrap();
-    assert!(e.message.contains("XPST0008") && e.message.contains("$x"), "{e}");
+    assert!(
+        e.message.contains("XPST0008") && e.message.contains("$x"),
+        "{e}"
+    );
     assert_eq!(e.line, Some(4), "{e}");
     // In an attribute value template.
-    let e = compile("avt", "<xsl:template match=\"/\"><r a=\"{$nope}\"/></xsl:template>")
-        .err()
-        .unwrap();
+    let e = compile(
+        "avt",
+        "<xsl:template match=\"/\"><r a=\"{$nope}\"/></xsl:template>",
+    )
+    .err()
+    .unwrap();
     assert!(e.message.contains("$nope"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }

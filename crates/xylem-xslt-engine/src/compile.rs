@@ -180,7 +180,8 @@ pub struct OutputSpec {
     pub encoding: Option<String>,
     pub doctype_public: Option<String>,
     pub doctype_system: Option<String>,
-    pub indent: bool,
+    /// `indent`, when the stylesheet gives it.
+    pub indent: Option<bool>,
     pub omit_declaration: bool,
     pub media_type: Option<String>,
 }
@@ -824,7 +825,7 @@ impl Compiler<'_> {
                         o.doctype_system = Some(v);
                     }
                     if let Some(v) = get("indent") {
-                        o.indent = v == "yes";
+                        o.indent = Some(v.trim() == "yes");
                     }
                     if let Some(v) = get("omit-xml-declaration") {
                         o.omit_declaration = v == "yes";
