@@ -113,13 +113,13 @@ impl XylemApp {
             .filter(|d| d.editor.is_dirty())
             .filter_map(|d| {
                 let p = d.path.as_ref().filter(|p| is_stylesheet(p))?;
-                Some((
-                    path_key(p),
-                    d.editor.doc.to_xml_with_offsets().0.into_bytes(),
-                ))
+                Some((path_key(p), super::stylesheet_issues::editor_bytes(d)))
             })
             .collect();
-        unsaved.insert(path_key(&path), xml.into_bytes());
+        // In the document's own encoding; the index reads it back to the
+        // same text the offsets above were taken from.
+        drop(xml);
+        unsaved.insert(path_key(&path), doc.to_bytes());
 
         let st = &mut self.references;
         st.open = true;

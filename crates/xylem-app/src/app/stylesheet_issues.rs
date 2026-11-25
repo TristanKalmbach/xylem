@@ -31,6 +31,10 @@ pub struct StylesheetIssuesState {
     /// A change waiting for typing to pause: path key, text hash, since.
     pending: Option<(String, u64, Instant)>,
     job: Option<Receiver<Finished>>,
+    /// What the text was last time it was looked at: path key, document
+    /// revision (structured views) and its hash, and when, so an unchanged
+    /// document is not written out and hashed again every frame.
+    seen: Option<(String, Option<u64>, u64, Instant)>,
     /// Top-level stylesheets using each file, found once per file.
     tops: Arc<Mutex<HashMap<String, Vec<PathBuf>>>>,
 }
@@ -53,6 +57,23 @@ fn is_stylesheet(p: &Path) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("xsl") || e.eq_ignore_ascii_case("xslt"))
+}
+
+/// A stylesheet as it is in the editor, as bytes in its own encoding (a
+/// stylesheet may declare ISO-8859-1): the structured document, or the
+/// source view's buffer while editing there.
+pub fn editor_bytes(ds: &crate::doc::DocState) -> Vec<u8> {
+    match (&ds.view, &ds.source) {
+        (View::Source, Some(src)) => match xylem_dom::Document::from_str(&src.text) {
+            Ok(mut d) => {
+                d.encoding = ds.editor.doc.encoding;
+                d.to_bytes()
+            }
+            // Not well-formed: compiling reports where, encoding aside.
+            Err(_) => src.text.clone().into_bytes(),
+        },
+        _ => ds.editor.doc.to_bytes(),
+    }
 }
 
 fn hash(bytes: &[u8]) -> u64 {
@@ -129,14 +150,28 @@ impl XylemApp {
         let Some(path) = ds.path.clone().filter(|p| is_stylesheet(p)) else {
             return;
         };
-        // The text as it is now: the source view's buffer while editing there.
-        let text: Vec<u8> = match (&ds.view, &ds.source) {
-            (View::Source, Some(src)) => src.text.clone().into_bytes(),
-            _ => ds.editor.doc.to_xml_with_offsets().0.into_bytes(),
-        };
         let key = path_key(&path);
+        // The structured views change only with the document's revision. The
+        // source view's buffer has no revision, so it is looked at a few
+        // times a second rather than every frame.
+        let in_source = matches!((&ds.view, &ds.source), (View::Source, Some(_)));
+        let revision = (!in_source).then(|| ds.editor.doc.revision());
+        if let Some((k, rev, _, at)) = &self.stylesheet_issues.seen
+            && *k == key
+            && (revision.is_some() && *rev == revision
+                || revision.is_none() && at.elapsed() < Duration::from_millis(250))
+            && self.stylesheet_issues.pending.is_none()
+        {
+            return;
+        }
+        // The text as it is now: the source view's buffer while editing there.
+        let text: Vec<u8> = editor_bytes(ds);
         let h = hash(&text);
         let st = &mut self.stylesheet_issues;
+        st.seen = Some((key.clone(), revision, h, Instant::now()));
+        if in_source {
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
         if st.checked.get(&key) == Some(&h) || st.job.is_some() {
             return;
         }
@@ -162,10 +197,7 @@ impl XylemApp {
             .filter(|d| d.editor.is_dirty())
             .filter_map(|d| {
                 let p = d.path.as_ref().filter(|p| is_stylesheet(p))?;
-                Some((
-                    path_key(p),
-                    d.editor.doc.to_xml_with_offsets().0.into_bytes(),
-                ))
+                Some((path_key(p), editor_bytes(d)))
             })
             .collect();
         unsaved.insert(key.clone(), text);
@@ -215,7 +247,7 @@ impl XylemApp {
         // Lines of this file are found in the structured view's text, which
         // is what was compiled unless the source view holds other edits.
         let (xml, offsets) = ds.editor.doc.to_xml_with_offsets();
-        let mapped = ds.view != View::Source && hash(xml.as_bytes()) == done.hash;
+        let mapped = ds.view != View::Source && hash(&ds.editor.doc.to_bytes()) == done.hash;
         let mut line_starts = vec![0usize];
         line_starts.extend(xml.match_indices('\n').map(|(i, _)| i + 1));
         let doc = &ds.editor.doc;
@@ -317,5 +349,52 @@ mod corpus {
         for f in found.iter().take(10) {
             println!("  {:?}:{:?} {}", f.file, f.line, f.message);
         }
+    }
+}
+
+#[cfg(test)]
+mod editor_text_corpus {
+    use super::*;
+
+    /// Every top-level stylesheet under `XYLEM_XSL_CORPUS`, compiled once from
+    /// disk and once with every module read as the editor writes it (parsed
+    /// into a document and written back in its own encoding), must give the
+    /// same result: what the editor checks as you type is what is on disk.
+    #[test]
+    #[ignore = "needs XYLEM_XSL_CORPUS"]
+    fn the_editors_text_compiles_like_the_file() {
+        let Some(root) = std::env::var_os("XYLEM_XSL_CORPUS").map(PathBuf::from) else {
+            return;
+        };
+        let tops = xylem_xslt::proof::top_level(&root);
+        let as_editor = |p: &Path| {
+            let bytes = std::fs::read(p).ok()?;
+            xylem_dom::Document::from_bytes(&bytes)
+                .ok()
+                .map(|d| d.to_bytes())
+        };
+        let mut differ = Vec::new();
+        for top in &tops {
+            let disk = xylem_xslt_engine::Stylesheet::compile_with(top, &|_| None)
+                .err()
+                .map(|e| e.message);
+            let editor = xylem_xslt_engine::Stylesheet::compile_with(top, &as_editor)
+                .err()
+                .map(|e| e.message);
+            if disk != editor {
+                differ.push(format!(
+                    "{}: disk {disk:?}, editor {editor:?}",
+                    top.display()
+                ));
+            }
+        }
+        println!(
+            "{} top-level stylesheets compiled from disk and from the editor's text",
+            tops.len()
+        );
+        for d in &differ {
+            println!("  DIFFERENT {d}");
+        }
+        assert!(differ.is_empty());
     }
 }
