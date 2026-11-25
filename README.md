@@ -1,9 +1,13 @@
 # Xylem
 
-Xylem is a structured XML editor written in Rust. It was built to replace
-XMetaL XMAX for writing narrative XML, and it also handles S1000D (issues 2.0
-to 6.0). Everything is pure Rust. It is built and tested on Windows and Linux;
-macOS should work but has not been built yet.
+Xylem is a structured XML editor and stylesheet workbench written in Rust.
+It was built to replace XMetaL XMAX for writing narrative XML, handles S1000D
+(issues 2.0 to 6.0), and has its own XSLT 2.0 / XPath 2.0 engine, so
+stylesheets can be written, checked, profiled and previewed without Saxon,
+Java or .NET. The same engine can run a publishing system's stylesheets in
+place of Saxon through a C library (see [docs/embedding.md](docs/embedding.md)).
+Everything is pure Rust. It is built and tested on Windows and Linux; macOS
+should work but has not been built yet.
 
 ![The normal view of a sample manual](docs/images/normal-view.png)
 
@@ -37,6 +41,29 @@ What it does:
   [docs/doctype-packages.md](docs/doctype-packages.md).
 - Stays quick on long documents (incremental layout, collapsible elements) and
   keeps your work safe (autosave and crash recovery).
+
+For stylesheet authors (see [docs/stylesheet-check.md](docs/stylesheet-check.md)):
+
+- **Run stylesheet** (Ctrl+Shift+R) runs a stylesheet on a document, unsaved
+  edits included, and opens the result; **Publication preview**
+  (Ctrl+Shift+F5) runs the team's publishing stylesheets, and an FO-to-HTML
+  step, on the document being edited and shows it in the browser.
+- **Stylesheet references** (F12) lists where a template, function, key,
+  mode or variable is defined and used, across every stylesheet that
+  includes or imports the file.
+- **Check stylesheet output** runs a stylesheet on a suite of real inputs
+  and compares the result with saved output, the last committed version or
+  another stylesheet, ignoring differences that are not real (generated
+  IDs); **Time templates** profiles it; **Analyze** finds slow patterns and
+  applies fixes that are proven not to change the output. Suites can be
+  made from a folder of saved publications, and results written as an HTML
+  report.
+- `xylem-xslt-check differential` runs every stylesheet in a folder through
+  two engines (for example the built-in one and Saxon) on every input and
+  reports every disagreement: the evidence for switching engines.
+
+Schemas can be chosen by root element or mapped from server URLs to local
+copies, for one user or a whole team ([docs/team-setup.md](docs/team-setup.md)).
 
 ## Screenshots
 
@@ -139,6 +166,11 @@ own, or:
 | `xylem-xpath` | XPath 1.0 |
 | `xylem-s1000d` | S1000D detection, codes, references, BREX, templates |
 | `xylem-customize` | Doctype packages and the XMAX importer (`xylem-import`) |
+| `xylem-xslt-engine` | XSLT 2.0 / XPath 2.0 processor (also runs XSLT 1.0 stylesheets the way .NET's processor does) |
+| `xylem-xslt-ffi` | The engine as a C library (`xylem_xslt.dll` / `.so` / `.dylib`) |
+| `xylem-xslt-cli` | The engine on the command line (`xylem-xslt transform`, `serve`) |
+| `xylem-xslt` | Stylesheet tools: check, profile, analyze, prove, differential, navigation (`xylem-xslt-check`) |
+| `xylem-w3c` | Runs the W3C XPath and XSLT test suites against the engine |
 | `xylem-app` | The egui/eframe desktop application (`xylem`) |
 
 ## Testing
