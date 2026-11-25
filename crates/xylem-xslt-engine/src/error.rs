@@ -22,7 +22,12 @@ pub struct Frame {
     pub file: String,
     /// The line of the declaration's start tag.
     pub line: u32,
+    /// How many times in a row the error passed through it (recursion).
+    pub repeat: u32,
 }
+
+/// Frames kept at each end of a long stack by [`XsltError::compact`].
+const KEEP_FRAMES: usize = 10;
 
 /// A compile or run-time error: its message and, where known, the
 /// stylesheet file, line and column it refers to, and the templates and
@@ -86,9 +91,14 @@ fn split_location(s: &str) -> Option<(&str, u32, Option<u32>, &str)> {
     None
 }
 
-/// Reads `  in template name (file:line)` back.
+/// Reads `  in template name (file:line)` back, with an optional
+/// `, N times`.
 fn parse_frame(line: &str) -> Option<Frame> {
     let rest = line.trim_start().strip_prefix("in ")?;
+    let (rest, repeat) = match rest.rsplit_once(", ") {
+        Some((r, n)) if n.ends_with(" times") => (r, n.trim_end_matches(" times").parse().ok()?),
+        _ => (rest, 1),
+    };
     let (kind, rest) = rest.split_once(' ')?;
     let open = rest.rfind(" (")?;
     let inner = rest[open + 2..].strip_suffix(')')?;
@@ -98,6 +108,7 @@ fn parse_frame(line: &str) -> Option<Frame> {
         name: rest[..open].to_string(),
         file: inner[..colon].to_string(),
         line: inner[colon + 1..].parse().ok()?,
+        repeat,
     })
 }
 
@@ -137,6 +148,42 @@ impl XsltError {
         }
     }
 
+    /// Shortens the stack of runaway recursion: frames repeated in a row
+    /// become one with a count, and of a still-long stack only the first and
+    /// last [`KEEP_FRAMES`] are kept, with a line saying how many were left
+    /// out.
+    pub fn compact(mut self) -> XsltError {
+        let mut stack: Vec<Frame> = Vec::with_capacity(self.stack.len().min(64));
+        for f in self.stack.drain(..) {
+            match stack.last_mut() {
+                Some(l)
+                    if l.kind == f.kind
+                        && l.name == f.name
+                        && l.file == f.file
+                        && l.line == f.line =>
+                {
+                    l.repeat += f.repeat;
+                }
+                _ => stack.push(f),
+            }
+        }
+        if stack.len() > 2 * KEEP_FRAMES {
+            let left_out = stack.len() - 2 * KEEP_FRAMES;
+            let tail = stack.split_off(stack.len() - KEEP_FRAMES);
+            stack.truncate(KEEP_FRAMES);
+            stack.push(Frame {
+                kind: "...".into(),
+                name: format!("{left_out} more frames"),
+                file: String::new(),
+                line: 0,
+                repeat: 1,
+            });
+            stack.extend(tail);
+        }
+        self.stack = stack;
+        self
+    }
+
     /// The error as JSON: `{"message", "file", "line", "column", "stack":
     /// [{"kind", "name", "file", "line"}]}`, absent parts as `null`.
     pub fn to_json(&self) -> String {
@@ -162,11 +209,12 @@ impl XsltError {
             .iter()
             .map(|f| {
                 format!(
-                    r#"{{"kind":{},"name":{},"file":{},"line":{}}}"#,
+                    r#"{{"kind":{},"name":{},"file":{},"line":{},"repeat":{}}}"#,
                     s(&f.kind),
                     s(&f.name),
                     s(&f.file),
-                    f.line
+                    f.line,
+                    f.repeat
                 )
             })
             .collect();
@@ -197,7 +245,14 @@ impl fmt::Display for XsltError {
         };
         f.write_str(&head)?;
         for fr in &self.stack {
+            if fr.kind == "..." {
+                write!(f, "\n  ... {}", fr.name)?;
+                continue;
+            }
             f.write_str(&frame(&fr.kind, &fr.name, &fr.file, fr.line))?;
+            if fr.repeat > 1 {
+                write!(f, ", {} times", fr.repeat)?;
+            }
         }
         Ok(())
     }
@@ -232,6 +287,30 @@ mod tests {
         assert_eq!(e.stack[1].line, 3);
         assert_eq!(e.to_string(), text);
         assert!(e.to_json().contains(r#""line":12,"column":7"#));
+    }
+
+    #[test]
+    fn recursion_stacks_are_compacted() {
+        let mut text = String::from("XTDE0000: too deep");
+        for _ in 0..5000 {
+            text.push_str(&frame("template", "a.xsl#t", "/s/a.xsl", 3));
+        }
+        for i in 0..30 {
+            text.push_str(&frame(
+                "template",
+                &format!("a.xsl#u{i}"),
+                "/s/a.xsl",
+                10 + i,
+            ));
+        }
+        let e = XsltError::from_message(&text).compact();
+        assert_eq!(e.stack[0].repeat, 5000);
+        assert_eq!(e.stack.len(), 21);
+        assert_eq!(e.stack[10].name, "11 more frames");
+        let shown = e.to_string();
+        assert!(shown.contains("(/s/a.xsl:3), 5000 times"), "{shown}");
+        assert!(shown.len() < 2000, "{}", shown.len());
+        assert_eq!(XsltError::from_message(&shown).stack[0].repeat, 5000);
     }
 
     #[test]

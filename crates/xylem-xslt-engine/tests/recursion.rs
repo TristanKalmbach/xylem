@@ -22,6 +22,9 @@ fn run(name: &str, body: &str) -> Result<String, String> {
 
 fn assert_depth_error(r: Result<String, String>) {
     let e = r.expect_err("endless recursion must fail");
+    // Repeated frames are collapsed, so the message stays short.
+    assert!(e.len() < 5_000, "error is {} bytes", e.len());
+    assert!(e.contains(" times"), "{}", &e[..e.len().min(300)]);
     assert!(
         e.contains("nested template or function calls"),
         "{}",

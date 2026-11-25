@@ -122,6 +122,8 @@ fn on_transform_thread(
         worker
             .join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            // Runaway recursion leaves thousands of identical frames.
+            .map_err(|e| XsltError::from_message(&e).compact().to_string())
     })
 }
 
