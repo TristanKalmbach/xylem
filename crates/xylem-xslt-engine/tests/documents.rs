@@ -60,3 +60,38 @@ fn unreadable_documents_behave_as_the_reference_does() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_2_0_run_with_only_secondary_results_fails_to_publish() {
+    let dir = std::env::temp_dir().join(format!(
+        "xylem-engine-only-secondary-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let only = r#"<xsl:result-document href="out.xml"><x/></xsl:result-document>"#;
+    // XSLT 2.0: no principal result next to a secondary one.
+    let xsl = dir.join("s.xsl");
+    std::fs::write(
+        &xsl,
+        format!(r#"<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/">{only}</xsl:template></xsl:stylesheet>"#),
+    )
+    .unwrap();
+    let ss = Stylesheet::compile(&xsl).unwrap();
+    let o = transform_bytes(&ss, b"<a/>", &HashMap::new(), false).unwrap();
+    assert!(
+        o.published()
+            .err()
+            .unwrap()
+            .contains("Object reference not set")
+    );
+    // An empty result alone is fine, as on the host.
+    std::fs::write(
+        &xsl,
+        r#"<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/"/></xsl:stylesheet>"#,
+    )
+    .unwrap();
+    let ss = Stylesheet::compile(&xsl).unwrap();
+    let o = transform_bytes(&ss, b"<a/>", &HashMap::new(), false).unwrap();
+    assert_eq!(o.published().unwrap(), "");
+    let _ = std::fs::remove_dir_all(&dir);
+}

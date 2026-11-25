@@ -399,7 +399,10 @@ named in brackets; notes marked *unverified* still need a probe.
     in an invalid XML document...`) for XSLT 1.0 and its `XmlDocument`
     message (`The specified node cannot be inserted...`, `This document
     already has a 'DocumentElement' node.`) for XSLT 2.0. Comments,
-    processing instructions and an empty result are allowed.
+    processing instructions and an empty result are allowed, except that an
+    XSLT 2.0 run writing only secondary results (`xsl:result-document`)
+    leaves the host without a document (`Object reference not set to an
+    instance of an object`).
 17. **Patterns on parentless nodes** [`parity`]. A one-step pattern
     (`para`, `@id`, `p[@x]`) matches a parentless element or attribute,
     such as one a function built, when its name test and predicates hold;

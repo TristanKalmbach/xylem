@@ -163,7 +163,7 @@ fn run_bytes(
         timing.retain(|t| t.time.calls > 0);
     }
     Ok(Output {
-        publish_error: serialize::document_error(&result, compat),
+        publish_error: publish_error(&result, &engine, compat),
         text: value::with_compat(compat, || serialize::host_style(&result)),
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
         results: secondary(&engine, compat),
@@ -236,7 +236,7 @@ fn run_from(
         }
     })?;
     Ok(Output {
-        publish_error: serialize::document_error(&result, compat),
+        publish_error: publish_error(&result, &engine, compat),
         text: value::with_compat(compat, || serialize::host_style(&result)),
         serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
         results: secondary(&engine, compat),
@@ -245,6 +245,24 @@ fn run_from(
         timing: Vec::new(),
         total_ms: 0.0,
     })
+}
+
+/// Why the reference host would fail to save the principal result. Besides
+/// a result that is not one document, an XSLT 2.0 run that writes only
+/// secondary results leaves Saxon's DOM destination without a document,
+/// which the host then reads (spec note 16).
+fn publish_error(result: &tree::Tree, engine: &exec::Engine, compat: bool) -> Option<String> {
+    if !compat && result.node(0).children.is_empty() && !engine.results.borrow().is_empty() {
+        return Some(
+            concat!(
+                "The stylesheet produced no principal result, only secondary ones ",
+                "(xsl:result-document); a .NET host reading DomDestination.XmlDocument fails here ",
+                "(Object reference not set to an instance of an object)"
+            )
+            .to_string(),
+        );
+    }
+    serialize::document_error(result, compat)
 }
 
 /// The engine's secondary results, written the host's way.

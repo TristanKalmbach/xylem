@@ -10,7 +10,6 @@
 //! `upper-first`), then the ignored characters and expansions (a string
 //! without them first).
 
-
 /// A string's sort key; compare keys with `Ord`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Key {
