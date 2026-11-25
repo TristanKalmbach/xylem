@@ -148,4 +148,17 @@ rm -rf "$out/run" && mkdir -p "$out/run"
 TMP="$native/run" TEMP="$native/run" TMPDIR="$native/run" XYLEM_CONFIG_DIR="$native/run/cfg" XYLEM_PACKAGES=samples/doctypes     XYLEM_SCRIPT="cmd RunStylesheet;;wait 5;;clickui As xsl:output asks;;clickui Run;;wait 40;;quit"     timeout 120 "$bin" "$repo/samples/manual-sample.xml" "$repo/samples/xslt/manual-to-html.xsl" > /dev/null 2>&1
 check run-stylesheet "$out/run/xylem-run/manual-sample-result.html" '<h2>2. Safety</h2>'
 check run-stylesheet-utf8 "$out/run/xylem-run/manual-sample-result.html" 'charset=utf-8'
+# File > Publication preview from a team configuration, one step: an HTML
+# result is named .html (and would open in the browser), with the
+# configured parameters applied.
+rm -rf "$out/preview" && mkdir -p "$out/preview"
+cat > "$out/preview/xylem-team.toml" <<TEAM
+[[preview]]
+name = "Manual"
+root = "manual"
+stylesheet = "$repo/samples/xslt/manual-to-html.xsl"
+params = { mode = "draft" }
+TEAM
+TMP="$native/preview" TEMP="$native/preview" TMPDIR="$native/preview" XYLEM_TEAM_CONFIG="$native/preview/xylem-team.toml"     XYLEM_CONFIG_DIR="$native/preview/cfg" XYLEM_PACKAGES=samples/doctypes     XYLEM_SCRIPT="cmd PublicationPreview;;wait 40;;quit"     timeout 120 "$bin" "$repo/samples/manual-sample.xml" > /dev/null 2>&1
+check preview-html "$out/preview/xylem-preview/manual-sample.html" '<p class="banner">Draft</p>'
 exit $fail
