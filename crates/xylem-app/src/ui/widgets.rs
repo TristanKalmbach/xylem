@@ -553,6 +553,7 @@ pub struct Dialog<'a> {
     modal: bool,
     resizable: bool,
     grow: bool,
+    side: bool,
 }
 
 impl<'a> Dialog<'a> {
@@ -564,7 +565,15 @@ impl<'a> Dialog<'a> {
             modal: true,
             resizable: false,
             grow: false,
+            side: false,
         }
+    }
+
+    /// A tool window that opens against the right edge of the window, so
+    /// the text it navigates to stays visible beside it.
+    pub fn side(mut self) -> Self {
+        self.side = true;
+        self
     }
 
     pub fn id(mut self, id: impl std::hash::Hash) -> Self {
@@ -652,11 +661,16 @@ impl<'a> Dialog<'a> {
             if self.grow {
                 window = window.auto_sized();
             }
+            let area = ctx.content_rect();
+            // Outer width: contents plus the frame's margins on both sides.
+            let outer = width + 2.0 * space::XL;
+            let x = if self.side {
+                (area.right() - outer - space::XL).max(area.left())
+            } else {
+                area.center().x - outer / 2.0
+            };
             let r = window
-                .default_pos(egui::pos2(
-                    ctx.content_rect().center().x - width / 2.0 - space::XL,
-                    ctx.content_rect().top() + 90.0,
-                ))
+                .default_pos(egui::pos2(x, area.top() + 90.0))
                 .show(ctx, |ui| {
                     if owns_keys(ui) {
                         ui.ctx()

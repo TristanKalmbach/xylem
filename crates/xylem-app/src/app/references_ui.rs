@@ -221,8 +221,9 @@ impl XylemApp {
         }
         let mut go: Option<(PathBuf, u32)> = None;
         let (close, _) = crate::ui::Dialog::new("Stylesheet references")
-            .width(640.0)
+            .width(520.0)
             .modeless()
+            .side()
             .grow()
             .show(ctx, |ui| {
                 if st.job.is_some() {
