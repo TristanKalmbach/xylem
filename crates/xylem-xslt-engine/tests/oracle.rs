@@ -9,7 +9,8 @@
 //!
 //! - `live_oracle` runs the host itself on every case (set
 //!   `XYLEM_SAXON_HOST` to `SaxonDotnetHost.exe`). With
-//!   `XYLEM_XSLT_ENGINE_REGEN=1` it rewrites the expected files.
+//!   `XYLEM_XSLT_ENGINE_REGEN=1` it rewrites the expected files
+//!   (`XYLEM_XSLT_ENGINE_CASES=parity,edge` limits either test to those cases).
 //! - `suite` runs a stylesheet check suite (`XYLEM_XSLT_ENGINE_SUITE` = a
 //!   suite `.toml`) and reports how many saved outputs the engine
 //!   reproduces. Suites hold real documents and are never committed.
@@ -37,7 +38,21 @@ const CASES: &[&str] = &[
     "edge",
     "docs",
     "html1",
+    "parity",
 ];
+
+/// The cases to run: all, or those named in `XYLEM_XSLT_ENGINE_CASES`
+/// (comma-separated), so one case can be regenerated alone.
+fn cases() -> Vec<&'static str> {
+    match std::env::var("XYLEM_XSLT_ENGINE_CASES") {
+        Ok(only) => CASES
+            .iter()
+            .copied()
+            .filter(|c| only.split(',').any(|o| o.trim() == *c))
+            .collect(),
+        Err(_) => CASES.to_vec(),
+    }
+}
 const PARAMS: &[(&str, &str)] = &[("mode", "final"), ("pageCount", "4")];
 
 fn cases_dir() -> PathBuf {
@@ -97,7 +112,7 @@ fn describe(c: &xylem_xslt::compare::Comparison) -> String {
 fn cases_match_reference_output() {
     let dir = cases_dir();
     let mut failures = Vec::new();
-    for case in CASES {
+    for case in cases() {
         let style = dir.join(case).join("style.xsl");
         let expected = std::fs::read(dir.join(case).join("expected.xml")).unwrap();
         match run_engine(&style, &input_of(case), &params()) {
@@ -137,7 +152,7 @@ fn live_oracle() {
     std::fs::create_dir_all(&tmp).unwrap();
     let p: std::collections::BTreeMap<String, String> = params().into_iter().collect();
     let mut failures = Vec::new();
-    for case in CASES {
+    for case in cases() {
         let style = dir.join(case).join("style.xsl");
         let out = if regen {
             dir.join(case).join("expected.xml")

@@ -1,0 +1,1 @@
+﻿<parity xmlns:fo="http://www.w3.org/1999/XSL/Format"><parentless><applied><fo:inline color="red" font-style="italic">MISSING [unknown]</fo:inline><fo:block a="1"><fo:inline>nested</fo:inline></fo:block></applied><found>found</found><pred>otherfirst-block</pred><attr>color</attr><deep>ancestor-requiredchild-of-block</deep></parentless></parity>

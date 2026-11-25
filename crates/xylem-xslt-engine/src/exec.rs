@@ -7,7 +7,7 @@ use crate::compile::{
 use crate::eval::R;
 use crate::tree::{self, Kind, NodeRef, QName, TNode, Tree};
 use crate::value::{Atomic, Item, Seq};
-use crate::xpath::{Axis, Expr, PathStep};
+use crate::xpath::{Axis, Expr, PathStep, Step};
 use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -417,6 +417,17 @@ impl<'s> Engine<'s> {
                 tree: n.tree,
                 idx: 0,
             }),
+            Expr::Path { start: None, steps }
+                if steps.len() == 1 && self.tree(n.tree).node(n.idx).parent.is_none() =>
+            {
+                // A one-step pattern (`para`, `@id`, `a[@x]`) also matches a
+                // parentless element or attribute, such as one a function or
+                // a temporary variable built (as Saxon does).
+                match &steps[0] {
+                    PathStep::Axis(s) => self.parentless_step_matches(n, s, &d),
+                    PathStep::Expr(..) => Ok(false),
+                }
+            }
             _ => {
                 // A relative pattern matches if some ancestor reaches `n`.
                 let mut cur = self.tree(n.tree).node(n.idx).parent;
@@ -427,11 +438,83 @@ impl<'s> Engine<'s> {
                     })? {
                         return Ok(true);
                     }
+                    if self.tree(n.tree).node(a).parent.is_none() {
+                        // The tree's root is a parentless element: the
+                        // pattern's first step may match the root itself
+                        // (`a/b` for a `b` child of a parentless `a`).
+                        return self.matches_from_parentless_root(a, n, p, &d);
+                    }
                     cur = self.tree(n.tree).node(a).parent;
                 }
                 Ok(false)
             }
         }
+    }
+
+    /// Whether the parentless node `n` satisfies step `s` on its own: the
+    /// name test and every predicate, where a positional predicate (`[1]`,
+    /// `[last()]`) never holds because `n` has no siblings to count.
+    fn parentless_step_matches(&self, n: NodeRef, s: &Step, d: &Dyn) -> R<bool> {
+        if !matches!(s.axis, Axis::Child | Axis::Attribute) {
+            return Ok(false);
+        }
+        {
+            let t = self.tree(n.tree);
+            let node = t.node(n.idx);
+            if node.kind == Kind::Document {
+                return Ok(false);
+            }
+            let principal = if s.axis == Axis::Attribute {
+                Kind::Attribute
+            } else {
+                Kind::Element
+            };
+            if (s.axis == Axis::Attribute) != (node.kind == Kind::Attribute)
+                || !crate::eval::test(node, &s.test, principal)
+            {
+                return Ok(false);
+            }
+        }
+        let inner = d.focus(Item::Node(n), 1, 1);
+        for pred in &s.preds {
+            if matches!(pred, Expr::Literal(a) if a.is_numeric()) {
+                return Ok(false);
+            }
+            let r = self.eval(pred, &inner)?;
+            let keep = match r.as_slice() {
+                [Item::Atomic(a)] if a.is_numeric() => false,
+                _ => self.ebv(&r)?,
+            };
+            if !keep {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Whether relative pattern `p` reaches `n` when its first step is
+    /// matched against `root`, the parentless element at the top of `n`'s
+    /// tree, and its remaining steps are evaluated from there.
+    fn matches_from_parentless_root(&self, root: u32, n: NodeRef, p: &Expr, d: &Dyn) -> R<bool> {
+        let Expr::Path { start: None, steps } = p else {
+            return Ok(false);
+        };
+        let (Some(PathStep::Axis(first)), true) = (steps.first(), steps.len() > 1) else {
+            return Ok(false);
+        };
+        let r = NodeRef {
+            tree: n.tree,
+            idx: root,
+        };
+        if !self.parentless_step_matches(r, first, d)? {
+            return Ok(false);
+        }
+        let rest = Expr::Path {
+            start: None,
+            steps: steps[1..].to_vec(),
+        };
+        let v = self.eval(&rest, &d.focus(Item::Node(r), 1, 1))?;
+        Ok(v.contains(&Item::Node(n)))
     }
 
     /// A cheap test of the pattern's last step before evaluating it.
