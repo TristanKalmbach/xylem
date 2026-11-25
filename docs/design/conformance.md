@@ -81,6 +81,10 @@ rejected for stylesheets below version 3.0. The XSLT runner checks
 | QT3, XPath 2.0 | 15,054 | 14,045 | 93.3% |
 | XSLT 1.0 and 2.0 | 4,682 | 3,716 | 79.4% |
 
+Then `xsl:next-match`, `xsl:apply-imports`, `xsl:for-each-group` (with
+`current-group`, `current-grouping-key`), `xsl:perform-sort`,
+`xsl:document` and simplified stylesheets: XSLT 3,858 of 4,682 (82.5%).
+
 | Set | Now |
 |---|---:|
 | `regex-syntax-xslt20` | 984 / 987 (3 depend on the Unicode version of `\w`, `\d`, `\c`) |
@@ -93,11 +97,10 @@ The largest remaining groups:
 | Wrong output (`got ...`) | ~400 each suite | Mixed: number formatting, serialization details, edge cases |
 | Casts to `hexBinary`, `base64Binary`, `NOTATION` | ~310 (QT3) | Types not implemented |
 | Expected errors not raised | ~210 (QT3), ~100 (XSLT) | Type checks the engine does not make yet |
-| `xsl:next-match`, `xsl:apply-imports` | ~95 (XSLT) | Not implemented |
-| `xsl:for-each-group`, `xsl:perform-sort` | ~60 (XSLT) | Not implemented |
+| Type annotations in patterns and sequence types (`element(*, xs:untyped)`) | some (XSLT) | Not parsed |
 | `base-uri`, `resolve-uri`, `static-base-uri`, `document-uri` | ~90 | Base URIs are file paths, not URIs |
 | `format-date`, `format-dateTime`, `format-time` | ~30 (XSLT) | Not implemented |
-| `xsl:document`, `xsl:namespace` | ~36 (XSLT) | Not implemented |
+| `xsl:namespace` | ~10 (XSLT) | Not implemented |
 | `normalize-unicode`, `trace`, `lang` | ~70 (QT3) | Not implemented |
 | Sets that crash | `function`, `call-template`, `error` (stack overflow on deep recursion), `unicode-90` (timeout) | Not counted in the totals |
 
