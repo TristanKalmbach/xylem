@@ -38,6 +38,11 @@ cargo build --release -p xylem-xslt-cli      # target/release/xylem-xslt(.exe)
   (`XYLEM_OUTPUT_SERIALIZE`, `serialize: true`) follows `xsl:output`; for
   the HTML method it matches .NET's XSLT 1.0 processor writing to a string
   (doctype, `META` content-type, void elements, CR LF line ends).
+  Because that is a string, its XML declaration and `META` tag name
+  `utf-16`. The C library, `xylem-xslt serve` and `xylem-xslt-check` return
+  it byte for byte as the service has it; `xylem-xslt transform` and
+  Xylem's Tools › Run stylesheet write files for people, so they write
+  UTF-8 and label it `utf-8`.
 - **Parameters** are name/value strings. Each sets the global `xsl:param`
   of exactly that name; a value is converted to the parameter's declared
   type when that is `xs:boolean`, `xs:integer`, `xs:decimal` or `xs:double`,

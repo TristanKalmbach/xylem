@@ -11,7 +11,9 @@
 //! (the `XmlDocument.OuterXml` form, `xsl:output` ignored; a result that is
 //! not one well-formed document is an error, as it is there) unless
 //! `--serialize` asks for the stylesheet's `xsl:output`. Without
-//! `--output` the result goes to standard output.
+//! `--output` the result goes to standard output. Serialized text is
+//! written as UTF-8 and labelled so (the service's string names `utf-16`);
+//! `serve` returns it as the service has it.
 //!
 //! `serve` keeps compiled stylesheets in memory and reads one JSON request
 //! per line on standard input, answering each with one JSON line on
