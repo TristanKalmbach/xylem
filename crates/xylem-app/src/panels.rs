@@ -117,6 +117,7 @@ fn structure_node(
         .take(12)
         .collect::<Vec<_>>()
         .join(" ");
+    let preview = crate::view::bidi::display_line(&preview).into_owned();
     let open = st.structure_expanded.contains(&n);
     let row = list_row(
         ui,

@@ -41,6 +41,10 @@ pub struct Canvas {
     pub layout: DocLayout,
     key: Option<(u64, u64, u64, u32, ViewMode, u32, bool)>,
     cache: LayoutCache,
+    /// How many fonts egui had when `cache` was filled. Fonts added for a
+    /// script take effect a frame later; galleys from before then were
+    /// measured without them and point into a font atlas since rebuilt.
+    font_count: usize,
     /// Desired x for vertical caret movement.
     goal_x: Option<f32>,
     pub scroll_to_caret: bool,
@@ -136,6 +140,12 @@ impl Canvas {
     }
 
     fn ensure_layout(&mut self, ui: &Ui, ed: &Editor, cx: &CanvasCtx, width: f32) {
+        let font_count = ui.ctx().fonts(|f| f.definitions().font_data.len());
+        if font_count != self.font_count {
+            self.font_count = font_count;
+            self.cache = LayoutCache::default();
+            self.key = None;
+        }
         let key = (
             ed.doc.revision(),
             self.collapsed_rev,
@@ -609,7 +619,11 @@ impl Canvas {
         };
         match key {
             Key::ArrowLeft | Key::ArrowRight => {
-                let fwd = key == Key::ArrowRight;
+                // In right-to-left text, Left moves forward through it.
+                let rtl = self
+                    .caret_loc(ed, rules)
+                    .is_some_and(|loc| self.layout.rtl_at(loc));
+                let fwd = (key == Key::ArrowRight) != rtl;
                 let from = if !m.shift && !ed.sel.is_caret() {
                     let (a, b) = ed.sel.ordered(doc);
                     let p = if fwd { b } else { a };
@@ -663,46 +677,42 @@ impl Canvas {
                 let Some(loc) = self.caret_loc(ed, rules) else {
                     return;
                 };
+                let Some(span) = self.layout.row_span(loc) else {
+                    return;
+                };
+                let (start, end) = (span.start, span.end);
                 let para = &self.layout.paras[loc.para];
-                let mut start = 0;
-                for row in &para.galley.rows {
-                    let end = start + row.char_count_excluding_newline();
-                    if loc.ch >= start && loc.ch <= end {
-                        // Stop at the first/last text on the row rather than
-                        // beyond leading start-tag or trailing end-tag chips.
-                        let is_chrome = |c: usize| {
-                            para.segs.iter().any(|sg| {
-                                sg.chars.contains(&c)
-                                    && matches!(
-                                        sg.kind,
-                                        SegKind::StartTag(_)
-                                            | SegKind::EndTag(_)
-                                            | SegKind::EmptyTag(_)
-                                            | SegKind::Generated(_)
-                                    )
-                            })
-                        };
-                        let ch = if key == Key::Home {
-                            let mut c = start;
-                            while c < end && is_chrome(c) {
-                                c += 1;
-                            }
-                            if c == end { start } else { c }
-                        } else {
-                            let mut c = end;
-                            while c > start && is_chrome(c - 1) {
-                                c -= 1;
-                            }
-                            if c == start { end } else { c }
-                        };
-                        let target = Loc { para: loc.para, ch };
-                        if let Some(p) = self.layout.position_at(target) {
-                            moved(self, ed, p, false, actions);
-                            self.caret_hint = Some((p, target));
-                        }
-                        return;
+                // Stop at the first/last text on the row rather than beyond
+                // leading start-tag or trailing end-tag chips.
+                let is_chrome = |c: usize| {
+                    para.segs.iter().any(|sg| {
+                        sg.chars.contains(&c)
+                            && matches!(
+                                sg.kind,
+                                SegKind::StartTag(_)
+                                    | SegKind::EndTag(_)
+                                    | SegKind::EmptyTag(_)
+                                    | SegKind::Generated(_)
+                            )
+                    })
+                };
+                let ch = if key == Key::Home {
+                    let mut c = start;
+                    while c < end && is_chrome(c) {
+                        c += 1;
                     }
-                    start += row.char_count_including_newline();
+                    if c == end { start } else { c }
+                } else {
+                    let mut c = end;
+                    while c > start && is_chrome(c - 1) {
+                        c -= 1;
+                    }
+                    if c == start { end } else { c }
+                };
+                let target = Loc { para: loc.para, ch };
+                if let Some(p) = self.layout.position_at(target) {
+                    moved(self, ed, p, false, actions);
+                    self.caret_hint = Some((p, target));
                 }
             }
             Key::A if m.command => {
@@ -876,6 +886,12 @@ impl Canvas {
                     None
                 };
                 let edge = edge.unwrap_or_else(|| tag_edge(name, cx.tag_colors, dark));
+                // In right-to-left text a start tag points left, at what it opens.
+                let kind = if kind < 2 && self.layout.rtl_char(pi, seg.chars.start) {
+                    1 - kind
+                } else {
+                    kind
+                };
                 for r in self.layout.range_rects(pi, seg.chars.start, seg.chars.end) {
                     let r = r.translate(off).shrink2(vec2(0.5, 1.5));
                     chip(&painter, r, kind, fill, edge, self.flagged.contains(&el));

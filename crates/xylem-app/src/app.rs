@@ -3773,7 +3773,7 @@ impl XylemApp {
             let names = unshaped.join(" and ");
             self.toast(
                 format!(
-                    "This document has {names} text. Xylem shows its characters but can't yet join them or lay out right-to-left text, so check that text in another viewer."
+                    "This document has {names} text. Xylem shows its characters but doesn't shape them yet, so check that text in another viewer."
                 ),
                 true,
             );

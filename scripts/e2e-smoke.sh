@@ -164,4 +164,13 @@ check preview-html "$out/preview/xylem-preview/manual-sample.html" '<p class="ba
 # Written as xsl:output asks, so a browser reads it: the empty list item
 # is not self-closed.
 check preview-html-form "$out/preview/xylem-preview/manual-sample.html" '<p></p>'
+# Right-to-left text: a click inside a Hebrew word finds that word (the
+# layout maps the visual line back to the text), and the arrow keys move
+# through right-to-left text the way it reads.
+cp samples/rtl-sample.xml "$out/rtl.xml"
+XYLEM_CONFIG_DIR="$native/cfg-rtl" XYLEM_SCRIPT="cmd View normal;;wait 10;;dblclickat -6 8 בדוק את;;wait 3;;type Q;;save $native/rtl-click.xml;;quit"     timeout 90 "$bin" "$native/rtl.xml" > /dev/null 2>&1
+check rtl-click-finds-word "$out/rtl-click.xml" 'הבטיחות. Q את רמת'
+cp samples/rtl-sample.xml "$out/rtl.xml"
+XYLEM_CONFIG_DIR="$native/cfg-rtl" XYLEM_SCRIPT="cmd View normal;;wait 10;;caret בדוק את;;key ArrowLeft;;type Z;;save $native/rtl-arrow.xml;;quit"     timeout 90 "$bin" "$native/rtl.xml" > /dev/null 2>&1
+check rtl-arrow-reads-forward "$out/rtl-arrow.xml" 'בZדוק את'
 exit $fail

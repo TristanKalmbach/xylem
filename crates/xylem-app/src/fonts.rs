@@ -338,14 +338,11 @@ impl Script {
         }
     }
 
-    /// Scripts whose letters change shape or order with their neighbours.
-    /// The text layout draws them one character at a time, left to right,
-    /// so they show but don't read correctly yet.
+    /// Scripts whose letters change shape with their neighbours in ways
+    /// the document view does not do yet (it shapes Arabic and lays out
+    /// Arabic and Hebrew right to left, see `view::bidi`).
     pub fn needs_shaping(self) -> bool {
-        matches!(
-            self,
-            Script::Arabic | Script::Hebrew | Script::Thai | Script::Indic
-        )
+        matches!(self, Script::Thai | Script::Indic)
     }
 
     fn fonts(self) -> &'static [&'static str] {
@@ -533,6 +530,6 @@ mod tests {
         assert_eq!(scripts_in("מדריך", false), vec![Script::Hebrew]);
         assert_eq!(scripts_in("คู่มือ", false), vec![Script::Thai]);
         assert_eq!(scripts_in("उपयोगकर्ता", false), vec![Script::Indic]);
-        assert!(Script::Arabic.needs_shaping() && !Script::Japanese.needs_shaping());
+        assert!(Script::Indic.needs_shaping() && !Script::Arabic.needs_shaping());
     }
 }

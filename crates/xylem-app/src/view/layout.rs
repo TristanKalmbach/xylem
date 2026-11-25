@@ -66,9 +66,221 @@ pub struct Para {
     pub icons: Arc<[(Range<usize>, std::path::PathBuf)]>,
     #[allow(dead_code)]
     pub owner: NodeId,
+    /// For a paragraph with right-to-left text: its galley holds the text
+    /// shaped and in visual order, and this maps between the two.
+    pub bidi: Option<Arc<BidiMap>>,
+}
+
+/// Maps a right-to-left paragraph's characters (logical order, as its
+/// segments and stops count them) to the glyphs of its galley (shaped, in
+/// visual order, one row per line with a line break between rows).
+#[derive(Debug)]
+pub struct BidiMap {
+    /// The glyph that shows each character.
+    glyph: Vec<u32>,
+    /// Whether each character reads right to left.
+    rtl: Vec<bool>,
+    /// The characters each glyph shows (a lam-alef ligature shows two; a
+    /// line break between rows shows none).
+    shows: Vec<Range<u32>>,
+    /// Row and column of each glyph.
+    place: Vec<(u32, u32)>,
+    /// The characters on each row.
+    rows: Vec<Range<u32>>,
+    /// Whether each character is a line break.
+    breaks: Vec<bool>,
+    /// Tag chips and atoms: drawn left to right inside, whichever way the
+    /// text around them reads, so a caret beside one goes by its whole box.
+    objects: Vec<Range<u32>>,
+    /// Whether the paragraph as a whole reads right to left.
+    base_rtl: bool,
+}
+
+impl BidiMap {
+    fn len(&self) -> usize {
+        self.glyph.len()
+    }
+
+    fn object_at(&self, i: usize) -> Option<Range<usize>> {
+        self.objects
+            .iter()
+            .find(|o| o.contains(&(i as u32)))
+            .map(|o| o.start as usize..o.end as usize)
+    }
 }
 
 impl Para {
+    /// Left and right edges of glyph `v` and its row's top and bottom, in
+    /// galley coordinates.
+    fn glyph_box(&self, map: &BidiMap, v: usize) -> (f32, f32, f32, f32) {
+        let (r, c) = map.place[v];
+        let row = &self.galley.rows[r as usize];
+        let c = c as usize;
+        let x0 = row.pos.x + row.x_offset(c);
+        // The row's width leaves out a trailing space, so the last glyph
+        // ends at its own advance.
+        let x1 = match row.glyphs.get(c + 1) {
+            Some(_) => row.pos.x + row.x_offset(c + 1),
+            None => row
+                .glyphs
+                .get(c)
+                .map_or(x0, |g| row.pos.x + g.pos.x + g.advance_width),
+        };
+        (x0, x1, row.min_y(), row.max_y())
+    }
+
+    /// The glyph a caret between characters `k - 1` and `k` sits against,
+    /// and whether on its right edge. The caret follows the character
+    /// before it (where typing goes), except at the start of a row.
+    fn bidi_anchor(&self, map: &BidiMap, k: usize) -> Option<(usize, bool)> {
+        let n = map.len();
+        let row_of = |i: usize| map.place[map.glyph[i] as usize].0;
+        let before = (k > 0 && k <= n).then(|| k - 1);
+        let after = (k < n).then_some(k);
+        let use_before = match (before, after) {
+            (Some(b), Some(a)) => !map.breaks[b] && row_of(b) == row_of(a),
+            (Some(b), None) => !map.breaks[b],
+            (None, Some(_)) => false,
+            (None, None) => return None,
+        };
+        if use_before {
+            let b = before?;
+            // After a left-to-right character: its right edge. After a chip
+            // in right-to-left text: the left edge of its first character.
+            let g = match map.object_at(b) {
+                Some(o) if map.rtl[b] => o.start,
+                _ => b,
+            };
+            Some((map.glyph[g] as usize, !map.rtl[b]))
+        } else {
+            let a = after?;
+            // Before a right-to-left character: its right edge. Before a
+            // chip in right-to-left text: the right edge of its last one.
+            let g = match map.object_at(a) {
+                Some(o) if map.rtl[a] => o.end - 1,
+                _ => a,
+            };
+            Some((map.glyph[g] as usize, map.rtl[a]))
+        }
+    }
+
+    fn bidi_caret(&self, map: &BidiMap, k: usize) -> Option<Rect> {
+        let (x, y0, y1) = match self.bidi_anchor(map, k) {
+            Some((v, right)) => {
+                let (x0, x1, y0, y1) = self.glyph_box(map, v);
+                (if right { x1 } else { x0 }, y0, y1)
+            }
+            // After a final line break: the start of the empty last row.
+            None => {
+                let row = self.galley.rows.last()?;
+                (row.pos.x, row.min_y(), row.max_y())
+            }
+        };
+        Some(Rect::from_min_max(Pos2::new(x, y0), Pos2::new(x, y1)))
+    }
+
+    /// The character boundary nearest to `pt` (galley coordinates).
+    fn bidi_hit(&self, map: &BidiMap, pt: Vec2) -> usize {
+        let rows = &self.galley.rows;
+        let Some(r) = rows
+            .iter()
+            .position(|row| pt.y < row.max_y())
+            .or(rows.len().checked_sub(1))
+        else {
+            return 0;
+        };
+        let mut best: Option<(f32, usize, bool)> = None;
+        for v in 0..map.place.len() {
+            let shows = &map.shows[v];
+            if map.place[v].0 as usize != r || shows.is_empty() || map.breaks[shows.start as usize]
+            {
+                continue;
+            }
+            let (x0, x1, _, _) = self.glyph_box(map, v);
+            let d = if pt.x < x0 {
+                x0 - pt.x
+            } else if pt.x > x1 {
+                pt.x - x1
+            } else {
+                0.0
+            };
+            if best.is_none_or(|(bd, _, _)| d < bd) {
+                best = Some((d, v, pt.x < (x0 + x1) / 2.0));
+            }
+        }
+        match best {
+            None => map.rows.get(r).map_or(0, |s| s.start as usize),
+            // A chip: before or after it, by which half of the whole chip.
+            Some((_, v, _)) if map.object_at(map.shows[v].start as usize).is_some() => {
+                let o = map
+                    .object_at(map.shows[v].start as usize)
+                    .unwrap_or_default();
+                let (x0, _, _, _) = self.glyph_box(map, map.glyph[o.start] as usize);
+                let (_, x1, _, _) = self.glyph_box(map, map.glyph[o.end - 1] as usize);
+                let left = pt.x < (x0 + x1) / 2.0;
+                if left != map.rtl[o.start] {
+                    o.start
+                } else {
+                    o.end
+                }
+            }
+            Some((_, v, left)) => {
+                let shows = &map.shows[v];
+                // The left half of a left-to-right glyph is before it; the
+                // left half of a right-to-left glyph is after it.
+                if left != map.rtl[shows.start as usize] {
+                    shows.start as usize
+                } else {
+                    shows.end as usize
+                }
+            }
+        }
+    }
+
+    /// Rectangles covering characters [a, b), merged along each row.
+    fn bidi_range(&self, map: &BidiMap, a: usize, b: usize) -> Vec<Rect> {
+        let n = map.len();
+        let mut boxes: Vec<(u32, f32, f32)> = Vec::new();
+        let mut last = None;
+        for i in a..b.min(n) {
+            let v = map.glyph[i] as usize;
+            if map.breaks[i] || last == Some(v) {
+                continue;
+            }
+            last = Some(v);
+            let (x0, x1, _, _) = self.glyph_box(map, v);
+            boxes.push((map.place[v].0, x0, x1));
+        }
+        boxes.sort_by(|p, q| p.0.cmp(&q.0).then(p.1.total_cmp(&q.1)));
+        let mut merged: Vec<(u32, f32, f32)> = Vec::new();
+        for (r, x0, x1) in boxes {
+            match merged.last_mut() {
+                Some(m) if m.0 == r && x0 <= m.2 + 0.5 => m.2 = m.2.max(x1),
+                _ => merged.push((r, x0, x1)),
+            }
+        }
+        let mut out: Vec<Rect> = merged
+            .into_iter()
+            .map(|(r, x0, x1)| {
+                let row = &self.galley.rows[r as usize];
+                Rect::from_min_max(Pos2::new(x0, row.min_y()), Pos2::new(x1, row.max_y()))
+            })
+            .collect();
+        // A selection that goes on past the paragraph: a small mark at its
+        // end, on the side the paragraph reads towards.
+        if b > n
+            && let Some(c) = self.bidi_caret(map, n)
+        {
+            let w = 4.0;
+            let x = if map.base_rtl { c.min.x - w } else { c.min.x };
+            out.push(Rect::from_min_max(
+                Pos2::new(x, c.min.y),
+                Pos2::new(x + w, c.max.y),
+            ));
+        }
+        out
+    }
+
     fn shifted(&self, dy: f32) -> Para {
         Para {
             rect: self.rect.translate(Vec2::new(0.0, dy)),
@@ -79,6 +291,7 @@ impl Para {
             stops: self.stops.clone(),
             icons: self.icons.clone(),
             owner: self.owner,
+            bidi: self.bidi.clone(),
         }
     }
 }
@@ -314,23 +527,82 @@ impl DocLayout {
         }
         let (_, i) = best?;
         let p = &self.paras[i];
-        let cur = p.galley.cursor_from_pos(pt - p.anchor);
-        Some(Loc {
-            para: i,
-            ch: cur.index,
-        })
+        let ch = match &p.bidi {
+            Some(map) => p.bidi_hit(map, pt - p.anchor),
+            None => p.galley.cursor_from_pos(pt - p.anchor).index,
+        };
+        Some(Loc { para: i, ch })
     }
 
     pub fn caret_rect(&self, loc: Loc) -> Rect {
         let p = &self.paras[loc.para];
+        if let Some(map) = &p.bidi
+            && let Some(r) = p.bidi_caret(map, loc.ch)
+        {
+            return r.translate(p.anchor.to_vec2());
+        }
         p.galley
             .pos_from_cursor(CCursor::new(loc.ch))
             .translate(p.anchor.to_vec2())
     }
 
+    /// The characters on the row the caret at `loc` is on, for Home and End.
+    pub fn row_span(&self, loc: Loc) -> Option<Range<usize>> {
+        let p = self.paras.get(loc.para)?;
+        if let Some(map) = &p.bidi {
+            let row = p
+                .bidi_anchor(map, loc.ch)
+                .map_or(0, |(v, _)| map.place[v].0);
+            let r = map.rows.get(row as usize)?;
+            return Some(r.start as usize..r.end as usize);
+        }
+        let mut start = 0;
+        for row in &p.galley.rows {
+            let end = start + row.char_count_excluding_newline();
+            if loc.ch >= start && loc.ch <= end {
+                return Some(start..end);
+            }
+            start += row.char_count_including_newline();
+        }
+        None
+    }
+
+    /// Whether character `i` of a paragraph reads right to left.
+    pub fn rtl_char(&self, para: usize, i: usize) -> bool {
+        self.paras
+            .get(para)
+            .and_then(|p| p.bidi.as_ref())
+            .is_some_and(|m| m.rtl.get(i).copied().unwrap_or(false))
+    }
+
+    /// Whether the text at the caret reads right to left, so the arrow keys
+    /// move the other way through it.
+    pub fn rtl_at(&self, loc: Loc) -> bool {
+        let Some(p) = self.paras.get(loc.para) else {
+            return false;
+        };
+        let Some(map) = &p.bidi else {
+            return false;
+        };
+        match p.bidi_anchor(map, loc.ch) {
+            Some((v, _)) => map.shows[v]
+                .clone()
+                .next()
+                .is_some_and(|c| map.rtl[c as usize]),
+            None => map.base_rtl,
+        }
+    }
+
     /// Rectangles covering chars [a, b) of a paragraph.
     pub fn range_rects(&self, para: usize, a: usize, b: usize) -> Vec<Rect> {
         let p = &self.paras[para];
+        if let Some(map) = &p.bidi {
+            return p
+                .bidi_range(map, a, b)
+                .into_iter()
+                .map(|r| r.translate(p.anchor.to_vec2()))
+                .collect();
+        }
         let mut out = Vec::new();
         let mut start = 0;
         for row in &p.galley.rows {
@@ -788,6 +1060,22 @@ impl<'a> Layouter<'a> {
             };
             pb.job.append("", 0.0, f);
         }
+        let mut bidi = None;
+        if super::bidi::has_rtl(&pb.job.text) {
+            let (job, map) = self.bidi_job(std::mem::take(&mut pb.job), &pb.segs);
+            // Left alignment is the start of the line, which for a
+            // right-to-left paragraph is its right edge.
+            if map.base_rtl && matches!(pb.align, TextAlign::Left | TextAlign::Justify) {
+                pb.align = TextAlign::Right;
+            }
+            pb.job = job;
+            pb.job.halign = match pb.align {
+                TextAlign::Center => Align::Center,
+                TextAlign::Right => Align::RIGHT,
+                _ => Align::LEFT,
+            };
+            bidi = Some(Arc::new(map));
+        }
         let (galley, galley_key) = self.cache.galley(self.ctx, pb.job);
         let x = match pb.align {
             TextAlign::Center => self.x + pb.indent + width / 2.0,
@@ -812,8 +1100,171 @@ impl<'a> Layouter<'a> {
             stops: pb.stops.into(),
             icons: pb.icons.into(),
             owner: pb.owner,
+            bidi,
         };
         self.push_para(para);
+    }
+
+    /// Shapes a paragraph with right-to-left text and puts each of its lines
+    /// in visual order. Returns the job to draw (one row per line, not
+    /// wrapped again) and the map back to the paragraph's characters.
+    fn bidi_job(&mut self, job: LayoutJob, segs: &[Seg]) -> (LayoutJob, BidiMap) {
+        use super::bidi;
+        let chars: Vec<char> = job.text.chars().collect();
+        // The section each character is formatted by.
+        let mut section_of = vec![0u32; chars.len()];
+        for (ci, (b, _)) in job.text.char_indices().enumerate() {
+            section_of[ci] = job
+                .sections
+                .iter()
+                .position(|s| s.byte_range.contains(&b))
+                .unwrap_or(0) as u32;
+        }
+        // Tag chips and atoms are objects: not shaped, not reordered inside.
+        let objects: Vec<Range<usize>> = segs
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.kind,
+                    SegKind::StartTag(_)
+                        | SegKind::EndTag(_)
+                        | SegKind::EmptyTag(_)
+                        | SegKind::Atom(_)
+                )
+            })
+            .map(|s| s.chars.clone())
+            .collect();
+        let in_object = |i: usize| objects.iter().any(|o| o.contains(&i));
+        let shaped = self.ctx.fonts_mut(|f| {
+            bidi::shape_arabic(
+                &chars,
+                |i| !in_object(i),
+                |i, c| f.has_glyph(&job.sections[section_of[i] as usize].format.font_id, c),
+            )
+        });
+        // The shaped text, wrapped as the paragraph is.
+        let mut first_of_shaped = vec![u32::MAX; shaped.chars.len()];
+        for (i, &s) in shaped.of_input.iter().enumerate().rev() {
+            first_of_shaped[s as usize] = i as u32;
+        }
+        let section_of_shaped = |s: usize| section_of[first_of_shaped[s] as usize] as usize;
+        let rebuild = |text: &[(char, usize)]| -> LayoutJob {
+            let mut out = LayoutJob {
+                wrap: job.wrap.clone(),
+                halign: job.halign,
+                justify: job.justify,
+                first_row_min_height: job.first_row_min_height,
+                break_on_newline: job.break_on_newline,
+                round_output_to_gui: job.round_output_to_gui,
+                ..Default::default()
+            };
+            let mut run = String::new();
+            let mut run_section: Option<usize> = None;
+            for &(c, sec) in text {
+                if let Some(r) = run_section
+                    && r != sec
+                {
+                    out.append(&run, 0.0, job.sections[r].format.clone());
+                    run.clear();
+                }
+                run_section = Some(sec);
+                run.push(c);
+            }
+            if let Some(sec) = run_section {
+                out.append(&run, 0.0, job.sections[sec].format.clone());
+            }
+            out
+        };
+        let logical: Vec<(char, usize)> = shaped
+            .chars
+            .iter()
+            .enumerate()
+            .map(|(s, &c)| (c, section_of_shaped(s)))
+            .collect();
+        let (wrapped, _) = self.cache.galley(self.ctx, rebuild(&logical));
+        let objects_shaped: Vec<Range<usize>> = objects
+            .iter()
+            .map(|o| shaped.of_input[o.start] as usize..shaped.of_input[o.end - 1] as usize + 1)
+            .collect();
+        let levels = bidi::resolve(&shaped.chars, &objects_shaped);
+        // Each line in visual order, with a line break between lines.
+        let mut visual: Vec<(char, usize)> = Vec::with_capacity(shaped.chars.len() + 8);
+        let mut glyph_of_shaped = vec![0u32; shaped.chars.len()];
+        let mut place = Vec::with_capacity(shaped.chars.len() + 8);
+        let mut start = 0;
+        let row_count = wrapped.rows.len();
+        for (r, row) in wrapped.rows.iter().enumerate() {
+            let end = start + row.char_count_excluding_newline();
+            let order = bidi::visual_order(&shaped.chars, &levels, &objects_shaped, start..end);
+            for (col, s) in order.into_iter().enumerate() {
+                let c = shaped.chars[s];
+                let c = if levels.rtl(s) && !objects_shaped.iter().any(|o| o.contains(&s)) {
+                    bidi::mirror(c)
+                } else {
+                    c
+                };
+                glyph_of_shaped[s] = visual.len() as u32;
+                visual.push((c, section_of_shaped(s)));
+                place.push((r as u32, col as u32));
+            }
+            let mut next = end;
+            if r + 1 < row_count {
+                let sec = visual.last().map_or(0, |v| v.1);
+                if row.ends_with_newline {
+                    // The paragraph's own line break shows as this one.
+                    glyph_of_shaped[end] = visual.len() as u32;
+                    next += 1;
+                }
+                place.push((r as u32, (end - start) as u32));
+                visual.push(('\n', sec));
+            }
+            start = next;
+        }
+        let mut draw = rebuild(&visual);
+        draw.wrap.max_width = f32::INFINITY;
+        // The map, in the paragraph's own characters.
+        let n = chars.len();
+        let glyph: Vec<u32> = (0..n)
+            .map(|i| glyph_of_shaped[shaped.of_input[i] as usize])
+            .collect();
+        let rtl: Vec<bool> = (0..n)
+            .map(|i| levels.rtl(shaped.of_input[i] as usize))
+            .collect();
+        let breaks: Vec<bool> = chars.iter().map(|&c| c == '\n').collect();
+        let mut shows = vec![0u32..0u32; visual.len()];
+        for (i, &v) in glyph.iter().enumerate() {
+            let s = &mut shows[v as usize];
+            if Range::is_empty(s) {
+                *s = i as u32..i as u32 + 1;
+            } else {
+                s.end = i as u32 + 1;
+            }
+        }
+        let mut span: Vec<Option<(u32, u32)>> = vec![None; row_count.max(1)];
+        for (i, &v) in glyph.iter().enumerate() {
+            let i = i as u32;
+            let r = &mut span[place[v as usize].0 as usize];
+            *r = Some(r.map_or((i, i + 1), |(a, b)| (a.min(i), b.max(i + 1))));
+        }
+        let rows: Vec<Range<u32>> = span
+            .into_iter()
+            .map(|r| r.map_or(n as u32..n as u32, |(a, b)| a..b))
+            .collect();
+        let base_rtl = levels.base.first().is_some_and(|l| l % 2 == 1);
+        let map = BidiMap {
+            glyph,
+            rtl,
+            shows,
+            place,
+            rows,
+            breaks,
+            objects: objects
+                .iter()
+                .map(|o| o.start as u32..o.end as u32)
+                .collect(),
+            base_rtl,
+        };
+        (draw, map)
     }
 
     /// Appends a paragraph and indexes its text segments and caret stops.
@@ -1951,3 +2402,7 @@ fn adjust_bg_for_dark(c: Color32, dark: bool) -> Color32 {
         c
     }
 }
+
+#[cfg(test)]
+#[path = "bidi_layout_tests.rs"]
+mod bidi_layout_tests;

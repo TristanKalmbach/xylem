@@ -19,6 +19,7 @@ xylem-dom = { workspace = true }
 xylem-edit = { workspace = true }
 xylem-style = { workspace = true }
 xylem-schema = { workspace = true }
+unicode-bidi = "0.3.18"
 xylem-customize = { workspace = true }
 xylem-s1000d = { workspace = true }
 xylem-xpath = { workspace = true }

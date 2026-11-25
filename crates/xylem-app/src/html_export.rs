@@ -83,6 +83,7 @@ thead {{ display: table-header-group; }}
 tr, img, .x-keep {{ break-inside: avoid; page-break-inside: avoid; }}
 .x-keep {{ break-after: avoid; page-break-after: avoid; }}
 td {{ border: 1px solid {GRID_COLOR}; padding: 3px 4px; vertical-align: top; }}
+div, td {{ unicode-bidi: plaintext; }}
 .x-item {{ position: relative; }}
 .x-marker {{ position: absolute; white-space: nowrap; }}
 .x-noimage {{ display: inline-block; border: 1px dashed #888888; color: #406040; padding: 12px 16px; }}
