@@ -76,6 +76,31 @@ pub struct Output {
     pub total_ms: f64,
 }
 
+/// Relabels serialized text that is saved as UTF-8: the declaration and the
+/// HTML content-type tag name `utf-16` because the publishing host writes
+/// to a string, which is wrong once the text is a UTF-8 file someone opens.
+pub fn label_utf8(text: &str) -> std::borrow::Cow<'_, str> {
+    if let Some(rest) = text.strip_prefix(serialize::STRING_DECLARATION) {
+        return format!("<?xml version=\"1.0\" encoding=\"utf-8\"?>{rest}").into();
+    }
+    // The tag sits near the top, inside `head`.
+    let head = text.len().min(4096);
+    let head = (0..=head)
+        .rev()
+        .find(|&i| text.is_char_boundary(i))
+        .unwrap_or(0);
+    match text[..head].find(serialize::STRING_META) {
+        Some(at) => {
+            let mut s = String::with_capacity(text.len());
+            s.push_str(&text[..at]);
+            s.push_str(&serialize::STRING_META.replace("utf-16", "utf-8"));
+            s.push_str(&text[at + serialize::STRING_META.len()..]);
+            s.into()
+        }
+        None => text.into(),
+    }
+}
+
 /// Transforms an input file. Parameters set the global `xsl:param` of
 /// exactly that name; values are converted to a declared boolean or
 /// numeric type and are strings otherwise, as the publishing host does.
@@ -381,8 +406,6 @@ impl Output {
         Ok(())
     }
 
-    /// The result as the host writes it to a file: UTF-8 with a byte order
-    /// mark.
     /// The principal result as the host saves it, or the host's error when
     /// it is not a single well-formed document.
     pub fn published(&self) -> Result<&str, String> {
@@ -392,6 +415,8 @@ impl Output {
         }
     }
 
+    /// The result as the host writes it to a file: UTF-8 with a byte order
+    /// mark.
     pub fn host_bytes(&self) -> Vec<u8> {
         let mut b = vec![0xEF, 0xBB, 0xBF];
         b.extend_from_slice(self.text.as_bytes());

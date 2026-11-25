@@ -115,6 +115,7 @@ impl XylemApp {
         }
         let mut host = Host::new(engine);
         host.allow_scripts = self.team.xslt_allow_scripts;
+        host.label_utf8 = true;
         let (tx, rx) = channel();
         self.preview.job = Some(rx);
         let name = cfg.name.clone().unwrap_or_else(|| "publication".into());

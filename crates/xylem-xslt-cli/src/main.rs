@@ -119,7 +119,9 @@ fn transform(args: &[String]) -> Result<(), String> {
     };
     let mut out = with_file_access(files, || transform_bytes_to(&ss, &bytes, &params, write))?;
     let text = if serialize {
-        std::mem::take(&mut out.serialized)
+        // A file or terminal, not the service's string: label it as the
+        // UTF-8 it is.
+        xylem_xslt_engine::label_utf8(&out.serialized).into_owned()
     } else {
         out.published()?;
         std::mem::take(&mut out.text)

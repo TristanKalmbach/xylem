@@ -25,6 +25,11 @@ pub struct Host {
     pub serialize: bool,
     /// Let XSLT 1.0 stylesheets run embedded scripts (`msxsl:script`).
     pub allow_scripts: bool,
+    /// The results are files for people to open: a declaration or HTML
+    /// content-type tag naming `utf-16` (the service's result is a string)
+    /// is relabelled as the UTF-8 the file holds. Off for comparisons with
+    /// the service, which keep its bytes.
+    pub label_utf8: bool,
 }
 
 /// Whether one stylesheet compiled.
@@ -93,12 +98,29 @@ impl Host {
             repeat: 1,
             serialize: false,
             allow_scripts: false,
+            label_utf8: false,
         }
     }
 
     /// Runs `stylesheet` on each `(input, output)` pair with `params`;
     /// with `profile`, also times every template and function.
     pub fn run(
+        &self,
+        stylesheet: &Path,
+        jobs: &[(PathBuf, PathBuf)],
+        params: &BTreeMap<String, String>,
+        profile: bool,
+    ) -> Run {
+        let run = self.run_jobs(stylesheet, jobs, params, profile);
+        if self.label_utf8 {
+            for job in run.jobs.iter().filter(|j| j.ok) {
+                relabel_utf8(&job.output);
+            }
+        }
+        run
+    }
+
+    fn run_jobs(
         &self,
         stylesheet: &Path,
         jobs: &[(PathBuf, PathBuf)],
@@ -288,6 +310,27 @@ fn quiet(cmd: &mut Command) {
     }
     #[cfg(not(windows))]
     let _ = cmd;
+}
+
+/// Rewrites a result file whose label says `utf-16` (see
+/// [`Host::label_utf8`]); a file that is not UTF-8 is left alone.
+fn relabel_utf8(path: &Path) {
+    const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+    let Ok(bytes) = std::fs::read(path) else {
+        return;
+    };
+    let (bom, body) = match bytes.strip_prefix(BOM) {
+        Some(rest) => (BOM, rest),
+        None => (&[][..], &bytes[..]),
+    };
+    let Ok(text) = std::str::from_utf8(body) else {
+        return;
+    };
+    if let std::borrow::Cow::Owned(fixed) = xylem_xslt_engine::label_utf8(text) {
+        let mut out = bom.to_vec();
+        out.extend_from_slice(fixed.as_bytes());
+        let _ = std::fs::write(path, out);
+    }
 }
 
 /// Runs jobs on the built-in engine: compiled once, each output written

@@ -186,6 +186,7 @@ impl XylemApp {
             .unwrap_or_else(|| PathBuf::from(xylem_xslt::host::BUILTIN));
         let mut host = Host::new(engine);
         host.allow_scripts = self.team.xslt_allow_scripts;
+        host.label_utf8 = true;
         host.serialize = st.serialize;
         let engine_name = if host.is_builtin() {
             "the built-in engine".to_string()

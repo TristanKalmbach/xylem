@@ -451,6 +451,13 @@ const URI_ATTRS: &[&str] = &[
     "usemap",
 ];
 
+/// The XML declaration the serializer writes: the host's second step
+/// writes to a string, so it names `utf-16`.
+pub(crate) const STRING_DECLARATION: &str = "<?xml version=\"1.0\" encoding=\"utf-16\"?>";
+/// The content-type tag the HTML method writes at the start of `head`.
+pub(crate) const STRING_META: &str =
+    "<META http-equiv=\"Content-Type\" content=\"text/html; charset=utf-16\">";
+
 /// Writes a result as its `xsl:output` asks, the way the reference host's
 /// second step (.NET's XSLT 1.0 processor writing to a string) does.
 ///
@@ -503,7 +510,7 @@ pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
         }
         _ => {
             if !o.omit_declaration {
-                out.push_str("<?xml version=\"1.0\" encoding=\"utf-16\"?>");
+                out.push_str(STRING_DECLARATION);
             }
             if let (Some(r), Some(s)) = (root, &o.doctype_system) {
                 let name = t.node(r).name.as_ref().unwrap().lexical();
@@ -652,9 +659,7 @@ fn html_node(
                     if let Some(ind) = indent {
                         ind.before_start(true, "\r\n", out);
                     }
-                    out.push_str(
-                        "<META http-equiv=\"Content-Type\" content=\"text/html; charset=utf-16\">",
-                    );
+                    out.push_str(STRING_META);
                     if let Some(ind) = indent {
                         ind.after_end(true);
                     }
