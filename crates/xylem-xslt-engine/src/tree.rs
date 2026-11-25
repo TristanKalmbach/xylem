@@ -245,7 +245,7 @@ pub fn from_dom_lines(
         } else {
             b.parent().map(|p| p.to_path_buf()).unwrap_or_default()
         },
-        depth: 0,
+        depth: std::cell::Cell::new(0),
     };
     let strip = &Strip {
         s: strip,
@@ -271,7 +271,65 @@ pub fn from_dom_lines(
 struct Entities {
     decls: HashMap<String, Entity>,
     dir: PathBuf,
-    depth: usize,
+    /// How many entity expansions are open, to stop recursive declarations.
+    depth: std::cell::Cell<usize>,
+}
+
+/// The deepest entity nesting expanded before reporting an error.
+const MAX_ENTITY_DEPTH: usize = 16;
+
+impl Entities {
+    /// Expands references to internal entities in an attribute value, as an
+    /// XML parser does: the replacement text is itself expanded and its
+    /// whitespace characters become spaces. References the parser already
+    /// resolved (predefined and character references) are not seen here, so
+    /// an escaped `&amp;name;` naming a declared entity would be expanded
+    /// too; references to undeclared entities stay as written.
+    fn expand_attribute(&self, value: &str, depth: usize) -> Result<String, String> {
+        if self.decls.is_empty() || !value.contains('&') {
+            return Ok(value.to_string());
+        }
+        let mut out = String::with_capacity(value.len());
+        let mut rest = value;
+        while let Some(at) = rest.find('&') {
+            out.push_str(&rest[..at]);
+            let after = &rest[at + 1..];
+            let name = after
+                .find(';')
+                .map(|e| &after[..e])
+                .filter(|n| !n.is_empty() && !n.contains(|c: char| c.is_whitespace() || c == '&'));
+            match name.and_then(|n| self.decls.get(n).map(|e| (n, e))) {
+                Some((n, Entity::Internal(text))) => {
+                    if depth >= MAX_ENTITY_DEPTH {
+                        return Err(format!("entity '{n}' nests too deeply"));
+                    }
+                    let text: String = text
+                        .chars()
+                        .map(|c| {
+                            if matches!(c, '\t' | '\n' | '\r') {
+                                ' '
+                            } else {
+                                c
+                            }
+                        })
+                        .collect();
+                    out.push_str(&self.expand_attribute(&text, depth + 1)?);
+                    rest = &after[n.len() + 1..];
+                }
+                Some((n, Entity::External(_))) => {
+                    return Err(format!(
+                        "external entity '&{n};' is not allowed in an attribute value"
+                    ));
+                }
+                None => {
+                    out.push('&');
+                    rest = after;
+                }
+            }
+        }
+        out.push_str(rest);
+        Ok(out)
+    }
 }
 
 enum Entity {
@@ -330,9 +388,41 @@ fn parse_entities(subset: &str) -> HashMap<String, Entity> {
                 out.insert(name.to_string(), Entity::External(uri));
             }
         } else if let Some(v) = quoted(after) {
-            out.insert(name.to_string(), Entity::Internal(v));
+            out.insert(name.to_string(), Entity::Internal(char_refs(&v)));
         }
     }
+    out
+}
+
+/// Expands character references (`&#45;`, `&#x2D;`) in an entity's literal
+/// value: the XML rule for building replacement text at declaration time.
+/// Other references stay, to be expanded where the entity is used.
+fn char_refs(v: &str) -> String {
+    let mut out = String::with_capacity(v.len());
+    let mut rest = v;
+    while let Some(at) = rest.find("&#") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 2..];
+        let ch = after.find(';').and_then(|e| {
+            let n = &after[..e];
+            let code = match n.strip_prefix(['x', 'X']) {
+                Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                None => n.parse().ok(),
+            };
+            code.and_then(char::from_u32).map(|c| (c, e))
+        });
+        match ch {
+            Some((c, e)) => {
+                out.push(c);
+                rest = &after[e + 1..];
+            }
+            None => {
+                out.push_str("&#");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
     out
 }
 
@@ -347,7 +437,7 @@ fn expand(
     preserve: bool,
 ) -> Result<(), String> {
     let ents = strip.ents;
-    if ents.depth > 16 {
+    if ents.depth.get() >= MAX_ENTITY_DEPTH {
         return Err(format!("entity '{name}' nests too deeply"));
     }
     let (text, _dir) = match ents.decls.get(name) {
@@ -392,10 +482,13 @@ fn expand(
     wrapper.push_str("</w>");
     let frag = Document::from_str(&wrapper).map_err(|e| format!("entity '{name}': {e}"))?;
     let w = frag.document_element().ok_or("empty entity")?;
-    for &c in frag.children(w) {
-        copy(&frag, c, t, parent, strip, preserve)?;
-    }
-    Ok(())
+    ents.depth.set(ents.depth.get() + 1);
+    let copied = frag
+        .children(w)
+        .iter()
+        .try_for_each(|&c| copy(&frag, c, t, parent, strip, preserve));
+    ents.depth.set(ents.depth.get() - 1);
+    copied
 }
 
 fn copy(
@@ -444,7 +537,7 @@ fn copy(
                 }
                 let mut an = TNode::new(Kind::Attribute, Some(me));
                 an.name = Some(QName::new(&u, l, p));
-                an.value = a.value.clone();
+                an.value = strip.ents.expand_attribute(&a.value, 0)?;
                 let ai = t.push(an);
                 t.nodes[me as usize].attrs.push(ai);
             }

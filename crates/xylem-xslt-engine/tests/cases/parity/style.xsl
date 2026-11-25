@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xsl:stylesheet [
+<!ENTITY U "ABC">
+<!ENTITY L "abc">
+<!ENTITY U2L " '&U;' , '&L;' ">
+<!ENTITY sep "&#45;&#45;">
+<!ENTITY greeting "<g>hello &U;</g>">
+]>
 <!-- Behaviours found by comparing the engine with the reference publishing
      service over many stylesheets. Each template below covers one. -->
 <xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
@@ -49,6 +56,11 @@
         <attr><xsl:apply-templates select="f:lookup('unknown')/@color" mode="pred"/></attr>
         <deep><xsl:apply-templates select="f:lookup('unknown')/descendant-or-self::fo:inline" mode="deep"/></deep>
       </parentless>
+      <entities>
+        <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
+        <avt v="{concat('&U;', '&sep;')}"/>
+        <content>&L;&sep;&greeting;</content>
+      </entities>
     </parity>
   </xsl:template>
 </xsl:stylesheet>
