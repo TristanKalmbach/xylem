@@ -381,6 +381,18 @@ impl Stylesheet {
 struct VarScope {
     locals: Vec<QName>,
     unresolved: Vec<(QName, String)>,
+    /// Set while compiling an `xsl:function` body outside any instruction
+    /// that gives a focus: there is no context item there.
+    focus_absent: bool,
+}
+
+/// Runs `f` with the focus absent (`xsl:function`) or present (inside
+/// `xsl:for-each` and the like), restoring the previous state after.
+fn with_focus<T>(absent: bool, f: impl FnOnce() -> T) -> T {
+    let before = SCOPE.with(|s| std::mem::replace(&mut s.borrow_mut().focus_absent, absent));
+    let r = f();
+    SCOPE.with(|s| s.borrow_mut().focus_absent = before);
+    r
 }
 
 thread_local! {
@@ -580,6 +592,22 @@ impl<'a> El<'a> {
     fn expr(&self, src: &str) -> Result<Expr, String> {
         let e = xpath::parse(src, &self.resolver()).map_err(|e| self.err(&e))?;
         note_vars(&e, self);
+        // A function body has no context item; the reference processor
+        // rejects these uses of it when compiling.
+        if SCOPE.with(|s| s.borrow().focus_absent) {
+            match xpath::absent_focus_use(&e) {
+                Some(xpath::FocusUse::Root) => {
+                    return Err(self.err(
+                        "XPTY0020: Leading '/' cannot select the root node of the tree containing \
+                         the context item: the context item is not a node",
+                    ));
+                }
+                Some(xpath::FocusUse::Position) => {
+                    return Err(self.err("XPDY0002: The context item is absent at this point"));
+                }
+                None => {}
+            }
+        }
         Ok(e)
     }
     fn opt_expr(&self, attr: &str) -> Result<Option<Expr>, String> {
@@ -874,7 +902,7 @@ impl Compiler<'_> {
                 "template" => self.template(d, prec)?,
                 "function" => {
                     let name = d.qname(d.req("name")?)?;
-                    let (params, body) = self.params_and_body(d)?;
+                    let (params, body) = with_focus(true, || self.params_and_body(d))?;
                     let arity = params.len();
                     let id = self.ss.functions.len();
                     let source = d.source();
@@ -1042,6 +1070,11 @@ impl Compiler<'_> {
     }
 
     fn sorts(&mut self, d: El) -> Result<Vec<Sort>, String> {
+        // Sort keys are evaluated with each item as the focus.
+        with_focus(false, || self.sorts_in_focus(d))
+    }
+
+    fn sorts_in_focus(&mut self, d: El) -> Result<Vec<Sort>, String> {
         let mut v = Vec::new();
         for c in d.child_els().filter(|c| c.is_xsl("sort")) {
             let avt = |a: &str| c.attr(a).map(|s| c.avt(s)).transpose();
@@ -1156,16 +1189,15 @@ impl Compiler<'_> {
                         e.err("XTSE1080: xsl:for-each-group needs exactly one grouping attribute")
                     );
                 };
-                let key = match how {
-                    GroupBy::By | GroupBy::Adjacent => e.expr(&v)?,
-                    _ => e.expr(&v)?,
-                };
+                let select = e.expr(e.req("select")?)?;
+                // Grouping keys and patterns see each item as the focus.
+                let key = with_focus(false, || e.expr(&v))?;
                 Instr::ForEachGroup {
-                    select: e.expr(e.req("select")?)?,
+                    select,
                     how,
                     key,
                     sorts: self.sorts(e)?,
-                    body: self.body(e)?,
+                    body: with_focus(false, || self.body(e))?,
                 }
             }
             "next-match" | "apply-imports" => Instr::NextMatch {
@@ -1195,9 +1227,9 @@ impl Compiler<'_> {
                 let mut non_matching = Vec::new();
                 for c in e.child_els() {
                     if c.is_xsl("matching-substring") {
-                        matching = self.body(c)?;
+                        matching = with_focus(false, || self.body(c))?;
                     } else if c.is_xsl("non-matching-substring") {
-                        non_matching = self.body(c)?;
+                        non_matching = with_focus(false, || self.body(c))?;
                     }
                 }
                 Instr::AnalyzeString {
@@ -1208,11 +1240,14 @@ impl Compiler<'_> {
                     non_matching,
                 }
             }
-            "for-each" => Instr::ForEach {
-                select: e.expr(e.req("select")?)?,
-                sorts: self.sorts(e)?,
-                body: self.body(e)?,
-            },
+            "for-each" => {
+                let select = e.expr(e.req("select")?)?;
+                Instr::ForEach {
+                    select,
+                    sorts: self.sorts(e)?,
+                    body: with_focus(false, || self.body(e))?,
+                }
+            }
             "attribute" => Instr::Attribute {
                 name: e.avt(e.req("name")?)?,
                 namespace: e.attr("namespace").map(|s| e.avt(s)).transpose()?,

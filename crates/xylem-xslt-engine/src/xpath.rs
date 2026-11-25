@@ -1061,3 +1061,41 @@ pub fn free_vars(e: &Expr, out: &mut Vec<QName>) {
     }
     walk(e, &mut Vec::new(), out);
 }
+
+/// How `e` uses the focus it is evaluated with, in the two ways the
+/// reference processor rejects when compiling a function body (which has
+/// no focus): a path starting at the root (`//x`), or `position()` /
+/// `last()`. Predicates and later path steps have a focus of their own
+/// and are not looked at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusUse {
+    Root,
+    Position,
+}
+
+pub fn absent_focus_use(e: &Expr) -> Option<FocusUse> {
+    match e {
+        Expr::Root => Some(FocusUse::Root),
+        Expr::Path { start: Some(s), .. } => absent_focus_use(s),
+        Expr::Path { start: None, .. } | Expr::Literal(_) | Expr::Var(_) | Expr::Context => None,
+        Expr::Filter(b, _) => absent_focus_use(b),
+        Expr::Call(q, args) => {
+            if &*q.uri == FN_NS && args.is_empty() && matches!(&*q.local, "position" | "last") {
+                return Some(FocusUse::Position);
+            }
+            args.iter().find_map(absent_focus_use)
+        }
+        Expr::Seq(v) => v.iter().find_map(absent_focus_use),
+        Expr::Bin(_, a, b) => absent_focus_use(a).or_else(|| absent_focus_use(b)),
+        Expr::Neg(a) | Expr::InstanceOf(a, _) | Expr::Cast(a, _, _) | Expr::Castable(a, _, _) => {
+            absent_focus_use(a)
+        }
+        Expr::If(c, t, f) => absent_focus_use(c)
+            .or_else(|| absent_focus_use(t))
+            .or_else(|| absent_focus_use(f)),
+        Expr::For(bs, r) | Expr::Quant(_, bs, r) => bs
+            .iter()
+            .find_map(|(_, x)| absent_focus_use(x))
+            .or_else(|| absent_focus_use(r)),
+    }
+}

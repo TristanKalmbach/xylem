@@ -155,3 +155,28 @@ fn undeclared_variables_are_compile_errors() {
     assert!(e.message.contains("$nope"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_function_body_has_no_context_item() {
+    let dir = temp("no-focus");
+    let compile = |name: &str, select: &str| {
+        let path = dir.join(format!("{name}.xsl"));
+        std::fs::write(
+            &path,
+            format!(
+                "<xsl:stylesheet version=\"2.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\" xmlns:f=\"urn:f\">\n<xsl:function name=\"f:f\"><xsl:param name=\"p\"/>\n<xsl:sequence select=\"{select}\"/></xsl:function>\n<xsl:template match=\"/\"><r/></xsl:template></xsl:stylesheet>"
+            ),
+        )
+        .unwrap();
+        Stylesheet::compile_with(&path, &|_| None)
+    };
+    // Even in a function that is never called.
+    let e = compile("root", "//x").err().unwrap();
+    assert!(e.message.contains("XPTY0020"), "{e}");
+    assert_eq!(e.line, Some(3), "{e}");
+    let e = compile("position", "position()").err().unwrap();
+    assert!(e.message.contains("XPDY0002"), "{e}");
+    // A focus of its own makes them fine.
+    assert!(compile("own", "$p//x, $p/(//x), count($p[position() = 1])").is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}
