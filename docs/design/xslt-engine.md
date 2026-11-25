@@ -457,8 +457,9 @@ named in brackets; notes marked *unverified* still need a probe.
   `format-number` details and the 1.0 processor's `generate-id()` form,
   are not reproduced. XSLT 2.0 `xsl:output` serialization (Saxon's) is
   approximated by the 1.0 processor's.
-- Not implemented: `xsl:namespace`, `normalize-unicode`, `lang`, imports
-  inside included modules, schema awareness. `format-date`,
+- Not implemented: `normalize-unicode`, imports inside included modules,
+  schema awareness. Namespace declarations made with `xsl:namespace` may
+  come out in another order than Saxon writes them. `format-date`,
   `format-dateTime` and `format-time` are English and Gregorian only.
 - Errors carry the stylesheet file and line (`XsltError`): compile errors
   the element's line (malformed XML its line and column), run-time errors

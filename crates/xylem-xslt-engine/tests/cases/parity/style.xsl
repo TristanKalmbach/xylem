@@ -100,6 +100,12 @@ s2"><xsl:text>t1&#13;t2&#10;t3</xsl:text></lines>
         <w><xsl:value-of select="$t/a/text(), 1, 2, $t/a[1]/text()" separator="|"/></w>
         <x a="{$t/a/text()}"><xsl:attribute name="b" select="$t/a/text()"/></x>
       </simple>
+      <!-- xsl:namespace and lang(). -->
+      <ns><xsl:element name="e"><xsl:namespace name="p" select="'urn:p'"/><xsl:namespace name="q">urn:<xsl:value-of select="'q'"/></xsl:namespace><xsl:attribute name="p:a" namespace="urn:p">1</xsl:attribute></xsl:element></ns>
+      <lang>
+        <xsl:variable name="l"><d xml:lang="en-US"><p/><q xml:lang="de"/></d></xsl:variable>
+        <xsl:value-of select="lang('en', $l/d/p), lang('EN-us', $l/d), lang('en', $l/d/q), lang('fr', $l/d/p)"/>
+      </lang>
       <entities>
         <attr><xsl:value-of select="translate('xAyBzC', &U2L;)"/></attr>
         <avt v="{concat('&U;', '&sep;')}"/>

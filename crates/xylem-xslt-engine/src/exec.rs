@@ -372,7 +372,9 @@ impl<'s> Engine<'s> {
                 for p in parts {
                     match p {
                         AvtPart::Lit(l) => s.push_str(l),
-                        AvtPart::Expr(e) => s.push_str(&self.simple_content(&self.eval(e, d)?, " ")),
+                        AvtPart::Expr(e) => {
+                            s.push_str(&self.simple_content(&self.eval(e, d)?, " "))
+                        }
                     }
                 }
                 Ok(s)
@@ -1247,6 +1249,27 @@ impl<'s> Engine<'s> {
                 };
                 out.leaf(Kind::Comment, None, s);
             }
+            Instr::Namespace { name, select, body } => {
+                let prefix = self.avt(name, d)?.trim().to_string();
+                let uri = match select {
+                    Some(e) => self.simple_content(&self.eval(e, d)?, " "),
+                    None => self.content_string(body, d, None)?,
+                };
+                if !prefix.is_empty() && !crate::types::is_ncname(&prefix) {
+                    return Err(format!(
+                        "XTDE0920: '{prefix}' is not a valid namespace prefix"
+                    ));
+                }
+                if prefix == "xmlns" || (prefix == "xml") != (uri == crate::tree::XML_NS) {
+                    return Err(format!(
+                        "XTDE0925: xsl:namespace cannot bind '{prefix}' to '{uri}'"
+                    ));
+                }
+                if uri.is_empty() {
+                    return Err("XTDE0930: xsl:namespace gives an empty namespace URI".into());
+                }
+                out.namespace(&prefix, &uri)?;
+            }
             Instr::Pi { name, select, body } => {
                 let n = self.avt(name, d)?;
                 let s = match select {
@@ -1830,6 +1853,38 @@ impl Out {
         if self.top_level() {
             self.close_top(i);
         }
+    }
+
+    /// Adds a namespace node to the element being built (`xsl:namespace`);
+    /// it must come before the element's children.
+    pub fn namespace(&mut self, prefix: &str, uri: &str) -> R<()> {
+        self.after_atomic = false;
+        let Some(&p) = self.stack.last() else {
+            return Err("XTDE0410: xsl:namespace outside an element".into());
+        };
+        let node = &mut self.tree.nodes[p as usize];
+        if node.kind != Kind::Element {
+            return Err("XTDE0410: xsl:namespace outside an element".into());
+        }
+        if !node.children.is_empty() {
+            return Err("XTDE0410: xsl:namespace after the element's children".into());
+        }
+        if prefix.is_empty() && node.name.as_ref().is_some_and(|q| q.uri.is_empty()) {
+            return Err(
+                "XTDE0440: a default namespace cannot be added to an element in no namespace"
+                    .into(),
+            );
+        }
+        if let Some((_, u)) = node.ns.iter().find(|(q, _)| &**q == prefix) {
+            if &**u != uri {
+                return Err(format!(
+                    "XTDE0430: prefix '{prefix}' is bound to two namespaces on one element"
+                ));
+            }
+            return Ok(());
+        }
+        node.ns.push((prefix.into(), uri.into()));
+        Ok(())
     }
 
     pub fn attr(&mut self, name: QName, value: String) -> R<()> {

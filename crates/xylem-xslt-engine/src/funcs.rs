@@ -262,6 +262,32 @@ impl Engine<'_> {
                     .map(|p| Item::Atomic(Atomic::str(p)))
                     .collect())
             }
+            ("lang", 1 | 2) => {
+                // The nearest xml:lang on the node or its ancestors, equal to
+                // the argument or a sub-language of it, ignoring case.
+                let want = s(0)?.to_ascii_lowercase();
+                let Some(x) = node_arg(1)? else {
+                    return bool_(false);
+                };
+                let t = self.tree(x.tree);
+                let mut cur = Some(x.idx);
+                while let Some(i) = cur {
+                    let found = t.node(i).attrs.iter().map(|&a| t.node(a)).find(|a| {
+                        a.name
+                            .as_ref()
+                            .is_some_and(|q| &*q.uri == crate::tree::XML_NS && &*q.local == "lang")
+                    });
+                    if let Some(a) = found {
+                        let have = a.value.trim().to_ascii_lowercase();
+                        return bool_(
+                            have == want
+                                || have.strip_prefix(&want).is_some_and(|r| r.starts_with('-')),
+                        );
+                    }
+                    cur = t.node(i).parent;
+                }
+                bool_(false)
+            }
             ("name" | "local-name", 0 | 1) => {
                 let Some(x) = node_arg(0)? else {
                     return str_(String::new());
@@ -885,26 +911,6 @@ impl Engine<'_> {
                     String::new()
                 }
             )),
-            ("lang", 1) => {
-                let want = s(0)?.to_lowercase();
-                let Item::Node(x) = d.item()? else {
-                    return bool_(false);
-                };
-                let t = self.tree(x.tree);
-                let mut cur = Some(x.idx);
-                while let Some(c) = cur {
-                    for &a in &t.node(c).attrs {
-                        let an = t.node(a);
-                        let q = an.name.as_ref().unwrap();
-                        if &*q.uri == crate::tree::XML_NS && &*q.local == "lang" {
-                            let l = an.value.to_lowercase();
-                            return bool_(l == want || l.starts_with(&format!("{want}-")));
-                        }
-                    }
-                    cur = t.node(c).parent;
-                }
-                bool_(false)
-            }
             ("node-name", 1) => {
                 let Some(x) = node_arg(0)? else {
                     return Ok(vec![]);

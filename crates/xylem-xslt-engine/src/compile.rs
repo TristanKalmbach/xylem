@@ -164,6 +164,12 @@ pub enum Instr {
         select: Option<Expr>,
         body: Vec<Instr>,
     },
+    /// `xsl:namespace`: a namespace node for the element being built.
+    Namespace {
+        name: Avt,
+        select: Option<Expr>,
+        body: Vec<Instr>,
+    },
     Number(Box<Number>),
     Message {
         select: Option<Expr>,
@@ -1233,6 +1239,11 @@ impl Compiler<'_> {
                 body: self.body(e)?,
             },
             "processing-instruction" => Instr::Pi {
+                name: e.avt(e.req("name")?)?,
+                select: e.opt_expr("select")?,
+                body: self.body(e)?,
+            },
+            "namespace" => Instr::Namespace {
                 name: e.avt(e.req("name")?)?,
                 select: e.opt_expr("select")?,
                 body: self.body(e)?,
