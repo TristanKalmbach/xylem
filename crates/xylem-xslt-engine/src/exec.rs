@@ -134,9 +134,9 @@ impl RuleList {
         l
     }
 
-    /// Positions of the rules that could match node `n` of `t`, in the
-    /// order they are tried.
-    fn candidates(&self, t: &Tree, n: u32) -> Vec<u32> {
+    /// The three sorted lists of rule positions that could match node `n`
+    /// of `t`: its name's, its kind's and the any-node rules.
+    fn candidate_lists(&self, t: &Tree, n: u32) -> [&[u32]; 3] {
         let node = t.node(n);
         let slot = kind_slot(node.kind);
         let named = match (&node.name, node.kind) {
@@ -146,13 +146,30 @@ impl RuleList {
                 .map(Vec::as_slice),
             _ => None,
         };
-        let lists = [named.unwrap_or(&[]), &self.by_kind[slot], &self.any];
-        let mut out: Vec<u32> = Vec::with_capacity(lists.iter().map(|l| l.len()).sum());
-        for l in lists {
-            out.extend_from_slice(l);
+        [named.unwrap_or(&[]), &self.by_kind[slot], &self.any]
+    }
+}
+
+/// Walks sorted position lists in merged order without allocating.
+struct Merge<'a> {
+    lists: [&'a [u32]; 3],
+}
+
+impl Iterator for Merge<'_> {
+    type Item = u32;
+    fn next(&mut self) -> Option<u32> {
+        let mut best: Option<usize> = None;
+        for (i, l) in self.lists.iter().enumerate() {
+            if let Some(&v) = l.first()
+                && best.is_none_or(|b| v < self.lists[b][0])
+            {
+                best = Some(i);
+            }
         }
-        out.sort_unstable();
-        out
+        let b = best?;
+        let v = self.lists[b][0];
+        self.lists[b] = &self.lists[b][1..];
+        Some(v)
     }
 }
 /// One key's index over one tree: key value to nodes in document order.
@@ -273,6 +290,10 @@ pub struct Engine<'s> {
     /// Templates and functions being run, innermost last (see
     /// [`MAX_CALL_DEPTH`]).
     depth: std::cell::Cell<usize>,
+    /// Shared empty tunnel parameters and regex groups, so building a
+    /// dynamic context (for every pattern test) allocates nothing.
+    no_tunnel: Tunnel,
+    no_groups: Arc<Vec<String>>,
     source: u32,
 }
 
@@ -304,7 +325,17 @@ impl<'s> Engine<'s> {
             }),
             source: 0,
             depth: std::cell::Cell::new(0),
+            no_tunnel: Arc::default(),
+            no_groups: Arc::default(),
         }
+    }
+
+    /// Takes the trees and key indexes the run built, which are most of
+    /// what it allocated, so they can be freed away from the caller.
+    pub fn take_trees(&self) -> Box<dyn Send> {
+        let trees = std::mem::take(&mut *self.trees.borrow_mut());
+        let keys = std::mem::take(&mut *self.keys.borrow_mut());
+        Box::new((trees, keys))
     }
 
     /// Counts one more nested template or function call, failing past
@@ -345,8 +376,8 @@ impl<'s> Engine<'s> {
             env: Env::default(),
             current: Some(item),
             mode: None,
-            tunnel: Arc::default(),
-            groups: Arc::default(),
+            tunnel: self.no_tunnel.clone(),
+            groups: self.no_groups.clone(),
             rule: None,
             group: None,
         }
@@ -544,8 +575,8 @@ impl<'s> Engine<'s> {
         skip: Option<usize>,
     ) -> R<Option<(usize, usize)>> {
         let list = self.rules_for(mode);
-        let candidates = list.candidates(&self.tree(n.tree), n.idx);
-        for i in candidates {
+        let lists = list.candidate_lists(&self.tree(n.tree), n.idx);
+        for i in (Merge { lists }) {
             let i = i as usize;
             if i < from {
                 continue;
@@ -886,15 +917,18 @@ impl<'s> Engine<'s> {
             p.borrow_mut().enter(t);
         }
         let tpl = &self.ss.templates[t];
-        let mut tunnel: HashMap<QName, Arc<Seq>> = (*d.tunnel).clone();
-        for (n, v, tun) in params {
-            if *tun {
-                tunnel.insert(n.clone(), v.clone());
-            }
-        }
         let mut nd = d.clone();
         nd.env = Env::default();
-        nd.tunnel = Arc::new(tunnel);
+        // Tunnel parameters pass on unchanged unless this call adds some.
+        if params.iter().any(|(_, _, tun)| *tun) {
+            let mut tunnel: HashMap<QName, Arc<Seq>> = (*d.tunnel).clone();
+            for (n, v, tun) in params {
+                if *tun {
+                    tunnel.insert(n.clone(), v.clone());
+                }
+            }
+            nd.tunnel = Arc::new(tunnel);
+        }
         for p in &tpl.params {
             let supplied = if p.tunnel {
                 nd.tunnel.get(&p.name).cloned()

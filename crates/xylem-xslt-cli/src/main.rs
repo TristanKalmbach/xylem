@@ -41,7 +41,9 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Instant, SystemTime};
-use xylem_xslt_engine::{Stylesheet, VersionRule, XsltError, transform_bytes, with_file_access};
+use xylem_xslt_engine::{
+    ResultForm, Stylesheet, VersionRule, XsltError, transform_bytes_to, with_file_access,
+};
 
 const USAGE: &str = "usage: xylem-xslt transform --stylesheet <file.xsl> --input <file.xml> [--output <file>] [--param name=value ...] [--serialize] [--no-file-access] [--versions reference-host|2-and-above]
        xylem-xslt compile --stylesheet <file.xsl> ...
@@ -105,7 +107,12 @@ fn transform(args: &[String]) -> Result<(), String> {
     let mut ss = Stylesheet::compile(&stylesheet)?;
     ss.version_rule = versions;
     let bytes = std::fs::read(&input).map_err(|e| format!("{}: {e}", input.display()))?;
-    let mut out = with_file_access(files, || transform_bytes(&ss, &bytes, &params, false))?;
+    let write = if serialize {
+        ResultForm::Serialize
+    } else {
+        ResultForm::Publish
+    };
+    let mut out = with_file_access(files, || transform_bytes_to(&ss, &bytes, &params, write))?;
     let text = if serialize {
         std::mem::take(&mut out.serialized)
     } else {
@@ -271,7 +278,12 @@ fn handle(req: &Request, cache: &mut HashMap<PathBuf, Cached>) -> serde_json::Va
         })
         .collect();
     let result = with_file_access(!req.no_file_access, || {
-        transform_bytes(ss, &bytes, &params, false)
+        let write = if req.serialize {
+            ResultForm::Serialize
+        } else {
+            ResultForm::Publish
+        };
+        transform_bytes_to(ss, &bytes, &params, write)
     });
     let mut out = match result {
         Ok(o) => o,

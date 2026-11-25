@@ -22,7 +22,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
-use xylem_xslt_engine::{Stylesheet, XsltError, transform_bytes, with_file_access};
+use xylem_xslt_engine::{ResultForm, Stylesheet, XsltError, transform_bytes_to, with_file_access};
 
 /// Write the result the way a publishing service saves it: the
 /// `XmlDocument.OuterXml` form (no XML declaration, `xsl:output` ignored).
@@ -260,7 +260,12 @@ pub unsafe extern "C" fn xylem_xslt_transform(
         // A panic here unwinds to `guarded`, which returns 3; the handle
         // keeps no state from the run, so it stays usable.
         let result = with_file_access(flags & XYLEM_NO_FILE_ACCESS == 0, || {
-            transform_bytes(&ss.inner, bytes, &params, false)
+            let write = if flags & XYLEM_OUTPUT_SERIALIZE != 0 {
+                ResultForm::Serialize
+            } else {
+                ResultForm::Publish
+            };
+            transform_bytes_to(&ss.inner, bytes, &params, write)
         });
         if let Ok(o) = &result {
             set_log(&o.messages, &o.warnings);

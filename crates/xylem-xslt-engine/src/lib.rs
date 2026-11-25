@@ -96,7 +96,60 @@ pub fn transform_bytes(
     params: &HashMap<String, String>,
     time: bool,
 ) -> Result<Output, String> {
-    on_transform_thread(|| run_bytes(ss, input, params, time))
+    on_transform_thread(|| run_bytes(ss, input, params, time, ResultForm::Both))
+}
+
+/// Which forms of the principal result a transformation writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResultForm {
+    /// `Output::text` (publish) and `Output::serialized`.
+    Both,
+    /// Only `Output::text`, the publishing service's form.
+    Publish,
+    /// Only `Output::serialized`, as `xsl:output` asks.
+    Serialize,
+}
+
+/// Like [`transform_bytes`], writing only the forms of the result that
+/// `write` names (the other field of [`Output`] is left empty), which saves
+/// writing a large result twice.
+pub fn transform_bytes_to(
+    ss: &Stylesheet,
+    input: &[u8],
+    params: &HashMap<String, String>,
+    write: ResultForm,
+) -> Result<Output, String> {
+    on_transform_thread(|| run_bytes(ss, input, params, false, write))
+}
+
+/// Frees what a transformation built on a background thread, so the caller
+/// does not wait for thousands of temporary trees to be dropped.
+fn free_later(garbage: Box<dyn Send>) {
+    use std::sync::OnceLock;
+    use std::sync::mpsc::{Sender, channel};
+    type Freer = Option<std::sync::Mutex<Sender<Box<dyn Send>>>>;
+    static FREER: OnceLock<Freer> = OnceLock::new();
+    let freer = FREER.get_or_init(|| {
+        let (tx, rx) = channel::<Box<dyn Send>>();
+        std::thread::Builder::new()
+            .name("xylem-xslt-free".into())
+            .spawn(move || {
+                for g in rx {
+                    drop(g);
+                }
+            })
+            .ok()
+            .map(|_| std::sync::Mutex::new(tx))
+    });
+    match freer {
+        Some(tx) => {
+            let tx = tx.lock().unwrap_or_else(|p| p.into_inner());
+            if let Err(e) = tx.send(garbage) {
+                drop(e.0);
+            }
+        }
+        None => drop(garbage),
+    }
 }
 
 /// The stack of the thread each transformation runs on: enough for
@@ -133,6 +186,7 @@ fn run_bytes(
     input: &[u8],
     params: &HashMap<String, String>,
     time: bool,
+    write: ResultForm,
 ) -> Result<Output, String> {
     let doc = xylem_dom::Document::from_bytes(input).map_err(|e| format!("input: {e}"))?;
     // The host gives the input the stylesheet's folder as its base URI.
@@ -162,16 +216,26 @@ fn run_bytes(
         }
         timing.retain(|t| t.time.calls > 0);
     }
-    Ok(Output {
+    let out = Output {
         publish_error: publish_error(&result, &engine, compat),
-        text: value::with_compat(compat, || serialize::host_style(&result)),
-        serialized: value::with_compat(compat, || serialize::with_output(&result, &ss.output)),
+        text: if write == ResultForm::Serialize {
+            String::new()
+        } else {
+            value::with_compat(compat, || serialize::host_style(&result))
+        },
+        serialized: if write == ResultForm::Publish {
+            String::new()
+        } else {
+            value::with_compat(compat, || serialize::with_output(&result, &ss.output))
+        },
         results: secondary(&engine, compat),
         messages: engine.messages.borrow().clone(),
         warnings: engine.warnings.borrow().clone(),
         timing,
         total_ms: if time { total_ms } else { 0.0 },
-    })
+    };
+    free_later(Box::new((engine.take_trees(), result, doc)));
+    Ok(out)
 }
 
 /// Where a transformation starts.
