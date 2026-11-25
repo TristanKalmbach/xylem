@@ -140,137 +140,70 @@ and do not fail the run. A known problem that starts working shows as
   therefore shows up as the child's exit code and does not end the check.
   With `--reference`, the same case also runs through SaxonDotnetHost.
 
-### Results (library 0.6.0, 64-bit, CLR 4.0.30319.42000)
+### Results (64-bit process, CLR 4.0.30319.42000)
 
-Results were measured on the engine as of `be6fd8c` on main, except where
-marked.
+Measured on main as of the engine's recursion, static-check and speed
+work.
 
-**Threads.** The built-in sample (4 rounds) and a publication stylesheet on
-the largest input (1.5 MB, 2 rounds) both passed.
+**Threads.** One compiled stylesheet runs on many threads at once:
 
 | Check | Runs | Identical | Wall time |
 |---|---:|---:|---:|
-| sample, shared handle | 32 | 32 | 3.18 s (single run 95 ms) |
-| sample, handle per thread | 32 | 32 | 0.74 s |
-| publication, shared handle | 16 | 16 | 5.38 s (single run 333 ms) |
-| publication, handle per thread | 16 | 16 | 0.91 s |
+| sample, shared handle, 8 threads | 32 | 32 | 66 ms (single run 17 ms) |
+| sample, handle per thread, 8 threads | 32 | 32 | 61 ms |
 
-A shared handle is safe, but its calls take turns: 8 threads on one handle
-take as long as running one after another. For parallel work, keep one
-compiled stylesheet per worker thread. That scales about 4–6× on 8 threads.
+**Memory.** 1,000 compile + transform + free cycles: private bytes 44.1 MB
+at the start, peaking at 47.5 MB in both the middle and the last third
+(0.0 MB growth), every output identical.
 
-**Memory.** Private bytes level off and stay there.
+**Errors.** Every case comes back to .NET as the reference host behaves, and
+none ends the process:
 
-| Cycle | Input | Iterations | Private bytes (first → peak, middle → last third) |
-|---|---|---:|---|
-| compile + transform + free | sample | 1200 | 20.5 MB → 27.5 → 27.5 MB |
-| compile + transform + free | 49 KB publication | 1500 | 42.4 MB → 52.9 → 52.8 MB |
-| compile + transform + free | 1.5 MB publication | 300 | 34.8 MB → 72.4 → 72.3 MB ³ |
-| compile + free | publication stylesheet | 1500 | 20.9 MB → 30.9 → 32.1 MB ³ |
-| transform (one handle) | 49 KB publication | 1500 | 29.0 MB → 52.8 → 53.4 MB ³ |
+| Case | Engine through .NET | Saxon through .NET |
+|---|---|---|
+| `xsl:message terminate="yes"` | error | error |
+| `fn:error()` | error | error |
+| dynamic type error | error | error |
+| XPath that does not parse | compile error | compile error |
+| input not well-formed | error | error |
+| endless named-template recursion | error (XTDE0000, after 10,000 nested calls) | **process ends, 0xC00000FD** |
+| endless `xsl:function` recursion | error (XTDE0000) | **process ends, 0xC00000FD** |
+| endless `apply-templates` recursion | error (XTDE0000) | **process ends, 0xC00000FD** |
+| `document()` of a missing file | empty, with a warning | empty |
+| `doc()` of a missing file | error (FODC0002) | error |
+| input nested 2,000 elements deep | result | result |
 
-³ Measured on the engine as of `9d47447`, before the rebase.
-
-With the 1.5 MB input, single samples swing between 35 and 72 MB, depending
-on whether the heap has returned the last run's freed tree to Windows. The
-peaks do not rise.
-
-**Errors.**
-
-| Case | Engine through .NET | Saxon through .NET | Verdict |
-|---|---|---|---|
-| `xsl:message terminate="yes"` | error | error | pass |
-| `fn:error()` | error | error | pass |
-| dynamic type error | error | error | pass |
-| XPath that does not parse | compile error | compile error | pass |
-| input not well-formed | error | error | pass |
-| endless named-template recursion | **process ends, 0xC00000FD** | process ends, 0xC00000FD | xfail |
-| endless `xsl:function` recursion | **process ends, 0xC00000FD** | process ends, 0xC00000FD | xfail |
-| endless `apply-templates` recursion | **process ends, 0xC00000FD** | process ends, 0xC00000FD | xfail |
-| `document()` of a missing file | empty, no error | empty, no error | xfail |
-| `doc()` of a missing file | **empty, no error** | error (FODC0002) | xfail |
-| input nested 2000 elements deep | **process ends, 0xC00000FD** | no crash | xfail |
+Inputs nested 100,000 deep are read; ordinary recursion (an identity
+transform over a deeply nested document) works to well beyond the depth
+Saxon reaches before its stack overflows.
 
 ## Speed
 
-The tables below compare Saxon-HE 9.7 through .NET with the engine through
-.NET on the largest input (`--repeat 5`, median of five runs, same machine,
-one after the other). The in-process Rust column is `xylem-xslt-check run`,
-the engine without .NET. Its numbers show that calling the engine through
-P/Invoke costs about 3–5 %.
+Saxon-HE 9.7 through .NET against the engine through .NET, on the largest
+input (a 1.4 MB publication; `--repeat 5`, median, same machine, one after
+the other). The engine's output equals Saxon's on this input for all four
+stylesheets.
 
-| Stylesheet (input) | Saxon compile | Saxon run | Engine compile | Engine run (.NET) | Engine run (Rust) |
-|---|---:|---:|---:|---:|---:|
-| Publication A (1.5 MB XML) | 1219 ms | 222 ms² | 33 ms | 303 ms | 287 ms |
-| Publication B (1.5 MB XML) | 1054 ms | 23 ms | 33 ms | 33 ms | 31 ms |
-| Publication C (1.5 MB XML) | 982 ms | 115 ms | 27 ms | 228 ms | 217 ms |
-| Publication D (1.5 MB XML) | 975 ms | 138 ms | 26 ms | 287 ms | 275 ms |
-| FO to HTML, XSLT 1.0 (2.3 MB FO)¹ | 21 ms | 39 ms | 3 ms | 1464 ms | 1527 ms |
+| Stylesheet | Saxon compile | Saxon run | Engine compile | Engine run |
+|---|---:|---:|---:|---:|
+| Publication A | 1,073 ms | 309 ms | 24 ms | 12 ms |
+| Publication B | 1,120 ms | 303 ms | 21 ms | 8 ms |
+| Publication C | 985 ms | 326 ms | 20 ms | 11 ms |
+| Publication D | 1,139 ms | 275 ms | 22 ms | 13 ms |
+| FO to HTML, XSLT 1.0 (2.3 MB FO)¹ | 23 ms | 38 ms | 4 ms | 56 ms |
 
 ¹ The reference here is `XslCompiledTransform`, not Saxon.
-² 142 ms in an earlier run on the same machine; Saxon's times vary more
-between runs than the engine's.
 
-Saxon's first run is slower (about 270 ms) than the median shown. A service
-that compiles a stylesheet for each publication pays Saxon's compile time
-every time: about 1.2 s per publication, against about 0.3 s on the engine.
-With a cached compiled stylesheet, the engine runs the publishing
-stylesheets about 2× slower than Saxon. It runs the FO-to-HTML step about
-30× slower than `XslCompiledTransform`.
+Saxon's times vary between runs more than the engine's. On the publishing
+stylesheets the engine compiles about 50× and runs about 25× faster; the
+FO-to-HTML step runs about 1.5× slower than .NET's own XSLT 1.0 processor.
 
-## Engine problems found
+## Known differences
 
-These are reported, not fixed here. The `errors` check keeps each one as an
-expected failure.
-
-1. **No recursion limit.** Endless recursion through named templates,
-   functions or `apply-templates` overflows the native stack. Windows then
-   ends the whole host process with 0xC00000FD. `catch_unwind` cannot catch
-   this, so no error comes back to .NET. Saxon on .NET ends the same way, so
-   this is not a regression against the current service. It still means a
-   faulty stylesheet takes the service down. Repro: `selftest errors`, cases
-   `recursion-*`. The stylesheet is
-
-   ```xml
-   <xsl:template match="/"><xsl:call-template name="down"><xsl:with-param name="n" select="1"/></xsl:call-template></xsl:template>
-   <xsl:template name="down"><xsl:param name="n"/><level n="{$n}"><xsl:call-template name="down"><xsl:with-param name="n" select="$n + 1"/></xsl:call-template></level></xsl:template>
-   ```
-
-2. **Deeply nested input ends the process.** An input about 1,150 elements
-   deep overflows a 1 MB stack, even with a stylesheet that only writes
-   `<r/>`. Saxon does not crash on it, nor on a 100,000-deep input. `xylem-xslt-check run` fails
-   the same way, so the cause is the input parser or tree, not .NET. For a
-   service that takes uploaded content, this is a denial of service. Repro:
-   `selftest errors`, case `input-nested-2000`, or any `<e><e>…</e></e>`
-   input 1,200 levels deep with the stylesheet
-   `<xsl:template match="/"><r/></xsl:template>`.
-3. **`fn:doc()` of a missing file returns an empty sequence.** It must raise
-   `FODC0002`, as Saxon does. Repro: case `doc-missing`, with
-   `<xsl:copy-of select="doc('does-not-exist.xml')"/>`.
-4. **`document()` of a missing file is not an error.** It gives an empty
-   node-set. XSLT 2.0 makes this a recoverable error, and Saxon recovers the
-   same way, so the output matches. A host that wants a failure has no way
-   to ask for one, apart from `XYLEM_NO_FILE_ACCESS`, which refuses every
-   file. Case `document-missing`.
-5. **Compile errors name the stylesheet with a `\\?\` prefix**
-   (`\\?\C:\…\a.xsl (xsl:value-of): unexpected Eof in '1 +'`). This is a
-   canonicalized Windows path where the path as given would read better.
-6. **Speed of the XSLT 1.0 FO-to-HTML step** (see Speed). The engine's
-   profile (`xylem-xslt-check run --profile`) puts most of the time in the
-   self time of the two templates that call `apply-templates` over most of
-   the elements. A likely cause, not yet confirmed, is matching template
-   rules whose patterns have predicates (a `preceding-sibling` step and a
-   `generate-id()` comparison) against every element.
-7. **XSLT 1.0 publish output is not what `XslCompiledTransform` writes.**
-   The service writes a 1.0 stylesheet's result through an `XmlWriter`, and
-   the engine's publish output differs from it in two ways:
-   - `generate-id()` has Saxon's form (`d1e6`) instead of .NET's (`ID0EG`).
-   - Newlines in text stay LF instead of becoming CR LF (the writer's
-     default `NewLineHandling.Replace`).
-
-   The harness hands the engine the same `XDocument` text the service hands
-   `XslCompiledTransform`, so node positions match. Repro: a
-   `version="1.0"` stylesheet that writes `generate-id()` and copies
-   indented input, run through `differential` against SaxonDotnetHost
-   without `--serialize`. The FO-to-HTML step (`--serialize`) is not
-   affected.
+- XSLT 1.0 numbers converted to text may differ from .NET's in the last
+  digit (`6.4990000000000006` against `6.4990000000000005`). Both strings
+  are the same double; the engine writes the shortest form that reads back
+  exactly.
+- `generate-id()` in XSLT 1.0 has the engine's form (`d1e6`), not .NET's
+  (`ID0EG`). Within an output every ID still matches its references; use
+  `xylem-xslt-check differential --rename-ids` to compare such outputs.

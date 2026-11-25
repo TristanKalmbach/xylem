@@ -1028,16 +1028,19 @@ namespace Xylem.DotnetEmbed
             return sb.ToString();
         }
 
-        /// <summary>Engine problems known at the time of writing; see README.md.</summary>
-        private static readonly Dictionary<string, string> KnownIssues = new Dictionary<string, string>
+        /// <summary>
+        /// Cases where the right outcome is a normal result, as the reference
+        /// host gives: a deep input is read, and document() of a missing file
+        /// is an empty node-set (with a warning), not an error.
+        /// </summary>
+        private static readonly HashSet<string> ExpectResult = new HashSet<string>
         {
-            { "recursion-template", "no recursion limit: the native stack overflows and the process ends (0xC00000FD); Saxon on .NET ends the same way" },
-            { "recursion-function", "no recursion limit: the native stack overflows and the process ends (0xC00000FD); Saxon on .NET ends the same way" },
-            { "recursion-apply-templates", "no recursion limit: the native stack overflows and the process ends (0xC00000FD); Saxon on .NET ends the same way" },
-            { "document-missing", "document() of a missing file gives an empty node-set without an error; Saxon does the same (a recoverable error in XSLT 2.0)" },
-            { "doc-missing", "fn:doc() of a missing file gives an empty sequence; it must raise FODC0002, as Saxon does" },
-            { "input-nested-2000", "the input parser or tree recurses per element: about 1,150 levels overflow a 1 MB stack and end the process (0xC00000FD); Saxon reads it" },
+            "document-missing",
+            "input-nested-2000",
         };
+
+        /// <summary>Engine problems known at the time of writing (none); see README.md.</summary>
+        private static readonly Dictionary<string, string> KnownIssues = new Dictionary<string, string>();
 
         private static bool Errors(Args a, string scratch)
         {
@@ -1070,7 +1073,7 @@ namespace Xylem.DotnetEmbed
                     result = "wrong-place";
                 else
                     result = "crash";
-                bool passed = result == "error";
+                bool passed = ExpectResult.Contains(c.Name) ? result == "no-error" : result == "error";
                 string known;
                 KnownIssues.TryGetValue(c.Name, out known);
                 string verdict = passed ? (known != null ? "xpass" : "pass") : (known != null ? "xfail" : "fail");
