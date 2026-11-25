@@ -62,24 +62,57 @@ fn hash(bytes: &[u8]) -> u64 {
     h.finish()
 }
 
+/// The stylesheets to compile for a file, from
+/// [`xylem_xslt::navigate::tops_using`] (the file first, then the top-level
+/// stylesheets that use it). A module other stylesheets include is checked
+/// only through them: on its own it would report the variables and
+/// templates it relies on its includers for.
+pub fn entry_points(tops: &[PathBuf]) -> &[PathBuf] {
+    if tops.len() > 1 { &tops[1..] } else { tops }
+}
+
 /// Compiles each of `tops` (reading `unsaved` texts instead of the files
 /// they name) and collects the errors, each once.
 pub fn compile_errors(tops: &[PathBuf], unsaved: &HashMap<String, Vec<u8>>) -> Vec<Found> {
     let read = |p: &Path| unsaved.get(&path_key(p)).cloned();
+    // The stylesheets compile independently: spread them over a few cores,
+    // leaving the rest for the editor.
+    let workers = std::thread::available_parallelism()
+        .map_or(2, |n| (n.get() / 2).max(1))
+        .min(tops.len().max(1));
+    let chunk = tops.len().div_ceil(workers).max(1);
+    let per_chunk: Vec<Vec<Found>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = tops
+            .chunks(chunk)
+            .map(|part| {
+                let read = &read;
+                scope.spawn(move || {
+                    part.iter()
+                        .filter_map(|top| {
+                            xylem_xslt_engine::Stylesheet::compile_with(top, read)
+                                .err()
+                                .map(|e| Found {
+                                    file: e.file.as_deref().map(PathBuf::from),
+                                    line: e.line,
+                                    message: e.message.clone(),
+                                })
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or_default())
+            .collect()
+    });
     let mut found: Vec<Found> = Vec::new();
-    for top in tops {
-        if let Err(e) = xylem_xslt_engine::Stylesheet::compile_with(top, &read) {
-            let f = Found {
-                file: e.file.as_deref().map(PathBuf::from),
-                line: e.line,
-                message: e.message.clone(),
-            };
-            if !found.contains(&f) {
-                found.push(f);
-            }
-            if found.len() >= MAX_ERRORS {
-                break;
-            }
+    for f in per_chunk.into_iter().flatten() {
+        if !found.contains(&f) {
+            found.push(f);
+        }
+        if found.len() >= MAX_ERRORS {
+            break;
         }
     }
     found
@@ -149,7 +182,7 @@ impl XylemApp {
                 }
                 t
             });
-            let found = compile_errors(&tops, &unsaved);
+            let found = compile_errors(entry_points(&tops), &unsaved);
             let _ = tx.send(Finished {
                 key,
                 hash: h,
@@ -253,5 +286,36 @@ mod tests {
             Some(path_key(&module))
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod corpus {
+    use super::*;
+
+    /// Times the check on a real shared module:
+    /// `XYLEM_XSL_ISSUES_FILE=<module.xsl> cargo test -p xylem-app --release
+    /// stylesheet_issues::corpus -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "needs XYLEM_XSL_ISSUES_FILE"]
+    fn a_shared_module_is_checked_through_its_includers() {
+        let Some(file) = std::env::var_os("XYLEM_XSL_ISSUES_FILE").map(PathBuf::from) else {
+            return;
+        };
+        let started = Instant::now();
+        let tops = xylem_xslt::navigate::tops_using(&file);
+        let found_tops = started.elapsed();
+        let entries = entry_points(&tops);
+        let found = compile_errors(entries, &HashMap::new());
+        println!(
+            "{} stylesheets use it (found in {found_tops:?}); compiled {} in {:?}; {} errors",
+            tops.len() - 1,
+            entries.len(),
+            started.elapsed() - found_tops,
+            found.len()
+        );
+        for f in found.iter().take(10) {
+            println!("  {:?}:{:?} {}", f.file, f.line, f.message);
+        }
     }
 }
