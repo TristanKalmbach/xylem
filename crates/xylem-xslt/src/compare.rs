@@ -94,7 +94,7 @@ pub fn renumber_generated_ids(text: &str) -> String {
 /// the end of its document part (for the `d<doc>e<node>` form).
 ///
 /// `d<digits>e<digits>` may follow punctuation (`continuedTable-d62e206`);
-/// with `loose` it may also follow a letter (`partListItems-tabled15e155`,
+/// with `loose` it may also follow a letter (`itemList-rowd15e155`,
 /// a stylesheet joining a name and an ID), and the form .NET's XSLT
 /// processor gives is recognised too (`ID0EVEAC`: `ID` and capitals or
 /// digits, at least one digit, standing alone). Strict matching keeps words
@@ -387,8 +387,8 @@ mod tests {
 
     #[test]
     fn ids_joined_to_a_word_are_recognised_when_renaming() {
-        let a = b"<r id=\"partListItems-tabled1540e155\"/><l to=\"partListItems-tabled1540e155\"/>";
-        let b = b"<r id=\"partListItems-tabled27e155\"/><l to=\"partListItems-tabled27e155\"/>";
+        let a = b"<r id=\"itemList-rowd1540e155\"/><l to=\"itemList-rowd1540e155\"/>";
+        let b = b"<r id=\"itemList-rowd27e155\"/><l to=\"itemList-rowd27e155\"/>";
         assert!(!compare(a, b).identical);
         assert!(compare_with(a, b, true).identical);
     }
