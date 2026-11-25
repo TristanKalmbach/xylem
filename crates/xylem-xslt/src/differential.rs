@@ -11,7 +11,7 @@
 //! as each stylesheet finishes, and a run started again with the same work
 //! folder skips what is already there.
 
-use crate::compare::{Comparison, compare};
+use crate::compare::{Comparison, compare_with};
 use crate::host::{Host, Run};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -77,6 +77,9 @@ pub struct Plan<'a> {
     pub work: &'a Path,
     /// Stylesheets run at the same time.
     pub threads: usize,
+    /// Compare generated IDs by their node part only (see
+    /// [`crate::compare::compare_with`]).
+    pub ignore_id_documents: bool,
 }
 
 /// Name of the results file in the work folder.
@@ -237,7 +240,7 @@ fn run_unit(
             (None, Some(error)) => Outcome::CandidateFailed { error },
             (None, None) => match (std::fs::read(r_out), std::fs::read(c_out)) {
                 (Ok(a), Ok(b)) => {
-                    let c: Comparison = compare(&a, &b);
+                    let c: Comparison = compare_with(&a, &b, plan.ignore_id_documents);
                     if c.identical {
                         Outcome::Same {
                             byte_identical: c.byte_identical,
@@ -457,6 +460,7 @@ mod tests {
             candidate: &host,
             work: &work,
             threads: 2,
+            ignore_id_documents: false,
         };
         let cases = run(&plan, &|_| {}, &AtomicBool::new(false)).unwrap();
         assert_eq!(cases.len(), 8);

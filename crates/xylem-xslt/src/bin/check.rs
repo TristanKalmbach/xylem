@@ -767,7 +767,7 @@ fn host_command(mut args: impl Iterator<Item = String>) -> Result<bool, String> 
 
 const DIFFERENTIAL_USAGE: &str = "Usage: xylem-xslt-check differential <stylesheet folder | file.xsl ...> \
 --inputs <folder> [--input-pattern <pattern>] --reference <program> [--candidate <program>] \
-[--params \"name=value name=value\" ...] [--serialize] [--work <folder>] [--threads <n>] [--report <file.md>]";
+[--params \"name=value name=value\" ...] [--serialize] [--ignore-id-documents] [--work <folder>] [--threads <n>] [--report <file.md>]";
 
 /// `differential`: every top-level stylesheet × input × parameter set,
 /// through a reference engine and a candidate engine, compared.
@@ -785,6 +785,7 @@ fn differential(mut args: impl Iterator<Item = String>) -> Result<bool, String> 
     let mut threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).max(1));
     let mut report: Option<PathBuf> = None;
     let mut serialize = false;
+    let mut ignore_id_documents = false;
     while let Some(a) = args.next() {
         let mut value = |name: &str| {
             args.next()
@@ -792,6 +793,7 @@ fn differential(mut args: impl Iterator<Item = String>) -> Result<bool, String> 
         };
         match a.as_str() {
             "--serialize" => serialize = true,
+            "--ignore-id-documents" => ignore_id_documents = true,
             "--inputs" => inputs_dir = Some(PathBuf::from(value("--inputs")?)),
             "--input-pattern" => pattern = value("--input-pattern")?,
             "--reference" => reference = Some(PathBuf::from(value("--reference")?)),
@@ -880,6 +882,7 @@ fn differential(mut args: impl Iterator<Item = String>) -> Result<bool, String> 
         candidate: &candidate,
         work: &work,
         threads,
+        ignore_id_documents,
     };
     let cases = run_plan(&plan, &|line| println!("{line}"), &AtomicBool::new(false))
         .map_err(|e| format!("{}: {e}", work.display()))?;

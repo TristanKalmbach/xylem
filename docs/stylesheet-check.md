@@ -82,6 +82,14 @@ second step such as XSL-FO to HTML (inputs read as they are, results
 written as `xsl:output` asks). The exit code is 0 only when the engines
 agree everywhere.
 
+Generated IDs (`generate-id()`, such as `d12e345`) name a document and a
+node. Engines number temporary documents differently: one may build a
+tree once per loop where another builds it per iteration, or skip
+numbering trees nothing refers to. That changes the document part of IDs
+without changing which element refers to which. `--ignore-id-documents`
+compares only the node part. Check itself always compares IDs in full
+(with document numbers renumbered in order of appearance).
+
 `xylem-xslt-check run …` and `compile …` take the same arguments as
 `SaxonDotnetHost.exe` and answer with the built-in engine, so the check
 program can be used wherever an engine program is expected, to run the

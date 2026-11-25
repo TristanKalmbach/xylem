@@ -87,6 +87,12 @@ pub fn decode(bytes: &[u8]) -> String {
 /// Renumbers the document part of `generate-id()` values (`d31e20` →
 /// `d1e20`) in order of first appearance.
 pub fn renumber_generated_ids(text: &str) -> String {
+    rewrite_generated_ids(text, false)
+}
+
+/// Like [`renumber_generated_ids`], or with `drop_documents` every document
+/// part the same (`d31e20` → `d0e20`): only the node part is compared.
+fn rewrite_generated_ids(text: &str, drop_documents: bool) -> String {
     let b = text.as_bytes();
     let mut out = String::with_capacity(text.len());
     let mut docs: HashMap<&str, usize> = HashMap::new();
@@ -109,7 +115,11 @@ pub fn renumber_generated_ids(text: &str) -> String {
                 if k > j + 1 && (k == b.len() || !word(b[k])) {
                     let doc = &text[i + 1..j];
                     let n = docs.len() + 1;
-                    let n = *docs.entry(doc).or_insert(n);
+                    let n = if drop_documents {
+                        0
+                    } else {
+                        *docs.entry(doc).or_insert(n)
+                    };
                     out.push_str(&text[last..i]);
                     out.push('d');
                     out.push_str(&n.to_string());
@@ -213,9 +223,24 @@ fn paths_at(toks: &[&str], wanted: &[usize]) -> Vec<(String, Option<String>)> {
 
 /// Compares a baseline output with a candidate output.
 pub fn compare(baseline: &[u8], candidate: &[u8]) -> Comparison {
+    compare_with(baseline, candidate, false)
+}
+
+/// Like [`compare`]; with `ignore_id_documents`, the document part of
+/// generated IDs is not compared at all, only the node part. Engines number
+/// documents differently (a processor may build a temporary tree once where
+/// another builds it per iteration, or not number trees nothing refers to),
+/// which changes IDs without changing what refers to what within an output.
+pub fn compare_with(baseline: &[u8], candidate: &[u8], ignore_id_documents: bool) -> Comparison {
     let byte_identical = baseline == candidate;
-    let a = normalise(baseline);
-    let b = normalise(candidate);
+    let (a, b) = if ignore_id_documents {
+        (
+            rewrite_generated_ids(&decode(baseline), true),
+            rewrite_generated_ids(&decode(candidate), true),
+        )
+    } else {
+        (normalise(baseline), normalise(candidate))
+    };
     if a == b {
         return Comparison {
             identical: true,
@@ -303,6 +328,17 @@ pub fn compare(baseline: &[u8], candidate: &[u8]) -> Comparison {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn document_numbers_can_be_left_out_of_the_comparison() {
+        // The same node, numbered in different documents in a different order.
+        let a = b"<x id=\"d3e7\"/><y ref=\"d5e9\"/>";
+        let b = b"<x id=\"d4e7\"/><y ref=\"d4e9\"/>";
+        assert!(!compare(a, b).identical);
+        assert!(compare_with(a, b, true).identical);
+        // The node part still counts.
+        assert!(!compare_with(a, b"<x id=\"d4e8\"/><y ref=\"d4e9\"/>", true).identical);
+    }
 
     #[test]
     fn generated_ids_are_renumbered_by_first_appearance() {
