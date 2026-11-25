@@ -135,12 +135,13 @@ the reference host's rule.
 Then `format-date` / `format-dateTime` / `format-time`, `xsl:namespace`,
 `lang` with a node argument, single-item argument checks (`XPTY0004`),
 compile-time focus checks in function bodies (`XPTY0020`, `XPDY0002`) and
-culture-ordered `xsl:sort` (2026-11-25):
+culture-ordered `xsl:sort` and `attribute()` steps on the attribute axis
+(2026-11-25):
 
 | Suite | Run | Passed | Rate |
 |---|---:|---:|---:|
 | QT3, XPath 2.0 | 15,054 | 14,654 | 97.3% |
-| XSLT 1.0 and 2.0 | 4,763 | 4,072 | 85.5% |
+| XSLT 1.0 and 2.0 | 4,763 | 4,090 | 85.9% |
 
 ## Against the reference publishing service
 

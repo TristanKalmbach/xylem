@@ -779,6 +779,7 @@ impl Parser<'_> {
             let preds = self.preds()?;
             return Ok(PathStep::Expr(prim, preds));
         }
+        let mut explicit = true;
         let axis = if self.sym("@") {
             Axis::Attribute
         } else if let Tok::AxisName(a) = self.peek().clone() {
@@ -799,9 +800,18 @@ impl Parser<'_> {
                 _ => return Err(format!("unknown axis '{a}'")),
             }
         } else {
+            explicit = false;
             Axis::Child
         };
         let test = self.node_test(&axis)?;
+        // Without an axis, an attribute test (`attribute()`,
+        // `attribute(name)`) steps along the attribute axis (XPath 2.0
+        // section 3.2.1.1).
+        let axis = if !explicit && matches!(test, NodeTest::Attribute(_)) {
+            Axis::Attribute
+        } else {
+            axis
+        };
         let preds = self.preds()?;
         Ok(PathStep::Axis(Step { axis, test, preds }))
     }
