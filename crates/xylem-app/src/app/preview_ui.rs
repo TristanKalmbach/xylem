@@ -36,7 +36,10 @@ fn run_preview(
         .error
         .or_else(|| first.jobs.first().and_then(|j| j.error.clone()))
     {
-        return Err(format!("The publication stylesheet failed: {e}"));
+        return Err(format!(
+            "The publication stylesheet failed: {}",
+            super::run_ui::readable_error(&e, 8)
+        ));
     }
     let Some(html_sheet) = &cfg.html else {
         return Ok(fo);
@@ -52,7 +55,10 @@ fn run_preview(
         .error
         .or_else(|| second.jobs.first().and_then(|j| j.error.clone()))
     {
-        return Err(format!("Turning the output into HTML failed: {e}"));
+        return Err(format!(
+            "Turning the output into HTML failed: {}",
+            super::run_ui::readable_error(&e, 8)
+        ));
     }
     Ok(html)
 }

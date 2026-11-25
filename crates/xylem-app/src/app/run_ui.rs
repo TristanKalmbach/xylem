@@ -56,6 +56,29 @@ pub fn parse_params(text: &str) -> Result<BTreeMap<String, String>, String> {
     Ok(out)
 }
 
+/// An engine error made readable: runs of the same line (a template that
+/// called itself thousands of times) become one line with a count, and the
+/// whole is cut to `max_lines`.
+pub fn readable_error(e: &str, max_lines: usize) -> String {
+    let mut lines: Vec<(String, usize)> = Vec::new();
+    for line in e.lines() {
+        match lines.last_mut() {
+            Some((last, n)) if *last == line => *n += 1,
+            _ => lines.push((line.to_string(), 1)),
+        }
+    }
+    let total = lines.len();
+    let mut out: Vec<String> = lines
+        .into_iter()
+        .take(max_lines)
+        .map(|(l, n)| if n > 1 { format!("{l}  (×{n})") } else { l })
+        .collect();
+    if total > max_lines {
+        out.push(format!("  … {} more lines", total - max_lines));
+    }
+    out.join("\n")
+}
+
 /// The file extension for a result: `html` when it is an HTML page, `fo`
 /// for XSL-FO, `xml` for other markup, `txt` otherwise.
 pub fn result_extension(bytes: &[u8]) -> &'static str {
@@ -379,7 +402,7 @@ impl XylemApp {
                             crate::ui::notice(
                                 ui,
                                 crate::ui::Tone::Danger,
-                                format!("The stylesheet failed: {e}"),
+                                format!("The stylesheet failed: {}", readable_error(e, 12)),
                             );
                         }
                     }
@@ -429,6 +452,22 @@ impl XylemApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_repeated_errors_are_shortened() {
+        let mut e = String::from("XTDE0000: too deep");
+        for _ in 0..5000 {
+            e.push_str("\n  in template again (a.xsl:3)");
+        }
+        e.push_str("\n  in template / (a.xsl:2)");
+        let r = readable_error(&e, 12);
+        assert_eq!(
+            r,
+            "XTDE0000: too deep\n  in template again (a.xsl:3)  (×5000)\n  in template / (a.xsl:2)"
+        );
+        let many: String = (0..30).map(|i| format!("line {i}\n")).collect();
+        assert!(readable_error(&many, 12).ends_with("… 18 more lines"));
+    }
 
     #[test]
     fn parameters_and_result_types() {
