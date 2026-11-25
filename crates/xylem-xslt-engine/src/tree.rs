@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 use xylem_dom::{Document, NodeId, NodeKind};
 
 pub const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
@@ -17,9 +17,9 @@ pub const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 /// An expanded name. `prefix` is kept only to serialize it again.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct QName {
-    pub uri: Rc<str>,
-    pub local: Rc<str>,
-    pub prefix: Rc<str>,
+    pub uri: Arc<str>,
+    pub local: Arc<str>,
+    pub prefix: Arc<str>,
 }
 
 impl QName {
@@ -67,7 +67,7 @@ pub struct TNode {
     /// Text, comment, PI data or attribute value.
     pub value: String,
     /// Namespace bindings declared on (elements) or required by this node.
-    pub ns: Vec<(Rc<str>, Rc<str>)>,
+    pub ns: Vec<(Arc<str>, Arc<str>)>,
 }
 
 /// One document or temporary tree.
@@ -78,7 +78,7 @@ pub struct Tree {
     pub base: String,
     /// Per node, its number among the tree's non-attribute nodes in
     /// document order (see `generate-id` in the design notes).
-    numbers: std::cell::OnceCell<Vec<u32>>,
+    numbers: std::sync::OnceLock<Vec<u32>>,
     /// For stylesheet modules: per node, the line where an element's start
     /// tag ends (the line the reference processor reports), else empty.
     pub lines: Vec<u32>,
@@ -174,8 +174,8 @@ impl Tree {
     }
 
     /// In-scope namespaces of an element, innermost binding first.
-    pub fn in_scope(&self, i: u32) -> Vec<(Rc<str>, Rc<str>)> {
-        let mut out: Vec<(Rc<str>, Rc<str>)> = Vec::new();
+    pub fn in_scope(&self, i: u32) -> Vec<(Arc<str>, Arc<str>)> {
+        let mut out: Vec<(Arc<str>, Arc<str>)> = Vec::new();
         let mut cur = Some(i);
         while let Some(c) = cur {
             let n = self.node(c);
@@ -190,7 +190,7 @@ impl Tree {
     }
 
     /// Resolves a prefix in scope at element `i` ("" = default namespace).
-    pub fn resolve(&self, i: u32, prefix: &str) -> Option<Rc<str>> {
+    pub fn resolve(&self, i: u32, prefix: &str) -> Option<Arc<str>> {
         if prefix == "xml" {
             return Some(XML_NS.into());
         }
@@ -519,14 +519,14 @@ fn copy(
 ) -> Result<(), String> {
     // The namespace bindings in scope, innermost last, so resolving a
     // prefix does not walk every ancestor.
-    let mut scope: Vec<(Rc<str>, Rc<str>)> = if t.node(parent).kind == Kind::Element {
+    let mut scope: Vec<(Arc<str>, Arc<str>)> = if t.node(parent).kind == Kind::Element {
         let mut v = t.in_scope(parent);
         v.reverse();
         v
     } else {
         Vec::new()
     };
-    let resolve = |scope: &[(Rc<str>, Rc<str>)], prefix: &str| -> Option<Rc<str>> {
+    let resolve = |scope: &[(Arc<str>, Arc<str>)], prefix: &str| -> Option<Arc<str>> {
         if prefix == "xml" {
             return Some(XML_NS.into());
         }
@@ -567,7 +567,7 @@ fn copy(
                         a.name.strip_prefix("xmlns:")
                     };
                     if let Some(p) = decl {
-                        let binding: (Rc<str>, Rc<str>) = (p.into(), a.value.as_str().into());
+                        let binding: (Arc<str>, Arc<str>) = (p.into(), a.value.as_str().into());
                         t.nodes[me as usize].ns.push(binding.clone());
                         scope.push(binding);
                     }

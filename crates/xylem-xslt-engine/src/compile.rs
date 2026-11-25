@@ -5,7 +5,7 @@ use crate::tree::{self, Kind, QName, StripSpace, Tree};
 use crate::xpath::{self, BinOp, Expr, SeqType};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub const XSL_NS: &str = "http://www.w3.org/1999/XSL/Transform";
 
@@ -70,7 +70,7 @@ pub enum Instr {
     Text(String),
     Lre {
         name: QName,
-        ns: Vec<(Rc<str>, Rc<str>)>,
+        ns: Vec<(Arc<str>, Arc<str>)>,
         attrs: Vec<(QName, Avt)>,
         sets: Vec<QName>,
         body: Vec<Instr>,
@@ -136,7 +136,7 @@ pub enum Instr {
     Attribute {
         name: Avt,
         namespace: Option<Avt>,
-        scope: Rc<Vec<(Rc<str>, Rc<str>)>>,
+        scope: Arc<Vec<(Arc<str>, Arc<str>)>>,
         select: Option<Expr>,
         sep: Option<Avt>,
         body: Vec<Instr>,
@@ -144,7 +144,7 @@ pub enum Instr {
     Element {
         name: Avt,
         namespace: Option<Avt>,
-        scope: Rc<Vec<(Rc<str>, Rc<str>)>>,
+        scope: Arc<Vec<(Arc<str>, Arc<str>)>>,
         sets: Vec<QName>,
         body: Vec<Instr>,
     },
@@ -939,7 +939,7 @@ impl Compiler {
         let Some(local) = e.xsl_local() else {
             return self.lre(e).map(Some);
         };
-        let scope = || Rc::new(e.t.in_scope(e.i));
+        let scope = || Arc::new(e.t.in_scope(e.i));
         Ok(Some(match local {
             "param" | "sort" | "with-param" | "fallback" => return Ok(None),
             "text" => Instr::Text(e.t.string_value(e.i)),

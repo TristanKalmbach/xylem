@@ -2,7 +2,7 @@
 
 use crate::tree::NodeRef;
 use std::cmp::Ordering;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// `xs:decimal` as a fixed-point number with 18 fractional digits.
 ///
@@ -100,21 +100,21 @@ impl Decimal {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Atomic {
-    Str(Rc<str>),
-    Untyped(Rc<str>),
+    Str(Arc<str>),
+    Untyped(Arc<str>),
     Bool(bool),
     Int(i64),
     Dec(Decimal),
     Dbl(f64),
     /// A value of a derived built-in type (or `xs:anyURI`, `xs:float`):
     /// the type's local name and the value of its primitive base.
-    Sub(&'static str, Rc<Atomic>),
+    Sub(&'static str, Arc<Atomic>),
     /// A date/time value (`xs:dateTime`, `xs:date`, ..., `xs:gDay`).
-    Time(Rc<crate::datetime::DateTime>),
+    Time(Arc<crate::datetime::DateTime>),
     /// A duration (`xs:duration` and its two subtypes).
-    Dur(Rc<crate::datetime::Duration>),
+    Dur(Arc<crate::datetime::Duration>),
     /// An `xs:QName`: namespace URI, prefix, local name.
-    QName(Rc<(Rc<str>, Rc<str>, Rc<str>)>),
+    QName(Arc<(Arc<str>, Arc<str>, Arc<str>)>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -126,7 +126,7 @@ pub enum Item {
 pub type Seq = Vec<Item>;
 
 impl Atomic {
-    pub fn str(s: impl Into<Rc<str>>) -> Atomic {
+    pub fn str(s: impl Into<Arc<str>>) -> Atomic {
         Atomic::Str(s.into())
     }
     /// The value with any derived-type annotation removed: what the

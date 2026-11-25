@@ -8,7 +8,7 @@
 //! them for XSLT 1.0 results (see [`node`]).
 
 use crate::tree::{Kind, Tree, XML_NS};
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// Why the reference host could not save this result as a document, or
 /// `None`. The host builds an XML document from the result (XSLT 2.0) or
@@ -53,14 +53,14 @@ pub fn document_error(t: &Tree, xslt1: bool) -> Option<String> {
 
 pub fn host_style(t: &Tree) -> String {
     let mut out = String::new();
-    let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];
+    let mut scope: Vec<(Arc<str>, Arc<str>)> = vec![("".into(), "".into())];
     for &c in &t.node(0).children {
         node(t, c, &mut scope, &mut out);
     }
     out
 }
 
-fn bound<'a>(scope: &'a [(Rc<str>, Rc<str>)], p: &str) -> Option<&'a str> {
+fn bound<'a>(scope: &'a [(Arc<str>, Arc<str>)], p: &str) -> Option<&'a str> {
     scope
         .iter()
         .rev()
@@ -71,7 +71,7 @@ fn bound<'a>(scope: &'a [(Rc<str>, Rc<str>)], p: &str) -> Option<&'a str> {
 /// One node written as XML, with the namespace declarations it needs.
 pub fn node_xml(t: &Tree, i: u32) -> String {
     let mut out = String::new();
-    let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];
+    let mut scope: Vec<(Arc<str>, Arc<str>)> = vec![("".into(), "".into())];
     match t.node(i).kind {
         Kind::Attribute => {
             let n = t.node(i);
@@ -100,7 +100,7 @@ enum Step {
     Close(u32, usize),
 }
 
-fn node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String) {
+fn node(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut String) {
     let mut stack = vec![Step::Open(i, false)];
     while let Some(step) = stack.pop() {
         let i = match step {
@@ -172,14 +172,14 @@ fn host_text(s: &str, out: &mut String) {
 
 /// Writes an element's start tag up to its closing `>` and adds the
 /// namespace declarations it writes to `scope`.
-fn start_tag(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String) {
+fn start_tag(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut String) {
     let n = t.node(i);
     let name = n.name.as_ref().unwrap();
-    let mut decls: Vec<(Rc<str>, Rc<str>)> = Vec::new();
-    let need = |p: &Rc<str>,
-                u: &Rc<str>,
-                scope: &Vec<(Rc<str>, Rc<str>)>,
-                decls: &mut Vec<(Rc<str>, Rc<str>)>| {
+    let mut decls: Vec<(Arc<str>, Arc<str>)> = Vec::new();
+    let need = |p: &Arc<str>,
+                u: &Arc<str>,
+                scope: &Vec<(Arc<str>, Arc<str>)>,
+                decls: &mut Vec<(Arc<str>, Arc<str>)>| {
         if &**p == "xml" || (u.is_empty() && !p.is_empty()) {
             return;
         }
@@ -318,7 +318,7 @@ pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
                     _ => {}
                 }
             }
-            let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];
+            let mut scope: Vec<(Arc<str>, Arc<str>)> = vec![("".into(), "".into())];
             for &c in &t.node(0).children {
                 html_node(t, c, &mut scope, &mut out);
             }
@@ -335,7 +335,7 @@ pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
                     None => out.push_str(&format!("<!DOCTYPE {name} SYSTEM \"{s}\">")),
                 }
             }
-            let mut scope: Vec<(Rc<str>, Rc<str>)> = vec![("".into(), "".into())];
+            let mut scope: Vec<(Arc<str>, Arc<str>)> = vec![("".into(), "".into())];
             for &c in &t.node(0).children {
                 node(t, c, &mut scope, &mut out);
             }
@@ -344,7 +344,7 @@ pub fn with_output(t: &Tree, o: &crate::compile::OutputSpec) -> String {
     out.replace('\n', "\r\n")
 }
 
-fn html_node(t: &Tree, i: u32, scope: &mut Vec<(Rc<str>, Rc<str>)>, out: &mut String) {
+fn html_node(t: &Tree, i: u32, scope: &mut Vec<(Arc<str>, Arc<str>)>, out: &mut String) {
     let mut stack = vec![Step::Open(i, false)];
     while let Some(step) = stack.pop() {
         let (i, raw) = match step {

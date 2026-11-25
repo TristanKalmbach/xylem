@@ -7,7 +7,7 @@ use crate::tree::{Kind, NodeRef, QName};
 use crate::value::{Atomic, Decimal, Item, Seq};
 use crate::xpath::{Expr, FN_NS, XS_NS};
 use crate::xsd_regex::XRegex;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// `round()` semantics: halves round towards positive infinity.
 pub fn round_half_up(x: f64) -> f64 {
@@ -432,7 +432,7 @@ impl Engine<'_> {
                         _ => x.0.abs(),
                     })),
                     Atomic::Sub("float", v) => {
-                        Atomic::Sub("float", Rc::new(Atomic::Dbl(f(v.to_f64()) as f32 as f64)))
+                        Atomic::Sub("float", Arc::new(Atomic::Dbl(f(v.to_f64()) as f32 as f64)))
                     }
                     o => Atomic::Dbl(f(o.to_f64())),
                 })])
@@ -445,7 +445,7 @@ impl Engine<'_> {
                     _ => crate::datetime::DtKind::DateTime,
                 };
                 let v = now.convert(kind).unwrap_or(now);
-                Ok(vec![Item::Atomic(Atomic::Time(Rc::new(v)))])
+                Ok(vec![Item::Atomic(Atomic::Time(Arc::new(v)))])
             }
             ("implicit-timezone", 0) => Ok(vec![Item::Atomic(crate::datetime::tz_duration(
                 crate::datetime::IMPLICIT_TZ,
@@ -461,7 +461,7 @@ impl Engine<'_> {
                     return Err("XPTY0004: dateTime() needs a date and a time".into());
                 };
                 let v = crate::datetime::combine(d, t)?;
-                Ok(vec![Item::Atomic(Atomic::Time(Rc::new(v)))])
+                Ok(vec![Item::Atomic(Atomic::Time(Arc::new(v)))])
             }
             (
                 "adjust-dateTime-to-timezone"
@@ -488,7 +488,7 @@ impl Engine<'_> {
                 } else {
                     Some(crate::datetime::IMPLICIT_TZ)
                 };
-                Ok(vec![Item::Atomic(Atomic::Time(Rc::new(t.adjust(tz))))])
+                Ok(vec![Item::Atomic(Atomic::Time(Arc::new(t.adjust(tz))))])
             }
             (f, 1) if component_fn(f).is_some() => {
                 let v = self.atomize(&arg(0)?);
@@ -516,7 +516,7 @@ impl Engine<'_> {
                 if !names_ok || (!prefix.is_empty() && uri.is_empty()) {
                     return Err(format!("FOCA0002: invalid QName '{lex}'"));
                 }
-                Ok(vec![Item::Atomic(Atomic::QName(Rc::new((
+                Ok(vec![Item::Atomic(Atomic::QName(Arc::new((
                     uri.as_str().into(),
                     prefix.into(),
                     local.into(),
@@ -534,7 +534,7 @@ impl Engine<'_> {
                     "local-name-from-QName" => str_(q.2.to_string()),
                     "namespace-uri-from-QName" => Ok(vec![Item::Atomic(Atomic::Sub(
                         "anyURI",
-                        Rc::new(Atomic::str(q.0.clone())),
+                        Arc::new(Atomic::str(q.0.clone())),
                     ))]),
                     _ if q.1.is_empty() => Ok(vec![]),
                     _ => str_(q.1.to_string()),
@@ -563,7 +563,7 @@ impl Engine<'_> {
                 let r = match numeric_of(a) {
                     Atomic::Sub("float", v) => {
                         let r = round_half_even(&Atomic::Dbl(v.to_f64() as f32 as f64), p);
-                        Atomic::Sub("float", Rc::new(Atomic::Dbl(r.to_f64() as f32 as f64)))
+                        Atomic::Sub("float", Arc::new(Atomic::Dbl(r.to_f64() as f32 as f64)))
                     }
                     o => round_half_even(&o, p),
                 };
@@ -751,7 +751,7 @@ impl Engine<'_> {
                 let u = self.base_uri(x)?;
                 Ok(vec![Item::Atomic(Atomic::Sub(
                     "anyURI",
-                    Rc::new(Atomic::str(u)),
+                    Arc::new(Atomic::str(u)),
                 ))])
             }
             ("document-uri", 1) => {
@@ -760,7 +760,7 @@ impl Engine<'_> {
                 };
                 Ok(self
                     .document_uri(x)
-                    .map(|u| Item::Atomic(Atomic::Sub("anyURI", Rc::new(Atomic::str(u)))))
+                    .map(|u| Item::Atomic(Atomic::Sub("anyURI", Arc::new(Atomic::str(u)))))
                     .into_iter()
                     .collect())
             }
@@ -770,7 +770,7 @@ impl Engine<'_> {
                 let u = crate::uri::from_path(&self.ss.path);
                 Ok(vec![Item::Atomic(Atomic::Sub(
                     "anyURI",
-                    Rc::new(Atomic::str(u)),
+                    Arc::new(Atomic::str(u)),
                 ))])
             }
             ("resolve-uri", 1 | 2) => {
@@ -787,7 +787,7 @@ impl Engine<'_> {
                 let u = crate::uri::resolve(rel.trim(), base.trim())?;
                 Ok(vec![Item::Atomic(Atomic::Sub(
                     "anyURI",
-                    Rc::new(Atomic::str(u)),
+                    Arc::new(Atomic::str(u)),
                 ))])
             }
             ("deep-equal", 2 | 3) => {

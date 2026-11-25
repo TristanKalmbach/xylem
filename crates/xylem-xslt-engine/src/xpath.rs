@@ -4,7 +4,7 @@
 
 use crate::tree::QName;
 use crate::value::{Atomic, Decimal};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Axis {
@@ -627,7 +627,7 @@ impl Parser<'_> {
             None if p.is_empty() => String::new(),
             None => return Err(format!("FONS0004: undeclared prefix '{p}'")),
         };
-        Ok(Atomic::QName(std::rc::Rc::new((
+        Ok(Atomic::QName(std::sync::Arc::new((
             uri.into(),
             p.into(),
             l.into(),
@@ -943,7 +943,7 @@ impl Parser<'_> {
                     && let Some(base) = (self.ns)(STATIC_BASE_KEY)
                 {
                     let base =
-                        Expr::Literal(Atomic::Sub("anyURI", Rc::new(Atomic::str(base.as_str()))));
+                        Expr::Literal(Atomic::Sub("anyURI", Arc::new(Atomic::str(base.as_str()))));
                     match (&*q.local, args.len()) {
                         ("static-base-uri", 0) => return Ok(base),
                         ("resolve-uri", 1) => args.push(base),

@@ -699,7 +699,7 @@ pub fn arith(op: BinOp, x: &Atomic, y: &Atomic) -> R<Atomic> {
         // float op (float|decimal|integer) is a float; with a double, a double.
         let narrow = !matches!(x, Dbl(_)) && !matches!(y, Dbl(_));
         return Ok(match r {
-            Dbl(d) if narrow => Sub("float", std::rc::Rc::new(Dbl(d as f32 as f64))),
+            Dbl(d) if narrow => Sub("float", std::sync::Arc::new(Dbl(d as f32 as f64))),
             o => o,
         });
     }

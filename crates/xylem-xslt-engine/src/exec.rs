@@ -10,14 +10,14 @@ use crate::value::{Atomic, Item, Seq};
 use crate::xpath::{Axis, Expr, PathStep, Step};
 use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// A linked list of variable bindings; cloning is cheap.
 #[derive(Clone, Default)]
-pub struct Env(Option<Rc<(QName, Rc<Seq>, Env)>>);
+pub struct Env(Option<Arc<(QName, Arc<Seq>, Env)>>);
 
-type Tunnel = Rc<HashMap<QName, Rc<Seq>>>;
+type Tunnel = Arc<HashMap<QName, Arc<Seq>>>;
 /// Template rules of one mode, best first: (template, pattern alternative).
 type RuleList = Vec<(usize, usize)>;
 /// One key's index over one tree: key value to nodes in document order.
@@ -36,10 +36,10 @@ pub struct Dyn {
     pub tunnel: Tunnel,
     /// `regex-group()`: the captured groups of the current
     /// `xsl:matching-substring` (group 0 is the whole match).
-    pub groups: Rc<Vec<String>>,
+    pub groups: Arc<Vec<String>>,
     /// `current-group()` and `current-grouping-key()` of the innermost
     /// `xsl:for-each-group`.
-    pub group: Option<Rc<(Seq, Option<Atomic>)>>,
+    pub group: Option<Arc<(Seq, Option<Atomic>)>>,
     /// The current template rule: its position in the mode's rule list
     /// and its template, for `xsl:next-match` / `xsl:apply-imports`.
     pub rule: Option<(usize, usize)>,
@@ -61,10 +61,10 @@ impl Dyn {
     }
     pub fn bind(&self, name: QName, v: Seq) -> Dyn {
         let mut d = self.clone();
-        d.env = Env(Some(Rc::new((name, Rc::new(v), self.env.clone()))));
+        d.env = Env(Some(Arc::new((name, Arc::new(v), self.env.clone()))));
         d
     }
-    fn lookup(&self, n: &QName) -> Option<Rc<Seq>> {
+    fn lookup(&self, n: &QName) -> Option<Arc<Seq>> {
         let mut cur = &self.env;
         while let Some(b) = &cur.0 {
             if b.0.same(n) {
@@ -117,12 +117,12 @@ impl Profiler {
 
 pub struct Engine<'s> {
     pub ss: &'s Stylesheet,
-    trees: RefCell<Vec<Rc<Tree>>>,
-    globals: RefCell<HashMap<QName, Rc<Seq>>>,
+    trees: RefCell<Vec<Arc<Tree>>>,
+    globals: RefCell<HashMap<QName, Arc<Seq>>>,
     evaluating: RefCell<Vec<QName>>,
     params: HashMap<String, String>,
-    rules: RefCell<HashMap<Option<QName>, Rc<RuleList>>>,
-    keys: RefCell<HashMap<(QName, u32), Rc<KeyIndex>>>,
+    rules: RefCell<HashMap<Option<QName>, Arc<RuleList>>>,
+    keys: RefCell<HashMap<(QName, u32), Arc<KeyIndex>>>,
     docs: RefCell<HashMap<String, u32>>,
     pub messages: RefCell<Vec<String>>,
     /// Secondary results from `xsl:result-document`: (href, tree), in the
@@ -144,7 +144,7 @@ impl<'s> Engine<'s> {
     ) -> Engine<'s> {
         Engine {
             ss,
-            trees: RefCell::new(vec![Rc::new(source)]),
+            trees: RefCell::new(vec![Arc::new(source)]),
             globals: RefCell::default(),
             evaluating: RefCell::default(),
             params: params.into_iter().collect(),
@@ -167,12 +167,12 @@ impl<'s> Engine<'s> {
     pub fn tree(&self, i: u32) -> Ref<'_, Tree> {
         Ref::map(self.trees.borrow(), |t| &*t[i as usize])
     }
-    pub fn tree_rc(&self, i: u32) -> Rc<Tree> {
+    pub fn tree_rc(&self, i: u32) -> Arc<Tree> {
         self.trees.borrow()[i as usize].clone()
     }
     pub fn add_tree(&self, t: Tree) -> u32 {
         let mut v = self.trees.borrow_mut();
-        v.push(Rc::new(t));
+        v.push(Arc::new(t));
         (v.len() - 1) as u32
     }
 
@@ -188,8 +188,8 @@ impl<'s> Engine<'s> {
             env: Env::default(),
             current: Some(item),
             mode: None,
-            tunnel: Rc::default(),
-            groups: Rc::default(),
+            tunnel: Arc::default(),
+            groups: Arc::default(),
             rule: None,
             group: None,
         }
@@ -295,7 +295,7 @@ impl<'s> Engine<'s> {
         self.evaluating.borrow_mut().pop();
         self.globals
             .borrow_mut()
-            .insert(n.clone(), Rc::new(v.clone()));
+            .insert(n.clone(), Arc::new(v.clone()));
         Ok(v)
     }
 
@@ -344,7 +344,7 @@ impl<'s> Engine<'s> {
 
     // ---- template rules -------------------------------------------------
 
-    fn rules_for(&self, mode: &Option<QName>) -> Rc<Vec<(usize, usize)>> {
+    fn rules_for(&self, mode: &Option<QName>) -> Arc<Vec<(usize, usize)>> {
         if let Some(r) = self.rules.borrow().get(mode) {
             return r.clone();
         }
@@ -368,7 +368,7 @@ impl<'s> Engine<'s> {
             (tt.prec, tt.matches[k].1, t)
         };
         v.sort_by(|a, b| key(b).partial_cmp(&key(a)).unwrap());
-        let r = Rc::new(v);
+        let r = Arc::new(v);
         self.rules.borrow_mut().insert(mode.clone(), r.clone());
         r
     }
@@ -546,7 +546,7 @@ impl<'s> Engine<'s> {
         items: &Seq,
         d: &Dyn,
         mode: Option<QName>,
-        params: &[(QName, Rc<Seq>, bool)],
+        params: &[(QName, Arc<Seq>, bool)],
         out: &mut Out,
     ) -> R<()> {
         let size = items.len();
@@ -575,7 +575,7 @@ impl<'s> Engine<'s> {
         &self,
         n: NodeRef,
         d: &Dyn,
-        params: &[(QName, Rc<Seq>, bool)],
+        params: &[(QName, Arc<Seq>, bool)],
         out: &mut Out,
     ) -> R<()> {
         let kind = self.tree(n.tree).node(n.idx).kind;
@@ -605,12 +605,18 @@ impl<'s> Engine<'s> {
     }
 
     /// Calls template `t` with `params` (name, value, tunnel).
-    fn invoke(&self, t: usize, d: &Dyn, params: &[(QName, Rc<Seq>, bool)], out: &mut Out) -> R<()> {
+    fn invoke(
+        &self,
+        t: usize,
+        d: &Dyn,
+        params: &[(QName, Arc<Seq>, bool)],
+        out: &mut Out,
+    ) -> R<()> {
         if let Some(p) = &self.timing {
             p.borrow_mut().enter(t);
         }
         let tpl = &self.ss.templates[t];
-        let mut tunnel: HashMap<QName, Rc<Seq>> = (*d.tunnel).clone();
+        let mut tunnel: HashMap<QName, Arc<Seq>> = (*d.tunnel).clone();
         for (n, v, tun) in params {
             if *tun {
                 tunnel.insert(n.clone(), v.clone());
@@ -618,7 +624,7 @@ impl<'s> Engine<'s> {
         }
         let mut nd = d.clone();
         nd.env = Env::default();
-        nd.tunnel = Rc::new(tunnel);
+        nd.tunnel = Arc::new(tunnel);
         for p in &tpl.params {
             let supplied = if p.tunnel {
                 nd.tunnel.get(&p.name).cloned()
@@ -648,9 +654,9 @@ impl<'s> Engine<'s> {
         r.map_err(|e| format!("{e}\n  in template {}", tpl.location))
     }
 
-    fn with_params(&self, ps: &[Param], d: &Dyn) -> R<Vec<(QName, Rc<Seq>, bool)>> {
+    fn with_params(&self, ps: &[Param], d: &Dyn) -> R<Vec<(QName, Arc<Seq>, bool)>> {
         ps.iter()
-            .map(|p| Ok((p.name.clone(), Rc::new(self.binding(p, d)?), p.tunnel)))
+            .map(|p| Ok((p.name.clone(), Arc::new(self.binding(p, d)?), p.tunnel)))
             .collect()
     }
 
@@ -737,7 +743,7 @@ impl<'s> Engine<'s> {
                         }
                     }
                 }
-                let i = Rc::new(map);
+                let i = Arc::new(map);
                 self.keys.borrow_mut().insert(id, i.clone());
                 i
             }
@@ -1020,11 +1026,11 @@ impl<'s> Engine<'s> {
                     nd.rule = None;
                     match groups {
                         Some(g) => {
-                            nd.groups = Rc::new(g);
+                            nd.groups = Arc::new(g);
                             self.body(matching, &nd, out)?;
                         }
                         None => {
-                            nd.groups = Rc::default();
+                            nd.groups = Arc::default();
                             self.body(non_matching, &nd, out)?;
                         }
                     }
@@ -1071,7 +1077,7 @@ impl<'s> Engine<'s> {
                         let mut nd = d.focus(first.clone(), k + 1, size);
                         nd.current = Some(first);
                         nd.rule = None;
-                        nd.group = Some(Rc::new((g, gk)));
+                        nd.group = Some(Arc::new((g, gk)));
                         (nd.clone(), nd)
                     })
                     .collect();
@@ -1241,7 +1247,7 @@ impl<'s> Engine<'s> {
         &self,
         lexical: &str,
         ns: Option<&Avt>,
-        scope: &[(Rc<str>, Rc<str>)],
+        scope: &[(Arc<str>, Arc<str>)],
         d: &Dyn,
         element: bool,
     ) -> R<QName> {
@@ -1739,7 +1745,7 @@ impl Out {
         }));
     }
 
-    pub fn start(&mut self, name: QName, ns: Vec<(Rc<str>, Rc<str>)>) {
+    pub fn start(&mut self, name: QName, ns: Vec<(Arc<str>, Arc<str>)>) {
         self.after_atomic = false;
         let mut n = TNode::new(Kind::Element, None);
         n.name = Some(name);
@@ -1885,7 +1891,7 @@ impl Out {
     /// stack, and carries each element's in-scope namespaces down instead
     /// of walking every ancestor again.
     fn copy_node(&mut self, src: &Tree, i: u32) {
-        type Scope = Rc<Vec<(Rc<str>, Rc<str>)>>;
+        type Scope = Arc<Vec<(Arc<str>, Arc<str>)>>;
         enum Step {
             Node(u32, Option<Scope>),
             End,
@@ -1909,7 +1915,7 @@ impl Out {
                     let scope = match outer {
                         None => src.in_scope(i),
                         Some(outer) => {
-                            let mut v: Vec<(Rc<str>, Rc<str>)> = Vec::new();
+                            let mut v: Vec<(Arc<str>, Arc<str>)> = Vec::new();
                             for (p, u) in &n.ns {
                                 if !v.iter().any(|(q, _)| q == p) {
                                     v.push((p.clone(), u.clone()));
@@ -1924,7 +1930,7 @@ impl Out {
                             v
                         }
                     };
-                    let scope = Rc::new(scope);
+                    let scope = Arc::new(scope);
                     self.start(n.name.clone().unwrap(), (*scope).clone());
                     for &a in &n.attrs {
                         let an = src.node(a);

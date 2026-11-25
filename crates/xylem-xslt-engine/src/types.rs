@@ -7,7 +7,7 @@
 //! string types and `xs:anyURI`, a `Dbl` for `xs:float`).
 
 use crate::value::Atomic;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// The type each built-in derived type is derived from.
 pub fn parent(t: &str) -> Option<&'static str> {
@@ -209,7 +209,7 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
             if v < lo || v > hi {
                 return Err(format!("FORG0001: {v} is out of range for xs:{t}"));
             }
-            return Ok(Atomic::Sub(name, Rc::new(Atomic::Int(v as i64))));
+            return Ok(Atomic::Sub(name, Arc::new(Atomic::Int(v as i64))));
         }
         match t {
             "anyURI" if lexical || matches!(a, Atomic::Sub("anyURI", _)) => {
@@ -217,7 +217,7 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
                 if !is_uri(v) {
                     return Err(bad());
                 }
-                Ok(Atomic::Sub(name, Rc::new(Atomic::str(v))))
+                Ok(Atomic::Sub(name, Arc::new(Atomic::str(v))))
             }
             "float" => {
                 let d = match &prim {
@@ -237,7 +237,7 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
                         ));
                     }
                 };
-                Ok(Atomic::Sub(name, Rc::new(Atomic::Dbl(d as f32 as f64))))
+                Ok(Atomic::Sub(name, Arc::new(Atomic::Dbl(d as f32 as f64))))
             }
             "hexBinary" | "base64Binary" => {
                 let bytes = match a {
@@ -255,7 +255,7 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
                 } else {
                     base64_encode(&bytes)
                 };
-                Ok(Atomic::Sub(name, Rc::new(Atomic::str(text))))
+                Ok(Atomic::Sub(name, Arc::new(Atomic::str(text))))
             }
             "anyURI" => Err(format!(
                 "XPTY0004: cannot cast {} to xs:anyURI",
@@ -265,7 +265,7 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
                 Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name()))
             }
             _ if lexical || matches!(a, Atomic::Sub(..)) => string_value(t, &s)
-                .map(|v| Atomic::Sub(name, Rc::new(Atomic::str(v))))
+                .map(|v| Atomic::Sub(name, Arc::new(Atomic::str(v))))
                 .ok_or_else(bad),
             _ => Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name())),
         }

@@ -4,10 +4,9 @@
 //!
 //! All strings are UTF-8. No panic crosses the C boundary: a failure inside
 //! the engine becomes an error return with a message. Every function is
-//! safe to call from any thread;
-//! one compiled stylesheet runs one transformation at a time (calls on the
-//! same handle wait for each other), so compile one per thread for
-//! parallel work. See `docs/embedding.md` for a C# example.
+//! safe to call from any thread, and one compiled stylesheet can run any
+//! number of transformations at once on different threads. See
+//! `docs/embedding.md` for a C# example.
 //!
 //! ```c
 //! XylemStylesheet *ss = xylem_xslt_compile("C:/styles/book-to-fo.xsl");
@@ -23,7 +22,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
-use std::sync::Mutex;
 use xylem_xslt_engine::{Stylesheet, transform_bytes, with_file_access};
 
 /// Write the result the way a publishing service saves it: the
@@ -37,17 +35,11 @@ pub const XYLEM_OUTPUT_SERIALIZE: u32 = 1;
 /// entities in the input fail instead. Stylesheet modules are still read.
 pub const XYLEM_NO_FILE_ACCESS: u32 = 2;
 
-/// A compiled stylesheet. Opaque to callers.
+/// A compiled stylesheet. Opaque to callers. It holds no per-run state,
+/// so transformations on one handle run concurrently.
 pub struct XylemStylesheet {
-    inner: Mutex<Compiled>,
+    inner: Stylesheet,
 }
-
-struct Compiled(Stylesheet);
-
-// SAFETY: the stylesheet is only ever touched while `inner`'s lock is held,
-// so it is never used from two threads at once; its reference counts are
-// not shared with anything outside it.
-unsafe impl Send for Compiled {}
 
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
@@ -118,9 +110,7 @@ pub unsafe extern "C" fn xylem_xslt_compile(path: *const c_char) -> *mut XylemSt
             return std::ptr::null_mut();
         };
         match Stylesheet::compile(Path::new(path)) {
-            Ok(ss) => Box::into_raw(Box::new(XylemStylesheet {
-                inner: Mutex::new(Compiled(ss)),
-            })),
+            Ok(ss) => Box::into_raw(Box::new(XylemStylesheet { inner: ss })),
             Err(e) => {
                 set_error(e);
                 std::ptr::null_mut()
@@ -140,8 +130,11 @@ pub unsafe extern "C" fn xylem_xslt_version_of(ss: *const XylemStylesheet) -> u3
         let Some(ss) = (unsafe { ss.as_ref() }) else {
             return 0;
         };
-        let g = ss.inner.lock().unwrap_or_else(|p| p.into_inner());
-        if g.0.version.starts_with('1') { 1 } else { 2 }
+        if ss.inner.version.starts_with('1') {
+            1
+        } else {
+            2
+        }
     })
 }
 
@@ -210,13 +203,11 @@ pub unsafe extern "C" fn xylem_xslt_transform(
                 }
             }
         };
-        let guard = ss.inner.lock().unwrap_or_else(|p| p.into_inner());
-        // A panic here unwinds to `guarded`, which returns 3; the lock is
-        // released on the way and recovered by the next call.
+        // A panic here unwinds to `guarded`, which returns 3; the handle
+        // keeps no state from the run, so it stays usable.
         let result = with_file_access(flags & XYLEM_NO_FILE_ACCESS == 0, || {
-            transform_bytes(&guard.0, bytes, &params, false)
+            transform_bytes(&ss.inner, bytes, &params, false)
         });
-        drop(guard);
         let text = match result {
             Ok(o) if !o.results.is_empty() => {
                 set_error(
@@ -293,41 +284,51 @@ mod tests {
     }
 
     #[test]
-    fn handle_survives_a_poisoned_lock() {
-        let dir = std::env::temp_dir().join(format!("xylem-ffi-poison-{}", std::process::id()));
+    fn one_handle_serves_many_threads_at_once() {
+        let dir = std::env::temp_dir().join(format!("xylem-ffi-threads-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let xsl = dir.join("s.xsl");
         std::fs::write(
             &xsl,
-            r#"<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:template match="/"><r/></xsl:template></xsl:stylesheet>"#,
+            r#"<xsl:stylesheet version="2.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"><xsl:param name="n"/><xsl:template match="/"><r n="{$n}"><xsl:value-of select="sum(for $i in 1 to 20000 return $i) + count(//a)"/></r></xsl:template></xsl:stylesheet>"#,
         )
         .unwrap();
         let path = CString::new(xsl.to_str().unwrap()).unwrap();
-        unsafe {
-            let ss = xylem_xslt_compile(path.as_ptr());
-            assert!(!ss.is_null());
-            // A panic while the handle is locked poisons the lock, as an
-            // engine failure mid-transform would.
-            let r = guarded("testing", 3, || {
-                let _g = (*ss).inner.lock().unwrap();
-                panic!("mid-transform");
-            });
-            assert_eq!(r, 3);
-            let (mut out, mut len) = (std::ptr::null_mut(), 0usize);
-            let rc = xylem_xslt_transform(
-                ss,
-                b"<a/>".as_ptr(),
-                4,
-                std::ptr::null(),
-                0,
-                &mut out,
-                &mut len,
-            );
-            assert_eq!(rc, 0);
-            assert_eq!(std::slice::from_raw_parts(out, len), b"<r />");
-            xylem_xslt_free_bytes(out, len);
-            xylem_xslt_free(ss);
-        }
+        let ss = unsafe { xylem_xslt_compile(path.as_ptr()) };
+        assert!(!ss.is_null());
+        // Raw pointers are not Send; the handle is shared by address.
+        let addr = ss as usize;
+        let started = std::time::Instant::now();
+        std::thread::scope(|scope| {
+            for t in 0..8 {
+                scope.spawn(move || {
+                    let ss = addr as *const XylemStylesheet;
+                    for k in 0..20 {
+                        let input = format!("<d>{}</d>", "<a/>".repeat(t + k));
+                        let params = CString::new(format!(r#"{{"n":"{t}-{k}"}}"#)).unwrap();
+                        let (mut out, mut len) = (std::ptr::null_mut(), 0usize);
+                        let rc = unsafe {
+                            xylem_xslt_transform(
+                                ss,
+                                input.as_ptr(),
+                                input.len(),
+                                params.as_ptr(),
+                                0,
+                                &mut out,
+                                &mut len,
+                            )
+                        };
+                        assert_eq!(rc, 0);
+                        let text = unsafe { std::slice::from_raw_parts(out, len) }.to_vec();
+                        unsafe { xylem_xslt_free_bytes(out, len) };
+                        let want = format!(r#"<r n="{t}-{k}">{}</r>"#, 200010000 + t + k);
+                        assert_eq!(String::from_utf8(text).unwrap(), want);
+                    }
+                });
+            }
+        });
+        eprintln!("8 threads x 20 transforms: {:?}", started.elapsed());
+        unsafe { xylem_xslt_free(ss) };
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -68,8 +68,8 @@ xylem_xslt_free(ss);
 
 - Compile a stylesheet once and keep the handle; compiling the 38-module
   stylesheets this engine was built for takes about 30 ms.
-- A handle runs one transformation at a time (other calls on it wait).
-  For parallel work, compile one handle per worker thread.
+- One handle can run many transformations at once on different threads:
+  compile each stylesheet once and share the handle.
 - `xylem_xslt_last_error()` is per thread.
 - No panic crosses the C boundary. `xylem_xslt_transform` returns 1 for
   bad arguments, 2 when the stylesheet or input fails (a dynamic error,

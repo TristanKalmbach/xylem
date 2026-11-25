@@ -255,3 +255,10 @@ impl Output {
         b
     }
 }
+
+/// A compiled stylesheet holds no per-run state, so one can serve many
+/// transformations on many threads at once.
+const _: () = {
+    const fn assert_thread_safe<T: Send + Sync>() {}
+    assert_thread_safe::<Stylesheet>();
+};

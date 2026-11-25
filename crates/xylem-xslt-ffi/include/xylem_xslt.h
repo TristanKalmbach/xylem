@@ -37,7 +37,7 @@ uint32_t xylem_xslt_version_of(const XylemStylesheet *ss);
  * Returns 0 and sets *out/*out_len (free with xylem_xslt_free_bytes),
  * or on failure 1 (bad arguments), 2 (the stylesheet or input failed) or
  * 3 (an internal engine failure; the handle stays usable).
- * One handle runs one transformation at a time. */
+ * One handle can run transformations on many threads at once. */
 int32_t xylem_xslt_transform(const XylemStylesheet *ss,
                              const uint8_t *input, size_t input_len,
                              const char *params_json, uint32_t flags,

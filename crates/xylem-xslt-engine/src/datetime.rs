@@ -7,7 +7,7 @@
 
 use crate::value::{Atomic, DEC_SCALE, Decimal};
 use std::cmp::Ordering;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// Which date/time type a [`DateTime`] is.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -672,10 +672,10 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
         return Some(match a {
             Atomic::Time(dt) => dt
                 .convert(kind)
-                .map(|v| Atomic::Time(Rc::new(v)))
+                .map(|v| Atomic::Time(Arc::new(v)))
                 .ok_or_else(|| format!("XPTY0004: cannot cast xs:{} to xs:{t}", dt.kind.name())),
             _ if lexical => DateTime::parse(kind, &a.to_string())
-                .map(|v| Atomic::Time(Rc::new(v)))
+                .map(|v| Atomic::Time(Arc::new(v)))
                 .ok_or_else(bad),
             _ => Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name())),
         });
@@ -687,9 +687,9 @@ pub fn cast(a: &Atomic, t: &str) -> Option<Result<Atomic, String>> {
         _ => return None,
     };
     Some(match a {
-        Atomic::Dur(d) => Ok(Atomic::Dur(Rc::new(d.convert(kind)))),
+        Atomic::Dur(d) => Ok(Atomic::Dur(Arc::new(d.convert(kind)))),
         _ if lexical => Duration::parse(kind, &a.to_string())
-            .map(|v| Atomic::Dur(Rc::new(v)))
+            .map(|v| Atomic::Dur(Arc::new(v)))
             .ok_or_else(bad),
         _ => Err(format!("XPTY0004: cannot cast {} to xs:{t}", a.type_name())),
     })
@@ -732,7 +732,7 @@ pub enum ArithOp {
 }
 
 fn dur(kind: DurKind, months: i64, seconds: Decimal) -> Atomic {
-    Atomic::Dur(Rc::new(Duration {
+    Atomic::Dur(Arc::new(Duration {
         kind,
         months,
         seconds,
@@ -815,7 +815,7 @@ fn add_to(t: &DateTime, d: &Duration, sign: i64) -> Result<Atomic, String> {
         DtKind::Time => (r.year, r.month, r.day) = (1972, 12, 31),
         _ => {}
     }
-    Ok(Atomic::Time(Rc::new(r)))
+    Ok(Atomic::Time(Arc::new(r)))
 }
 
 fn scale(d: &Duration, f: f64, dec: Option<Decimal>, divide: bool) -> Result<Atomic, String> {
@@ -998,12 +998,14 @@ mod tests {
 
     #[test]
     fn arithmetic() {
-        let t = Atomic::Time(Rc::new(dt(DtKind::Date, "2000-01-31")));
-        let m = Atomic::Dur(Rc::new(Duration::parse(DurKind::YearMonth, "P1M").unwrap()));
+        let t = Atomic::Time(Arc::new(dt(DtKind::Date, "2000-01-31")));
+        let m = Atomic::Dur(Arc::new(
+            Duration::parse(DurKind::YearMonth, "P1M").unwrap(),
+        ));
         let r = arith(ArithOp::Add, &t, &m).unwrap();
         assert_eq!(r.to_string(), "2000-02-29");
-        let a = Atomic::Time(Rc::new(dt(DtKind::DateTime, "2000-10-30T06:12:00")));
-        let b = Atomic::Time(Rc::new(dt(DtKind::DateTime, "1999-11-28T09:00:00Z")));
+        let a = Atomic::Time(Arc::new(dt(DtKind::DateTime, "2000-10-30T06:12:00")));
+        let b = Atomic::Time(Arc::new(dt(DtKind::DateTime, "1999-11-28T09:00:00Z")));
         assert_eq!(
             arith(ArithOp::Sub, &a, &b).unwrap().to_string(),
             "P336DT21H12M"
