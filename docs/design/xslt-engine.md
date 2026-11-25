@@ -328,6 +328,9 @@ named in brackets; notes marked *unverified* still need a probe.
    also outside the `from` node's subtree (the XSLT 1.0 wording; XSLT 2.0's
    formal definition would stop at the subtree). For `level="single"` and
    `"multiple"`, the `from` node may be the numbered node itself [`edge`].
+   When no node matches `from`, `level="any"` counts from the start of the
+   document and `"multiple"` counts every ancestor, as if there were no
+   `from`; `"single"` gives nothing [`parity`].
 6. **Empty `xsl:value-of` in a typed variable** [`edge`]. Inside a
    variable with `as="xs:string"` it gives a zero-length string, not an
    empty sequence.
@@ -363,33 +366,95 @@ named in brackets; notes marked *unverified* still need a probe.
     the end in the 1.0 host, while the 2.0 host keeps its place.
     `normalize-space()` removes only space, tab, CR and LF, never a
     no-break space (both hosts).
+13. **Output indentation** [`html2`]. The XSLT 1.0 processor indents the
+    HTML method unless `indent="no"` is given, and the XML method when
+    `indent="yes"` is. A line end (CR LF) and two spaces per open element
+    come before a block element's start tag that follows a block start or
+    end tag, and before a block end tag that follows a block end tag;
+    anything else (text, an inline element) ends the run, so mixed content
+    stays on its line. For HTML the block elements are .NET's list (see
+    `HTML_BLOCK` in `serialize.rs`; it includes `font`, `s`, `ins` and
+    `iframe` but not `script`, `select` or `object`); for XML every element
+    is one. A zero-length text node right after a block start tag puts
+    the end tag on its own line. The DOCTYPE or XML declaration then has
+    a line of its own. A void HTML element given content writes it after
+    the start tag and has no end tag. XSLT 2.0 HTML output goes through
+    Saxon's serializer, which indents by three spaces with other rules
+    (not reproduced).
+14. **Which processor runs a stylesheet.** The service runs a stylesheet
+    on Saxon when its root `version` attribute is exactly `2.0`, and on
+    .NET's XSLT 1.0 processor otherwise (`1.0`, `2`, `3.0`, a simplified
+    stylesheet's `xsl:version`); `VersionRule` in `compile.rs`.
+15. **XSLT 1.0 result details** [`parity1`]. The result is built through an
+    `XmlWriter`: an element's namespace declarations follow its
+    attributes; every line end in text (LF, CR or CR LF) is written CR LF;
+    a zero-length text node from `value-of` or `copy-of` ends its element
+    with a full end tag (`<a></a>`), while an empty `xsl:text` does not.
+    The XSLT 2.0 path writes a CR in text as it is. In both, a CR LF in an
+    attribute value of the stylesheet or input is one space.
+16. **A result that is not a document.** In publish mode the host fails
+    on top-level text (even whitespace) and on a second top-level element,
+    with its `XmlWriter` message (`Token Text in state Start would result
+    in an invalid XML document...`) for XSLT 1.0 and its `XmlDocument`
+    message (`The specified node cannot be inserted...`, `This document
+    already has a 'DocumentElement' node.`) for XSLT 2.0. Comments,
+    processing instructions and an empty result are allowed.
+17. **Patterns on parentless nodes** [`parity`]. A one-step pattern
+    (`para`, `@id`, `p[@x]`) matches a parentless element or attribute,
+    such as one a function built, when its name test and predicates hold;
+    a positional predicate (`p[1]`) never does. A multi-step pattern
+    (`a/b`) may match its first step at the parentless root of a tree.
+18. **Stylesheet text** [`parity`]. Comments and processing instructions
+    go before whitespace stripping, so text on either side of one is a
+    single text node and keeps its whitespace when any of it is not
+    whitespace. Internal entities declared in a stylesheet's (or input's)
+    DOCTYPE are expanded in attribute values too, recursively, with
+    character references in entity values expanded at declaration.
+19. **URIs** [`parity`]. The input's `base-uri()` and `document-uri()` are
+    the stylesheet's folder as a `file:///` URI (%20 for spaces, no
+    trailing slash); `static-base-uri()` is the calling module's file; a
+    temporary tree's base URI is the stylesheet's and it has no document
+    URI. `resolve-uri()` results drop an empty authority (`file:/C:/...`)
+    and keep the relative part's characters as given. A string passed to
+    `document()`, `doc()` or `doc-available()` resolves against the module
+    that contains the call.
+20. **Unreadable documents.** In XSLT 1.0 a `document()` that cannot be
+    read fails the transformation (`An error occurred while loading
+    document '...'. See InnerException ... / Could not find file '...'.`).
+    In XSLT 2.0 `document()` gives an empty sequence (the engine adds a
+    warning) and `doc()` fails. `document('')` is the calling module. A
+    malformed document fails in both.
+21. **Undeclared variables.** Both processors refuse to compile a
+    stylesheet that refers to a variable no declaration provides (XSLT 2.0
+    `XPST0008`), even in templates that never run.
+22. **Generated IDs in XSLT 1.0** (not reproduced). The 1.0 processor's
+    `generate-id()` values have their own form (`ID0EC`, `ID0TH0A`: a
+    document number, a node-kind letter and base-32 positions), so they
+    differ from the engine's `d1e2` form; they are consistent within a
+    result, as links need.
 
 ## Known gaps in the prototype
 
-- Regular expressions use the `regex` crate's dialect directly; XML Schema
-  regex differences (character class subtraction, `\i`, `\c`, and so on)
-  are not translated. The 8 uses in the target stylesheets work.
-- `document()` ignores its second argument, resolves relative to the top
-  stylesheet's folder (or the node's document), and returns an empty
-  sequence silently when a file cannot be read.
+- `document()` ignores its second argument (a node whose base URI should
+  be used).
 - External entities nested inside an external entity resolve against the
   outer document's folder; parameter entities and external DTDs are not
   read.
 - `xsl:sort` ignores `case-order`, `lang` and `collation`.
 - `format-number()` handles `#`, `0`, `.`, `,` and literal affixes only;
   no percent, per-mille, exponent or `xsl:decimal-format`.
-- XSLT 1.0 mode covers what the FO-to-HTML stylesheet needs (first item
-  for strings, doubles, 1.0 comparisons); other 1.0 differences such as
-  `format-number` details and node-set functions on non-node values are
-  untested. The XML and text output methods are written but unverified
-  against the host; `indent="yes"` is ignored.
-- Not implemented: `xsl:for-each-group`, `xsl:analyze-string`,
-  `xsl:result-document`, `xsl:next-match`, `xsl:apply-imports`,
-  `xsl:namespace`, output indentation, simplified stylesheets,
-  imports inside included modules, date/time and duration types, QNames as
-  values, and most of F&O beyond the list in `funcs.rs`.
-- Errors give the template chain but no line numbers; dynamic type errors
-  are reported as strings, not W3C error codes.
+- XSLT 1.0 mode follows the 1.0 processor where the corpus showed it
+  (spec notes 12 to 16 and 22); other 1.0 differences, such as
+  `format-number` details and the 1.0 processor's `generate-id()` form,
+  are not reproduced. XSLT 2.0 `xsl:output` serialization (Saxon's) is
+  approximated by the 1.0 processor's.
+- Not implemented: `xsl:namespace`, `format-date` / `format-dateTime` /
+  `format-time`, `normalize-unicode`, `lang`, imports inside included
+  modules, schema awareness.
+- Errors carry the stylesheet file and line (`XsltError`): compile errors
+  the element's line (malformed XML its line and column), run-time errors
+  the template and function chain with each declaration's line, not the
+  instruction's. Most dynamic errors have no W3C error code.
 - The `suite` test reports counts and differences but never fails, so it
   is a measurement, not a gate.
 

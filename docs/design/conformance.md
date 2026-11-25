@@ -109,9 +109,28 @@ The largest remaining groups:
 | `format-date`, `format-dateTime`, `format-time` | ~30 (XSLT) | Not implemented |
 | `xsl:namespace` | ~10 (XSLT) | Not implemented |
 | `normalize-unicode`, `trace`, `lang` | ~70 (QT3) | Not implemented |
-| Sets that crash | `function`, `call-template`, `error` (stack overflow on deep recursion), `unicode-90` (timeout) | Not counted in the totals |
+| Sets that crash | `unicode-90` (timeout); `function` and `call-template` run since deep recursion became an error (see below) | Not counted in the totals |
 
 Re-run the commands above after engine changes and update this table.
+
+## Hardening for in-process use (2026-11-25)
+
+Deep recursion ends in an error instead of a stack overflow (each
+transformation runs on a thread with a large stack and more than 10,000
+nested template or function calls fail), so the `function` and
+`call-template` sets now run: 36 of 50 and 31 of 34. Also added:
+`base-uri`, `document-uri`, `static-base-uri`, `resolve-uri`, compile-time
+`XPST0008` for undeclared variables, and the reference processors'
+behaviour for parentless patterns, `xsl:number` without a matching `from`,
+unreadable documents and output indentation (spec notes 13 to 22 in
+[xslt-engine.md](xslt-engine.md)). The W3C runner runs version 2.0 and
+higher as XSLT 2.0 (`VersionRule::TwoAndAbove`); publishing hosts use
+the reference host's rule.
+
+| Suite | Run | Passed | Rate |
+|---|---:|---:|---:|
+| QT3, XPath 2.0 | 15,054 | 14,632 | 97.2% |
+| XSLT 1.0 and 2.0 | 4,763 | 4,021 | 84.4% |
 
 ## After XML Schema regex translation (2026-11-24)
 
