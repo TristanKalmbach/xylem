@@ -24,7 +24,7 @@
 //! → {"id":2,"stylesheet":"C:/s/book.xsl","input_text":"<book/>","serialize":false}
 //! ← {"id":2,"ok":true,"ms":3,"output_text":"<fo:root …/>"}
 //! → {"id":3,"stylesheet":"C:/s/missing.xsl","input_text":"<a/>"}
-//! ← {"id":3,"ok":false,"error":"…"}
+//! ← {"id":3,"ok":false,"error":"…","at":{"message":"…","file":"…","line":12,"column":null,"stack":[…]}}
 //! ```
 //!
 //! A request names `input` (a file) or `input_text`; the result goes to
@@ -39,7 +39,7 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Instant, SystemTime};
-use xylem_xslt_engine::{Stylesheet, transform_bytes, with_file_access};
+use xylem_xslt_engine::{Stylesheet, XsltError, transform_bytes, with_file_access};
 
 const USAGE: &str = "usage: xylem-xslt transform --stylesheet <file.xsl> --input <file.xml> [--output <file>] [--param name=value ...] [--serialize] [--no-file-access]
        xylem-xslt compile --stylesheet <file.xsl> ...
@@ -140,7 +140,11 @@ fn compile(args: &[String]) -> Result<(), String> {
             Ok(_) => println!("ok      {p}"),
             Err(e) => {
                 failed = true;
-                println!("error   {p}: {}", e.lines().next().unwrap_or(""));
+                let e = XsltError::from_message(&e);
+                match (&e.file, e.line) {
+                    (Some(f), Some(l)) => println!("error   {f}:{l}: {}", e.message),
+                    _ => println!("error   {p}: {}", e.message),
+                }
             }
         }
     }
@@ -201,7 +205,12 @@ fn serve() -> Result<(), String> {
 
 fn handle(req: &Request, cache: &mut HashMap<PathBuf, Cached>) -> serde_json::Value {
     let started = Instant::now();
-    let fail = |e: String| serde_json::json!({"id": req.id, "ok": false, "error": e});
+    // Errors carry their location too, so an editor can jump to it.
+    let fail = |e: String| {
+        let at: serde_json::Value =
+            serde_json::from_str(&XsltError::from_message(&e).to_json()).unwrap_or_default();
+        serde_json::json!({"id": req.id, "ok": false, "error": e, "at": at})
+    };
     let Some(path) = &req.stylesheet else {
         return fail("no stylesheet".into());
     };

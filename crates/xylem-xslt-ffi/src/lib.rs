@@ -22,7 +22,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char};
 use std::path::Path;
-use xylem_xslt_engine::{Stylesheet, transform_bytes, with_file_access};
+use xylem_xslt_engine::{Stylesheet, XsltError, transform_bytes, with_file_access};
 
 /// Write the result the way a publishing service saves it: the
 /// `XmlDocument.OuterXml` form (no XML declaration, `xsl:output` ignored).
@@ -44,6 +44,7 @@ pub struct XylemStylesheet {
 thread_local! {
     static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
     static LAST_LOG: RefCell<CString> = RefCell::new(CString::default());
+    static LAST_ERROR_JSON: RefCell<CString> = RefCell::new(CString::default());
 }
 
 fn set_log(messages: &[String], warnings: &[String]) {
@@ -76,6 +77,8 @@ fn guarded<T>(what: &str, on_panic: T, f: impl FnOnce() -> T) -> T {
 
 fn set_error(e: impl Into<String>) {
     let s = e.into().replace('\0', " ");
+    let json = XsltError::from_message(&s).to_json();
+    LAST_ERROR_JSON.with(|l| *l.borrow_mut() = CString::new(json).unwrap_or_default());
     LAST_ERROR.with(|l| *l.borrow_mut() = CString::new(s).unwrap_or_default());
 }
 
@@ -84,6 +87,18 @@ fn set_error(e: impl Into<String>) {
 pub extern "C" fn xylem_xslt_last_error() -> *const c_char {
     guarded("reading the last error", std::ptr::null(), || {
         LAST_ERROR.with(|l| l.borrow().as_ptr())
+    })
+}
+
+/// The last error on this thread as JSON, so an application can point at
+/// the stylesheet line: `{"message", "file", "line", "column", "stack":
+/// [{"kind", "name", "file", "line"}]}`, unknown parts `null`; the stack
+/// lists the templates and functions a run-time error passed through,
+/// innermost first. Valid until the next call on this thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn xylem_xslt_last_error_json() -> *const c_char {
+    guarded("reading the last error", std::ptr::null(), || {
+        LAST_ERROR_JSON.with(|l| l.borrow().as_ptr())
     })
 }
 
@@ -485,6 +500,18 @@ mod tests {
                 .to_string_lossy()
                 .to_string();
             assert!(err.contains("file access is turned off"), "{err}");
+            let json = CStr::from_ptr(xylem_xslt_last_error_json())
+                .to_string_lossy()
+                .to_string();
+            let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(
+                v["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("file access is turned off")
+            );
+            assert_eq!(v["stack"][0]["kind"], "template", "{json}");
+            assert_eq!(v["line"], 1, "{json}");
             xylem_xslt_free(ss);
             let bad = CString::new(dir.join("missing.xsl").to_str().unwrap()).unwrap();
             assert!(xylem_xslt_compile(bad.as_ptr()).is_null());

@@ -37,14 +37,25 @@ fn unreadable_documents_behave_as_the_reference_does() {
     let o = run(&dir, "2.0", copy_missing).unwrap();
     assert_eq!(o.text, "<r />");
     assert_eq!(o.warnings.len(), 1);
-    assert!(o.warnings[0].starts_with("FODC0002: document('missing.xml')"), "{:?}", o.warnings);
+    assert!(
+        o.warnings[0].starts_with("FODC0002: document('missing.xml')"),
+        "{:?}",
+        o.warnings
+    );
 
-    let e = run(&dir, "2.0", r#"<xsl:copy-of select="doc('missing.xml')"/>"#).err().unwrap();
+    let e = run(&dir, "2.0", r#"<xsl:copy-of select="doc('missing.xml')"/>"#)
+        .err()
+        .unwrap();
     assert!(e.starts_with("FODC0002: doc('missing.xml')"), "{e}");
 
     for v in ["1.0", "2.0"] {
         assert!(run(&dir, v, r#"<xsl:copy-of select="document('bad.xml')"/>"#).is_err());
-        let o = run(&dir, v, r#"<xsl:value-of select="document('')/*/my:data/v"/>"#).unwrap();
+        let o = run(
+            &dir,
+            v,
+            r#"<xsl:value-of select="document('')/*/my:data/v"/>"#,
+        )
+        .unwrap();
         assert_eq!(o.text, "<r>embedded</r>", "version {v}");
     }
     let _ = std::fs::remove_dir_all(&dir);

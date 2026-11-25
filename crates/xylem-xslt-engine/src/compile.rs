@@ -1,6 +1,7 @@
 //! Reads stylesheet modules into a [`Stylesheet`]: declarations, template
 //! rules with their priorities and import precedence, and instruction trees.
 
+use crate::error::XsltError;
 use crate::tree::{self, Kind, QName, StripSpace, Tree};
 use crate::xpath::{self, BinOp, Expr, SeqType};
 use std::collections::HashMap;
@@ -279,31 +280,68 @@ impl StripSpace for Stylesheet {
     }
 }
 
-struct Compiler {
+/// Supplies a module's text instead of the file on disk (an editor's
+/// unsaved buffer), or `None` to read the file. It is asked with the
+/// module's absolute path, symbolic links resolved, without a `\\?\`
+/// prefix.
+pub type ModuleReader<'a> = &'a dyn Fn(&Path) -> Option<Vec<u8>>;
+
+struct Compiler<'r> {
     ss: Stylesheet,
     next_prec: usize,
     loading: Vec<PathBuf>,
+    read: ModuleReader<'r>,
 }
 
 impl Stylesheet {
+    /// Compiles the stylesheet at `path` and every module it includes or
+    /// imports, reading them from disk.
     pub fn compile(path: &Path) -> Result<Stylesheet, String> {
+        Self::compile_with(path, &|_| None).map_err(String::from)
+    }
+
+    /// Like [`Stylesheet::compile`], with `read` supplying the text of any
+    /// module (the top one, includes, imports) in place of its file, so an
+    /// editor can compile what is being typed before it is saved. Errors
+    /// carry the file, line and column they refer to.
+    pub fn compile_with(path: &Path, read: ModuleReader) -> Result<Stylesheet, XsltError> {
         let mut c = Compiler {
             ss: Stylesheet::default(),
             next_prec: 0,
             loading: Vec::new(),
+            read,
         };
         c.ss.base = path.parent().map(Path::to_path_buf).unwrap_or_default();
         c.ss.path = path.to_path_buf();
-        c.module(path, None)?;
-        let ss = c.ss;
-        Ok(ss)
+        c.module(path, None)
+            .map_err(|e| XsltError::from_message(&e))?;
+        Ok(c.ss)
     }
 }
 
-fn load_tree(path: &Path) -> Result<Tree, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let doc =
-        xylem_dom::Document::from_bytes(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+/// A path as modules are named to a [`ModuleReader`] and in errors.
+fn display_path(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => path.to_path_buf(),
+    }
+}
+
+fn load_tree(path: &Path, read: ModuleReader) -> Result<Tree, String> {
+    let shown = display_path(path);
+    let bytes = match read(&shown) {
+        Some(b) => b,
+        None => std::fs::read(path).map_err(|e| format!("{}: {e}", shown.display()))?,
+    };
+    let doc = xylem_dom::Document::from_bytes(&bytes).map_err(|e| {
+        crate::error::located(
+            &shown.to_string_lossy(),
+            e.line as u32,
+            Some(e.column as u32),
+            &e.message,
+        )
+    })?;
     struct Keep;
     impl StripSpace for Keep {
         fn strip(&self, _: &QName) -> bool {
@@ -462,7 +500,13 @@ impl<'a> El<'a> {
         parse_avt(src, &self.resolver()).map_err(|e| self.err(&e))
     }
     fn err(&self, msg: &str) -> String {
-        format!("{} ({}): {msg}", self.file, self.name().lexical())
+        let line = self.t.lines.get(self.i as usize).copied().unwrap_or(0);
+        crate::error::located(
+            self.file,
+            line,
+            None,
+            &format!("{}: {msg}", self.name().lexical()),
+        )
     }
     fn seq_type(&self) -> Result<Option<SeqType>, String> {
         self.attr("as")
@@ -574,7 +618,7 @@ fn default_priority(e: &Expr) -> f64 {
     }
 }
 
-impl Compiler {
+impl Compiler<'_> {
     fn module(&mut self, path: &Path, prec_out: Option<&mut usize>) -> Result<(), String> {
         let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         if self.loading.contains(&path) {
@@ -584,7 +628,7 @@ impl Compiler {
         if self.loading.len() > 1 {
             self.ss.extra_modules += 1;
         }
-        let tree = load_tree(&path)?;
+        let tree = load_tree(&path, self.read)?;
         let file = path.to_string_lossy().to_string();
         let root = tree
             .node(0)
@@ -690,7 +734,7 @@ impl Compiler {
                     }
                     self.loading.push(href.clone());
                     self.ss.extra_modules += 1;
-                    let tree = load_tree(&href)?;
+                    let tree = load_tree(&href, self.read)?;
                     let file = href.to_string_lossy().to_string();
                     let root = tree
                         .node(0)

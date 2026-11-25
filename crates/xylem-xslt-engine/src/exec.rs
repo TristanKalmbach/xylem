@@ -655,7 +655,9 @@ impl<'s> Engine<'s> {
         if let Some(p) = &self.timing {
             p.borrow_mut().leave();
         }
-        r.map_err(|e| format!("{e}\n  in template {}", tpl.location))
+        r.map_err(|e| {
+            e + &crate::error::frame("template", &tpl.location, &tpl.source.file, tpl.source.line)
+        })
     }
 
     fn with_params(&self, ps: &[Param], d: &Dyn) -> R<Vec<(QName, Arc<Seq>, bool)>> {
@@ -699,7 +701,14 @@ impl<'s> Engine<'s> {
         if let Some(p) = &self.timing {
             p.borrow_mut().leave();
         }
-        r.map_err(|e| format!("{e}\n  in function {}()", f.name.lexical()))?;
+        r.map_err(|e| {
+            e + &crate::error::frame(
+                "function",
+                &format!("{}()", f.name.lexical()),
+                &f.source.file,
+                f.source.line,
+            )
+        })?;
         let v = out.finish_seq(self);
         Ok(Some(match &f.as_ {
             Some(t) => self.convert(v, t, &format!("result of {}()", f.name.lexical()))?,

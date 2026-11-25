@@ -70,6 +70,12 @@ xylem_xslt_free(ss);
   stylesheets this engine was built for takes about 30 ms.
 - One handle can run many transformations at once on different threads:
   compile each stylesheet once and share the handle.
+- `xylem_xslt_last_error_json()` gives the same error as JSON with the
+  stylesheet `file`, `line` and `column` it refers to (where known) and,
+  for run-time errors, the `stack` of templates and functions it passed
+  through, innermost first; `serve` adds the same object as `at` to a
+  failed reply. Rust callers get it as `XsltError`
+  (`Stylesheet::compile_with`, `XsltError::from_message`).
 - `xylem_xslt_last_error()` is per thread, and so is
   `xylem_xslt_last_log()`: after a transformation, a JSON object with its
   `xsl:message` texts and warnings about errors it recovered from.

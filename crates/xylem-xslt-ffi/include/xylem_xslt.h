@@ -25,6 +25,10 @@ typedef struct XylemStylesheet XylemStylesheet;
 const char *xylem_xslt_version(void);
 /* The last error on the calling thread; valid until the next call on it. */
 const char *xylem_xslt_last_error(void);
+/* The same error as JSON: {"message","file","line","column","stack":[...]},
+ * unknown parts null; the stack lists templates and functions, innermost
+ * first. */
+const char *xylem_xslt_last_error_json(void);
 /* What the last transformation on this thread reported besides its result,
  * as JSON {"messages":[...],"warnings":[...]} (xsl:message texts, warnings
  * about recovered errors such as an unreadable document()). */

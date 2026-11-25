@@ -16,6 +16,7 @@
 pub mod api;
 mod compile;
 mod datetime;
+mod error;
 mod eval;
 mod exec;
 mod funcs;
@@ -31,7 +32,8 @@ pub(crate) mod xsd_regex;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub use compile::{OutputSpec, Source, Stylesheet};
+pub use compile::{ModuleReader, OutputSpec, Source, Stylesheet};
+pub use error::{Frame, XsltError};
 pub use exec::TemplateTime;
 pub use value::with_file_access;
 
